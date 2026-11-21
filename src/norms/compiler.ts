@@ -1,17 +1,13 @@
 /**
  * @file Compiles norm documents into norms: reads a document's declarations,
  * builds the norm they state and checks that its names and protocol
- * predicates refer to declared things. A norms directory loads as the norms
- * of its documents.
+ * predicates refer to declared things.
  */
 
-import { FileSystem } from "@effect/platform";
-import { Data, Effect, Either, Order } from "effect";
+import { Either } from "effect";
 import { createHash } from "node:crypto";
-import { join } from "node:path";
 import {
   decodeNorm,
-  type InstalledNorms,
   isLowercaseName,
   type MessageForm,
   type Norm,
@@ -36,53 +32,6 @@ const attributes: Readonly<Record<string, readonly string[]>> = {
   integer: [":minimum", ":maximum"],
   "multi-select": [":choices", ":min-items", ":max-items"],
 };
-
-/** A norms directory the server cannot use, and why. */
-export class NormsConfigurationError extends Data.TaggedError(
-  "NormsConfigurationError",
-)<{ readonly reason: string }> {
-  override get message(): string {
-    return `The norms directory is invalid: ${this.reason}`;
-  }
-}
-
-/**
- * Compiles every `.lisp` norm document directly in `directory`, in name
- * order. Norm names are unique.
- */
-export const loadNorms = Effect.fn("loadNorms")(
-  function* (directory: string) {
-    const fs = yield* FileSystem.FileSystem;
-    const files = yield* fs.readDirectory(directory);
-    const norms: InstalledNorms = yield* Effect.forEach(
-      files.filter((file) => file.endsWith(".lisp")).sort(Order.string),
-      (file) =>
-        fs
-          .readFileString(join(directory, file))
-          .pipe(
-            Effect.flatMap((source) =>
-              Either.mapLeft(
-                compileNorm(source),
-                (reason) => new NormsConfigurationError({ reason }),
-              ),
-            ),
-          ),
-      { concurrency: 1 },
-    );
-    if (new Set(norms.map((norm) => norm.name)).size !== norms.length) {
-      return yield* new NormsConfigurationError({
-        reason: "two documents name the same norm",
-      });
-    }
-    return norms;
-  },
-  Effect.catchTags({
-    BadArgument: (error) =>
-      Effect.fail(new NormsConfigurationError({ reason: error.message })),
-    SystemError: (error) =>
-      Effect.fail(new NormsConfigurationError({ reason: error.message })),
-  }),
-);
 
 /** The norm `source` declares. Its digest names the exact document bytes supplied to both participants. */
 export function compileNorm(source: string): Compiled<Norm> {

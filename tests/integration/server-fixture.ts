@@ -43,9 +43,7 @@ import { type ChildProcess, spawn } from "node:child_process";
 import { createServer } from "node:net";
 import { basename, dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
-import { makeFirewall } from "../../src/firewall.js";
-import { AgentName } from "../../src/messages.js";
-import { serverFactory } from "../../src/server.js";
+import { prepareTables } from "../../src/server.js";
 import { openTestDatabase, restrictedLogin } from "../support/database.js";
 import { callTool, decodeInboxEntry, type SignedIn } from "../support/host.js";
 import { issuerFixture, requiredScope } from "../support/issuer.js";
@@ -298,25 +296,6 @@ const signIn = (endpoint: URL, bearer: Redacted.Redacted) =>
   );
 
 /**
- * Creates the server's tables as the login of `url`,
- * which may create tables, so the server serves them through a login that
- * may not.
- */
-const preparedBy = (url: Redacted.Redacted, issuer: string) =>
-  serverFactory(url, {
-    issuer,
-    subject: SERVER_AGENT_OWNER,
-    name: AgentName.make(SERVER_AGENT_NAME),
-    firewall: makeFirewall({
-      me: AgentName.make(SERVER_AGENT_NAME),
-      historyLimit: 1,
-    }),
-  }).pipe(
-    Effect.scoped,
-    Effect.mapError(failed("could not prepare the server's database")),
-  );
-
-/**
  * Prepares one server whose server agent's owner and clients' owners sign in
  * with tokens from its own test issuer. The scope removes its directory and
  * stops its issuer and every process and connection it started.
@@ -333,7 +312,9 @@ export const sharedServer = Effect.fn("sharedServer")(function* () {
   const endpoint = new URL(`http://${LOOPBACK_HOST}:${port}/mcp`);
   const resource = `https://${LOOPBACK_HOST}:${port}/mcp`;
   const database = yield* openTestDatabase();
-  yield* preparedBy(database.url, issuer.issuer);
+  yield* prepareTables(database.sql).pipe(
+    Effect.mapError(failed("could not prepare the server's database")),
+  );
   const restrictedUrl = yield* restrictedLogin(database);
   const environment = {
     SHARNESS_CONFIG_FILE: join(directory, "settings.json"),

@@ -15,7 +15,6 @@ import {
   type Act,
   checkStructure,
   formatAct,
-  type InstalledNorms,
   type MessageForm,
   type Norm,
   type NormProblem,
@@ -72,7 +71,7 @@ interface FittedAct extends HeldAct {
  * instance in progress and the stage that failed. Without norms every message
  * passes.
  */
-export function structureCheck(installed: InstalledNorms): StructureCheck {
+export function structureCheck(installed: readonly Norm[]): StructureCheck {
   return Effect.fn("structureCheck")(function* (message, earlier) {
     return installed.length === 0
       ? { kind: "passed", textRules: [] }
@@ -87,7 +86,7 @@ export function structureCheck(installed: InstalledNorms): StructureCheck {
 
 /** What the structure check says of `message` at `now`, after the `earlier` messages of its conversation. */
 function checkMessage(
-  installed: InstalledNorms,
+  installed: readonly Norm[],
   message: Message,
   earlier: readonly EarlierMessage[],
   now: number,
@@ -180,7 +179,7 @@ function refusalReply(norm?: Norm) {
  * protocol at the time of its check advances the instance.
  */
 function projectProtocol(
-  installed: InstalledNorms,
+  installed: readonly Norm[],
   earlier: readonly EarlierMessage[],
 ): ProtocolView {
   let view: ProtocolView = {};
@@ -218,7 +217,7 @@ function projectProtocol(
  */
 function replayed(
   view: ProtocolView,
-  installed: InstalledNorms,
+  installed: readonly Norm[],
   { message, checkedAt, allowed }: EarlierMessage,
 ) {
   return !allowed || checkedAt === undefined
@@ -236,7 +235,7 @@ function replayed(
  */
 function readHeldAct(
   view: ProtocolView,
-  installed: InstalledNorms,
+  installed: readonly Norm[],
   message: Message,
 ): Checked<HeldAct> {
   return Either.flatMap(readAct(message), (act) => {

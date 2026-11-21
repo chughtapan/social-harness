@@ -17,12 +17,9 @@ import {
   Struct,
 } from "effect";
 import { expect } from "vitest";
-import type { DecisionProvider, Firewall } from "./firewall.js";
+import type { DecisionProvider, Firewall, MessagePolicy } from "./firewall.js";
 import { openTestDatabase } from "../tests/support/database.js";
-import {
-  answersTo,
-  type TestPolicy,
-} from "../tests/support/decision-provider.js";
+import { answersTo } from "../tests/support/decision-provider.js";
 import {
   callTool,
   inboxOf,
@@ -33,9 +30,8 @@ import {
   decisionState,
   inProcessServer,
 } from "../tests/support/in-process-server.js";
-import { AgentName } from "./messages.js";
-import { compileNorm } from "./norms/compiler.js";
-import { serverFactory } from "./server.js";
+import { holdNorms } from "./norms/index.js";
+import { prepareTables } from "./server.js";
 
 it("gives the server agent its tools, and a status result that names the agent", () =>
   Effect.gen(function* () {
@@ -225,20 +221,6 @@ it("interrupts only the aborted call, whose conversation the next send then uses
     expect(yield* send(alice, hello)).toHaveProperty("id");
   }));
 
-/** A server opened on `database`, with Alice as its server agent behind a firewall that allows everything. */
-const openOn = (
-  database: Effect.Effect.Success<ReturnType<typeof openTestDatabase>>,
-) =>
-  serverFactory(database.url, {
-    issuer: "urn:social-harness:test",
-    subject: "alice",
-    name: AgentName.make("alice"),
-    firewall: {
-      checkIncoming: () => Effect.succeed({ kind: "allowed" }),
-      checkOutgoing: () => Effect.succeed({ kind: "allowed" }),
-    },
-  });
-
 /** The one rule of every policy here. */
 const privacy = {
   id: "privacy",
@@ -251,14 +233,10 @@ const privacy = {
 const policy = (
   provider: DecisionProvider,
   action?: "deny" | "reply",
-): TestPolicy => ({
+): MessagePolicy => ({
   provider,
-  source: {
-    policy: {
-      rules: [{ ...privacy, ...(action === undefined ? {} : { action }) }],
-      settings: { minimumProbability: 0.8, timeoutMilliseconds: 5_000 },
-    },
-  },
+  rules: [{ ...privacy, ...(action === undefined ? {} : { action }) }],
+  settings: { minimumProbability: 0.8, timeoutMilliseconds: 5_000 },
 });
 
 /** A provider that finds every message compliant. */
@@ -445,17 +423,19 @@ it.each([
 
 /** `open` starts an instance and `close`, from the other agent, ends it. */
 const exchange = Either.getOrThrow(
-  compileNorm(`(norm exchange :initiator Sender :participant Receiver)
+  holdNorms([
+    `(norm exchange :initiator Sender :participant Receiver)
 (content open :by Sender :starts true :initiates opened)
 (content close :by Receiver :when opened :ends true)
-`),
+`,
+  ]),
 );
 
 it("answers what an agent that holds norms withholds, plain text and an act out of turn alike, and the conversation goes on", () =>
   Effect.gen(function* () {
     const { alice, bob } = yield* aliceAndBob({
       notice: "Not accepted.",
-      norms: [exchange],
+      norms: exchange,
       policy: policy(compliant),
     });
 
@@ -477,7 +457,7 @@ it("checks each act of a norm against the whole conversation, though the provide
   Effect.gen(function* () {
     const { alice, bob } = yield* aliceAndBob({
       historyLimit: 1,
-      norms: [exchange],
+      norms: exchange,
       policy: policy(compliant),
     });
 
@@ -537,9 +517,9 @@ it("lists every conversation once, in name order", () =>
 it("prepares an empty database and leaves a prepared one as it is", () =>
   Effect.gen(function* () {
     const database = yield* openTestDatabase();
-    yield* openOn(database);
+    yield* prepareTables(database.sql);
     yield* database.sql`INSERT INTO firewall_checks (decided_at, record) VALUES (1, 'kept')`;
-    yield* openOn(database);
+    yield* prepareTables(database.sql);
     expect(yield* database.sql`SELECT record FROM firewall_checks`).toEqual([
       { record: "kept" },
     ]);
@@ -551,7 +531,7 @@ it("rejects a database that holds other tables without changing their records", 
     const database = yield* openTestDatabase();
     yield* database.sql`CREATE TABLE retained (value TEXT NOT NULL)`;
     yield* database.sql`INSERT INTO retained VALUES ('prior installation')`;
-    expect(yield* openOn(database).pipe(Effect.flip)).toMatchObject({
+    expect(yield* prepareTables(database.sql).pipe(Effect.flip)).toMatchObject({
       reason: "schema",
     });
     expect(yield* database.sql`SELECT * FROM retained`).toEqual([
@@ -602,10 +582,17 @@ const withholdingByText = Effect.gen(function* () {
     Effect.succeed(
       message.text === "withheld"
         ? {
-            kind: "refused",
-            checkId: "chk_withheld",
-            reason: "rule-violation",
-            feedback: [],
+            kind: "withheld",
+            record: {
+              checkId: "chk_withheld",
+              direction: "incoming",
+              decision: "withheld",
+              time: 0,
+              peer: message.author,
+              reason: "rule-violation",
+              decidedBy: [],
+              checkedRuleIds: [],
+            },
           }
         : { kind: "allowed" },
     );

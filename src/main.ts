@@ -41,19 +41,13 @@ import { createRemoteJWKSet, jwtVerify } from "jose";
 import { createServer } from "node:http";
 import { dirname, resolve } from "node:path";
 import {
-  type LoadedMessagePolicy,
   loadMessagePolicy,
   makeFirewall,
+  type MessagePolicy,
 } from "./firewall.js";
 import { AgentName } from "./messages.js";
-import {
-  initialNormsHaveRules,
-  type InstalledNorms,
-  loadNorms,
-  type NormsConfigurationError,
-  structureCheck,
-} from "./norms/index.js";
-import { databaseUrl, packageVersion, serverFactory } from "./server.js";
+import { type HeldNorms, loadNorms } from "./norms/index.js";
+import { packageVersion, serverFactory } from "./server.js";
 
 /**
  * Messages identify the failed operation without disclosing documents or credentials.
@@ -128,15 +122,15 @@ const settingsFile = Schema.Struct({
 
 /**
  * What the process holds after reading the settings file and the files it
- * names: the message policy, the provider credential and the norms
- * themselves, in place of their paths.
+ * names: the message policy with its provider and the held norms, in place
+ * of their paths.
  */
 type Settings = Omit<
   typeof settingsFile.Type,
   "messagePolicyFile" | "normsDirectory"
 > & {
-  readonly messagePolicy?: LoadedMessagePolicy;
-  readonly norms?: InstalledNorms;
+  readonly messagePolicy?: MessagePolicy;
+  readonly norms?: HeldNorms;
 };
 
 /**
@@ -164,36 +158,27 @@ const loadSettings = Effect.fn("loadSettings")(function* () {
   const norms =
     file.normsDirectory === undefined
       ? undefined
-      : yield* loadNorms(resolve(settingsDirectory, file.normsDirectory)).pipe(
-          Effect.mapError((error: NormsConfigurationError) =>
-            refused(
-              `The configured norms directory is invalid: ${error.reason}`,
-            ),
-          ),
-        );
+      : yield* loadNorms(resolve(settingsDirectory, file.normsDirectory));
   if (norms !== undefined && file.messagePolicyFile === undefined) {
     return yield* refused(
       "The configured norms need a messagePolicyFile: the message policy checks them",
     );
   }
-  const messagePolicy = yield* loadMessagePolicy(
+  const messagePolicy =
     file.messagePolicyFile === undefined
       ? undefined
-      : resolve(settingsDirectory, file.messagePolicyFile),
-  ).pipe(Effect.mapError((error) => refused(error.message)));
-  if (
-    norms !== undefined &&
-    initialNormsHaveRules(norms) &&
-    Option.getOrUndefined(messagePolicy)?.provider === undefined
-  ) {
+      : yield* loadMessagePolicy(
+          resolve(settingsDirectory, file.messagePolicyFile),
+        );
+  if (norms?.hasTextRules === true && messagePolicy?.provider === undefined) {
     return yield* refused(
       "The configured norms have English rules, which need a messagePolicyFile with a decisionProvider to check them",
     );
   }
   const settings: Settings = {
     ...Struct.omit(file, "messagePolicyFile", "normsDirectory"),
-    messagePolicy: Option.getOrUndefined(messagePolicy),
-    ...(norms === undefined ? {} : { norms }),
+    messagePolicy,
+    norms,
   };
   return settings;
 });
@@ -312,6 +297,10 @@ const exitUnsuccessfully = (line: string) =>
     ),
   );
 
+/** Ends a start that failed for a reason its message states. */
+const explained = ({ message }: { readonly message: string }) =>
+  exitUnsuccessfully(message);
+
 /**
  * Installs a process-global stderr logger for OpenTelemetry warnings and failures.
  * The logger remains installed after export closes.
@@ -351,31 +340,24 @@ const spanExport = Layer.unwrapEffect(
 
 /** Serves until the process is stopped. Fails if it cannot start. */
 const serve = Effect.gen(function* () {
-  const url = yield* databaseUrl;
+  const url = yield* Config.redacted("SHARNESS_DATABASE_URL").pipe(
+    Effect.mapError(() =>
+      refused("Set SHARNESS_DATABASE_URL to the database the server uses"),
+    ),
+  );
   const settings = yield* loadSettings();
-  const { authentication, norms } = settings;
+  const { authentication, serverAgent, norms } = settings;
   const factory = yield* serverFactory(url, {
     issuer: authentication.issuer,
-    subject: settings.serverAgent.subject,
-    name: settings.serverAgent.name,
+    subject: serverAgent.subject,
+    name: serverAgent.name,
     firewall: makeFirewall({
-      ...(settings.messagePolicy === undefined
-        ? {}
-        : { source: settings.messagePolicy }),
-      me: settings.serverAgent.name,
-      historyLimit: settings.maximumHistoryRecords ?? 256,
+      policy: settings.messagePolicy,
+      historyLimit: settings.maximumHistoryRecords,
       notice: `Your message was not accepted: it breaks a rule this agent applies to incoming messages.${norms === undefined ? "" : " Call read_norms to see which messages it accepts."}`,
-      ...(norms === undefined ? {} : { structureCheck: structureCheck(norms) }),
+      structureCheck: norms?.structureCheck,
     }),
-    ...(norms === undefined
-      ? {}
-      : {
-          norms: norms.map((norm) => ({
-            name: norm.name,
-            description: norm.description,
-            document: norm.source,
-          })),
-        }),
+    norms: norms?.documents,
   });
   yield* listen(settings, factory);
   yield* Console.log(
@@ -400,9 +382,10 @@ NodeRuntime.runMain(
     return exitUnsuccessfully(HELP_MESSAGE);
   }).pipe(
     Effect.catchTags({
-      SettingsError: ({ message }) => exitUnsuccessfully(message),
-      DatabaseUrlMissingError: ({ message }) => exitUnsuccessfully(message),
-      DatabasePreparationError: ({ message }) => exitUnsuccessfully(message),
+      SettingsError: explained,
+      NormsConfigurationError: explained,
+      MessagePolicyConfigurationError: explained,
+      DatabasePreparationError: explained,
     }),
     Effect.catchAll(() => exitUnsuccessfully(UNEXPLAINED_FAILURE)),
   ),

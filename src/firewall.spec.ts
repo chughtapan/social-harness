@@ -13,8 +13,6 @@ import {
   Effect,
   FastCheck as fc,
   Fiber,
-  Option,
-  Redacted,
   Schema,
   TestClock,
 } from "effect";
@@ -39,6 +37,10 @@ import { AgentName, Message } from "./messages.js";
 
 type Direction = "incoming" | "outgoing";
 const directions = ["incoming", "outgoing"] as const;
+
+/** What a check that does not allow its message concludes: a draft is refused, a peer's message withheld. */
+const unallowed = (direction: Direction) =>
+  direction === "outgoing" ? "refused" : "withheld";
 
 const directories: string[] = [];
 afterEach(() => {
@@ -71,12 +73,6 @@ function loadConfigured(path: string, key?: string) {
           key === undefined ? [] : [["SHARNESS_DECISION_PROVIDER_KEY", key]],
         ),
       ),
-    ),
-    Effect.flatMap(
-      Option.match({
-        onNone: () => Effect.dieMessage("expected configured policy"),
-        onSome: Effect.succeed,
-      }),
     ),
   );
 }
@@ -134,10 +130,8 @@ describe("message-policy file", () => {
         ),
         "key-value",
       );
-      expect(loaded.policy.rules.length).toBeGreaterThan(0);
-      expect(Redacted.value(loaded.provider?.apiKey ?? Redacted.make(""))).toBe(
-        "key-value",
-      );
+      expect(loaded.rules.length).toBeGreaterThan(0);
+      expect(loaded.provider).toBeDefined();
     }),
   );
 });
@@ -219,23 +213,17 @@ function check(direction: Direction, setup: Setup = {}) {
 /** Alice's firewall under `setup`. */
 function firewallOf(setup: Setup = {}) {
   return makeFirewall({
-    source: {
-      policy: {
-        decisionProvider: { model: "test" },
-        rules: setup.rules ?? [privacy],
-        settings: {
-          minimumProbability: setup.minimumProbability ?? 0.5,
-          timeoutMilliseconds: setup.timeoutMilliseconds ?? 5_000,
-        },
+    policy: {
+      rules: setup.rules ?? [privacy],
+      settings: {
+        minimumProbability: setup.minimumProbability ?? 0.5,
+        timeoutMilliseconds: setup.timeoutMilliseconds ?? 5_000,
       },
+      provider: setup.provider ?? certain,
     },
-    me: alice,
-    historyLimit: setup.historyLimit ?? 256,
-    provider: setup.provider ?? certain,
-    ...(setup.notice === undefined ? {} : { notice: setup.notice }),
-    ...(setup.structureCheck === undefined
-      ? {}
-      : { structureCheck: setup.structureCheck }),
+    historyLimit: setup.historyLimit,
+    notice: setup.notice,
+    structureCheck: setup.structureCheck,
   });
 }
 
@@ -263,17 +251,27 @@ it.prop(
         minimumProbability,
       });
       const unsure = probability < minimumProbability;
-      const refusal = (reason: string) => ({
-        kind: "refused",
-        reason,
-        feedback: [repair],
-      });
+      const violation = {
+        outgoing: {
+          kind: "refused",
+          reason: "rule-violation",
+          feedback: [repair],
+        },
+        incoming: {
+          kind: "withheld",
+          record: {
+            reason: "rule-violation",
+            decidedBy: [{ ruleId: proposal.id, advice: repair }],
+          },
+        },
+      }[direction];
       const expected = {
-        sure: {
-          compliant: { kind: "allowed" },
-          violation: refusal("rule-violation"),
-        }[choice],
-        outgoing: refusal("unresolved-evidence"),
+        sure: { compliant: { kind: "allowed" }, violation }[choice],
+        outgoing: {
+          kind: "refused",
+          reason: "unresolved-evidence",
+          feedback: [repair],
+        },
         incoming: {
           kind: "allowed",
           guidance: {
@@ -349,8 +347,8 @@ it.prop(
         minimumProbability: 0.8,
       });
       expect(result).toMatchObject({
-        kind: "refused",
-        reason: "rule-violation",
+        kind: unallowed(direction),
+        record: { reason: "rule-violation" },
       });
     }),
 );
@@ -360,12 +358,10 @@ it.each(directions)(
   (direction) =>
     Effect.gen(function* () {
       expect(yield* check(direction)).toMatchObject({
-        kind: "refused",
-        reason: "rule-violation",
-        feedback: [privacy.feedback],
+        kind: unallowed(direction),
         record: {
           direction,
-          decision: direction === "outgoing" ? "refused" : "withheld",
+          decision: unallowed(direction),
           peer: bob,
           reason: "rule-violation",
           decidedBy: [{ ruleId: privacy.id, advice: privacy.feedback }],
@@ -467,7 +463,10 @@ it.each([true, false])(
         earlier: Array.from({ length: 80 }, () => large),
       });
       expect(within.kind).toBe("allowed");
-      expect(beyond).toMatchObject({ reason: "unresolved-evidence" });
+      expect(beyond).toMatchObject({
+        kind: unallowed(direction),
+        record: { reason: "unresolved-evidence" },
+      });
     }),
 );
 
@@ -500,7 +499,7 @@ it.prop(
 
 it("allows every message of an agent without a message policy, with nothing to save", () =>
   Effect.gen(function* () {
-    const firewall = makeFirewall({ me: alice, historyLimit: 256 });
+    const firewall = makeFirewall({});
     const message = yield* fromBob;
 
     expect(yield* firewall.checkIncoming(message, [])).toEqual({
@@ -615,7 +614,7 @@ describe("Firewall replies", () => {
         });
 
         const reply = "reply" in result ? result.reply : undefined;
-        expect(result).toMatchObject({ kind: "refused" });
+        expect(result).toMatchObject({ kind: "withheld" });
         expect(
           reply && [
             reply.text,
@@ -677,7 +676,7 @@ describe("Firewall structure check", () => {
           },
         });
         expect(yield* check("incoming", setup)).toMatchObject({
-          kind: "refused",
+          kind: "withheld",
           reply: { text },
         });
       }),
@@ -709,7 +708,7 @@ describe("Firewall structure check", () => {
         ]),
       ).toEqual([[{ turn: 2 }, ["polite", privacy.id]]]);
       expect(result).toMatchObject({
-        kind: "refused",
+        kind: "withheld",
         reply: { text: `Refused: ${privacy.feedback}` },
       });
     }));
@@ -747,18 +746,15 @@ function checkWithJev(respond: () => ReturnType<typeof globalThis.fetch>) {
     return respond();
   };
   return Effect.gen(function* () {
-    const result = yield* makeFirewall({
-      source: {
-        policy: {
-          decisionProvider,
-          rules: [privacy],
-          settings: { minimumProbability: 0.5, timeoutMilliseconds: 5_000 },
-        },
-        provider: { ...decisionProvider, apiKey: Redacted.make(secret) },
-      },
-      me: alice,
-      historyLimit: 256,
-    })
+    const policy = yield* loadConfigured(
+      file({
+        decisionProvider,
+        rules: [privacy],
+        settings: { minimumProbability: 0.5, timeoutMilliseconds: 5_000 },
+      }),
+      secret,
+    );
+    const result = yield* makeFirewall({ policy })
       .checkIncoming(yield* fromBob, [])
       .pipe(Effect.provideService(FetchHttpClient.Fetch, fetch));
     return { result, requests };

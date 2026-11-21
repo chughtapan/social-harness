@@ -18,14 +18,12 @@ import {
 import { EventsExtension } from "@modelcontextprotocol/server/ext/events";
 import { nodeWebhookSender } from "@modelcontextprotocol/server/ext/events/node";
 import {
-  Config,
   Context,
   Data,
   Duration,
   Effect,
   JSONSchema,
   Layer,
-  Option,
   Order,
   PubSub,
   Queue,
@@ -38,39 +36,16 @@ import packageJson from "../package.json" with { type: "json" };
 import {
   type CheckRecord,
   checkRecordSchema,
+  type EarlierMessage,
   type Firewall,
   type FirewallRefusalReason,
   LocalGuidance,
   type StructureDetail,
 } from "./firewall.js";
-import {
-  AgentName,
-  type CommunicationError,
-  Message,
-  MsgId,
-  wellFormedString,
-} from "./messages.js";
+import { AgentName, Message, MsgId, wellFormedString } from "./messages.js";
 
 /** The version of this package, as MCP clients and telemetry read it. */
 export const packageVersion: string = packageJson.version;
-
-/**
- * The environment names no database URL.
- * @public
- */
-export class DatabaseUrlMissingError extends Data.TaggedError(
-  "DatabaseUrlMissingError",
-) {
-  override get message(): string {
-    return "Set SHARNESS_DATABASE_URL to the database the server uses";
-  }
-}
-
-/** Read from `SHARNESS_DATABASE_URL`. */
-export const databaseUrl = Config.redacted("SHARNESS_DATABASE_URL").pipe(
-  Effect.catchTag("ConfigError", () => new DatabaseUrlMissingError()),
-  Effect.withSpan("databaseUrl"),
-);
 
 /**
  * The tables could not be created. Messages name the operator's
@@ -100,7 +75,7 @@ export class DatabasePreparationError extends Data.TaggedError(
  * it, and `checked_at` is when the firewall checked it. `firewall_checks`
  * holds the record of each check.
  */
-const prepareTables = Effect.fn("prepareDatabase")(
+export const prepareTables = Effect.fn("prepareDatabase")(
   function* (sql: SqlClient.SqlClient) {
     const tables = yield* sql<{
       name: string;
@@ -144,7 +119,7 @@ const prepareTables = Effect.fn("prepareDatabase")(
   ),
 );
 
-const storedMessages = Schema.Array(
+const storedRows = Schema.Array(
   Schema.Struct({
     sequence: Schema.Number,
     client: AgentName,
@@ -157,74 +132,157 @@ const storedMessages = Schema.Array(
     checkedAt: Schema.NullOr(Schema.NumberFromString),
   }),
 );
-type StoredMessage = (typeof storedMessages.Type)[number];
 
-const messagesWhere = (
-  sql: SqlClient.SqlClient,
-  where: Statement.Fragment,
-  limit: number | null,
-) =>
-  sql`SELECT sequence, client, from_server AS "fromServer", msg_id AS "msgId",
-      text, reply_to AS "replyTo", allowed, guidance,
-      checked_at AS "checkedAt"
-    FROM messages WHERE ${where} ORDER BY sequence LIMIT ${limit}`.pipe(
-    Effect.flatMap(Schema.decodeUnknown(storedMessages)),
-    Effect.orDie,
-  );
+/**
+ * One message as the tables hold it: the server agent's firewall's check of
+ * it, its place in the order messages were stored, and the guidance that
+ * firewall gave with it.
+ */
+interface StoredMessage extends EarlierMessage {
+  readonly sequence: number;
+  readonly guidance?: LocalGuidance;
+}
 
 const savedRecord = Schema.parseJson(checkRecordSchema);
 
-const storeDecision = (sql: SqlClient.SqlClient, record: CheckRecord) =>
-  Effect.flatMap(
-    Schema.encode(savedRecord)(record),
-    (saved) =>
-      sql`INSERT INTO firewall_checks ${sql.insert({
-        decided_at: record.time,
-        record: saved,
-      })}`,
-  ).pipe(Effect.orDie);
+/**
+ * The key of the advisory lock a transaction holds while it stores messages,
+ * so that messages commit in `sequence` order: a reader that has read to one
+ * sequence has seen every message before it.
+ */
+const STORE_LOCK = 1;
 
-const storeMessage = Effect.fn("saveMessage")(function* (
-  sql: SqlClient.SqlClient,
-  client: AgentName,
-  message: Message,
-  held: {
-    readonly allowed: boolean;
-    readonly guidance?: LocalGuidance;
-    readonly record?: CheckRecord;
-  },
-) {
-  const guidance =
-    held.guidance === undefined
-      ? null
-      : yield* Schema.encode(Schema.parseJson(LocalGuidance))(held.guidance);
-  yield* sql`INSERT INTO messages ${sql.insert({
-    client,
-    from_server: message.recipient === client,
-    msg_id: message.msgId,
-    text: message.text,
-    reply_to: message.replyToMsgId ?? null,
-    allowed: held.allowed,
-    guidance,
-    checked_at: held.record?.time ?? null,
-  })}`;
-  if (held.record !== undefined) {
-    yield* storeDecision(sql, held.record);
-  }
-}, Effect.orDie);
-
-const readDecisions = Effect.fn("readDecisions")(function* (
-  sql: SqlClient.SqlClient,
-  since: number,
-) {
-  const rows = yield* sql`SELECT record FROM firewall_checks
-    WHERE decided_at >= ${since}
-    ORDER BY decided_at DESC, sequence DESC LIMIT 100`;
-  const saved = yield* Schema.decodeUnknown(
-    Schema.Array(Schema.Struct({ record: savedRecord })),
-  )(rows);
-  return { decisions: saved.map(({ record }) => record) };
-}, Effect.orDie);
+/**
+ * Every read and write of the tables. A row names its client and which of
+ * the two agents wrote it, so the other agent of each message is
+ * `serverAgent`. A query that fails ends its caller as a defect.
+ */
+function tablesOf(sql: SqlClient.SqlClient, serverAgent: AgentName) {
+  const messages = (where: Statement.Fragment, limit: number | null) =>
+    sql`SELECT sequence, client, from_server AS "fromServer", msg_id AS "msgId",
+        text, reply_to AS "replyTo", allowed, guidance,
+        checked_at AS "checkedAt"
+      FROM messages WHERE ${where} ORDER BY sequence LIMIT ${limit}`.pipe(
+      Effect.flatMap(Schema.decodeUnknown(storedRows)),
+      Effect.map((rows) =>
+        rows.map(
+          (row): StoredMessage => ({
+            sequence: row.sequence,
+            message: {
+              author: row.fromServer ? serverAgent : row.client,
+              recipient: row.fromServer ? row.client : serverAgent,
+              msgId: row.msgId,
+              ...(row.replyTo === null ? {} : { replyToMsgId: row.replyTo }),
+              text: row.text,
+            },
+            allowed: row.allowed,
+            ...(row.guidance === null ? {} : { guidance: row.guidance }),
+            ...(row.checkedAt === null ? {} : { checkedAt: row.checkedAt }),
+          }),
+        ),
+      ),
+      Effect.orDie,
+    );
+  const record = (decision: CheckRecord) =>
+    Effect.flatMap(
+      Schema.encode(savedRecord)(decision),
+      (saved) =>
+        sql`INSERT INTO firewall_checks ${sql.insert({
+          decided_at: decision.time,
+          record: saved,
+        })}`,
+    ).pipe(Effect.orDie);
+  return {
+    /** The messages of `client`'s conversation after the place `after`, oldest first, `limit` of them at most. */
+    conversation: (client: AgentName, after = 0, limit: number | null = null) =>
+      messages(sql`client = ${client} AND sequence > ${after}`, limit),
+    /**
+     * The messages `reader` received after the place `after`, oldest first:
+     * for the server agent those its firewall allowed from every client, and
+     * for a client the server agent's messages to it.
+     */
+    inbox: (reader: AgentName, after: number, limit: number) =>
+      messages(
+        reader === serverAgent
+          ? sql`NOT from_server AND allowed AND sequence > ${after}`
+          : sql`client = ${reader} AND from_server AND sequence > ${after}`,
+        limit,
+      ),
+    /** The place of the newest message, or zero when there is none. */
+    newest: sql<{
+      sequence: number;
+    }>`SELECT COALESCE(MAX(sequence), 0) AS sequence FROM messages`.pipe(
+      Effect.map(([newest]) => newest?.sequence ?? 0),
+      Effect.orDie,
+    ),
+    /** The client of every conversation, in name order. */
+    clients: sql<{ client: string }>`SELECT DISTINCT client FROM messages`.pipe(
+      Effect.flatMap((rows) =>
+        Schema.decodeUnknown(Schema.Array(AgentName))(
+          rows.map((row) => row.client),
+        ),
+      ),
+      Effect.map((clients) => [...clients].sort(Order.string)),
+      Effect.orDie,
+      Effect.withSpan("conversationsOf"),
+    ),
+    /** Saves the record of one check. */
+    record,
+    /**
+     * Stores messages, each with the record of its check, in one transaction
+     * that takes the store lock first.
+     */
+    store: (
+      entries: ReadonlyArray<
+        Omit<StoredMessage, "sequence" | "checkedAt"> & {
+          readonly record?: CheckRecord;
+        }
+      >,
+    ) =>
+      sql
+        .withTransaction(
+          Effect.gen(function* () {
+            yield* sql`SELECT pg_advisory_xact_lock(${STORE_LOCK})`;
+            for (const { message, allowed, guidance, ...checked } of entries) {
+              const fromServer = message.author === serverAgent;
+              yield* sql`INSERT INTO messages ${sql.insert({
+                client: fromServer ? message.recipient : message.author,
+                from_server: fromServer,
+                msg_id: message.msgId,
+                text: message.text,
+                reply_to: message.replyToMsgId ?? null,
+                allowed,
+                guidance:
+                  guidance === undefined
+                    ? null
+                    : yield* Schema.encode(Schema.parseJson(LocalGuidance))(
+                        guidance,
+                      ),
+                checked_at: checked.record?.time ?? null,
+              })}`;
+              if (checked.record !== undefined) {
+                yield* record(checked.record);
+              }
+            }
+          }),
+        )
+        .pipe(Effect.orDie, Effect.withSpan("saveMessage")),
+    /** The records of the hundred latest checks since `since`, newest first. */
+    decisions: (since: number) =>
+      sql`SELECT record FROM firewall_checks
+        WHERE decided_at >= ${since}
+        ORDER BY decided_at DESC, sequence DESC LIMIT 100`.pipe(
+        Effect.flatMap(
+          Schema.decodeUnknown(
+            Schema.Array(Schema.Struct({ record: savedRecord })),
+          ),
+        ),
+        Effect.map((saved) => saved.map((row) => row.record)),
+        Effect.orDie,
+        Effect.withSpan("readDecisions"),
+      ),
+  };
+}
 
 const PAGE_SIZE = 50;
 
@@ -234,14 +292,6 @@ const InboxEntry = Schema.Struct({
   guidance: Schema.optionalWith(LocalGuidance, { exact: true }),
 });
 type InboxEntry = typeof InboxEntry.Type;
-
-class SendError extends Data.TaggedError("SendError")<{
-  readonly reason: "content-invalid";
-}> {
-  override get message(): string {
-    return "send failed: the message content is invalid";
-  }
-}
 
 const refusalText: Readonly<Record<FirewallRefusalReason, string>> = {
   "rule-violation": "It breaks a rule of the agent's message policy.",
@@ -274,22 +324,6 @@ class FirewallRefusal extends Data.TaggedError("FirewallRefusal")<{
     ].join(" ");
   }
 }
-
-const refusalOf = (refused: {
-  readonly checkId: string;
-  readonly reason: FirewallRefusalReason;
-  readonly rule?: string;
-  readonly feedback: readonly string[];
-  readonly detail?: StructureDetail;
-}) =>
-  new FirewallRefusal({
-    reason: "firewall-refused",
-    checkId: refused.checkId,
-    refusal: refused.reason,
-    ...(refused.rule === undefined ? {} : { rule: refused.rule }),
-    feedback: refused.feedback,
-    ...(refused.detail === undefined ? {} : { detail: refused.detail }),
-  });
 
 /** The server agent named a client that has sent it no message, so the two have no conversation. */
 class AddressError extends Data.TaggedError("AddressError")<{
@@ -352,13 +386,6 @@ const WEBHOOK_TTL_MILLISECONDS = 30 * 60_000;
 const INBOX_EVENT = "org.social-harness/inbox.pending";
 
 /**
- * The key of the advisory lock a transaction holds while it stores messages,
- * so that messages commit in `sequence` order: a reader that has read to one
- * sequence has seen every message before it.
- */
-const STORE_LOCK = 1;
-
-/**
  * Connects to the database at `url` until the scope closes, prepares the
  * tables, and returns the factory the MCP SDK builds each request's server
  * with. A request's `authInfo` names its owner in `extra.issuer` and
@@ -389,6 +416,7 @@ export const serverFactory = Effect.fn("serverFactory")(function* (
     SqlClient.SqlClient,
   );
   yield* prepareTables(sql);
+  const tables = tablesOf(sql, server.name);
   /** The lock of each conversation a message was sent in, by its client. */
   const conversationLocks = new Map<AgentName, Effect.Semaphore>();
   /** Published with an agent's name each time a message becomes readable for it. */
@@ -409,19 +437,6 @@ export const serverFactory = Effect.fn("serverFactory")(function* (
         );
   };
 
-  const messageOf = (row: StoredMessage): Message => ({
-    author: row.fromServer ? server.name : row.client,
-    recipient: row.fromServer ? row.client : server.name,
-    msgId: row.msgId,
-    ...(row.replyTo === null ? {} : { replyToMsgId: row.replyTo }),
-    text: row.text,
-  });
-
-  const entryOf = (row: StoredMessage): InboxEntry => ({
-    message: messageOf(row),
-    ...(row.guidance === null ? {} : { guidance: row.guidance }),
-  });
-
   /** Holds `client`'s conversation until the scope closes. */
   const lockConversation = (client: AgentName) =>
     Effect.sync(() => {
@@ -436,17 +451,49 @@ export const serverFactory = Effect.fn("serverFactory")(function* (
       Effect.asVoid,
     );
 
+  /** Stores `entries` and wakes the recipient of each one it may read. */
+  const deliver = (entries: Parameters<typeof tables.store>[0]) =>
+    Effect.zipRight(
+      tables.store(entries),
+      Effect.forEach(
+        entries.filter((entry) => entry.allowed),
+        ({ message }) => PubSub.publish(readable, message.recipient),
+        { concurrency: 1, discard: true },
+      ),
+    );
+
+  /**
+   * The firewall's reply to a message it withheld, as a message from the
+   * server agent that answers it. There is none when the firewall gave no
+   * reply or its text cannot be a message.
+   */
+  const replyTo = (
+    withheld: Message,
+    reply?: { readonly text: string; readonly record: CheckRecord },
+  ) =>
+    reply === undefined
+      ? Effect.succeed([])
+      : Message.create({
+          author: server.name,
+          recipient: withheld.author,
+          text: reply.text,
+          replyToMsgId: withheld.msgId,
+        }).pipe(
+          Effect.map((message) => [
+            { message, allowed: true, record: reply.record },
+          ]),
+          Effect.orElseSucceed(() => []),
+        );
+
   /**
    * Sends one message in `client`'s conversation, from the server agent when
    * `author` is its name and from the client otherwise. A check reads the
    * conversation's earlier messages, so the conversation's lock is held from
    * that read until the message is stored, while other conversations do not
-   * wait. No transaction is open while a check runs. A message the server
-   * agent may not send, or one whose check could not run, fails the send and
-   * is not stored. A message withheld from the server agent is stored with
-   * `allowed` false, in one transaction with the firewall's reply to its
-   * sender. The transaction takes the store lock first, so messages commit
-   * in `sequence` order.
+   * wait. No transaction is open while a check runs. A refused message fails
+   * the send and is not stored. A withheld message is stored where the
+   * server agent does not read it, in one transaction with the firewall's
+   * reply to its sender.
    */
   const send = Effect.fn("send")(
     function* (
@@ -455,10 +502,9 @@ export const serverFactory = Effect.fn("serverFactory")(function* (
       sent: { readonly text: string; readonly replyToMsgId?: MsgId },
     ) {
       const outgoing = author === server.name;
-      const recipient = outgoing ? client : server.name;
       yield* lockConversation(client);
-      const stored = yield* messagesWhere(sql, sql`client = ${client}`, null);
-      if (outgoing && stored.length === 0) {
+      const earlier = yield* tables.conversation(client);
+      if (outgoing && earlier.length === 0) {
         return yield* new AddressError({
           reason: "unknown-agent",
           name: client,
@@ -466,68 +512,41 @@ export const serverFactory = Effect.fn("serverFactory")(function* (
       }
       const message = yield* Message.create({
         author,
-        recipient,
+        recipient: outgoing ? client : server.name,
         text: sent.text,
         replyToMsgId: sent.replyToMsgId,
-      }).pipe(
-        Effect.catchTag(
-          "CommunicationError",
-          ({ reason }: CommunicationError) => new SendError({ reason }),
-        ),
-      );
-      const earlier = stored.map((row) => ({
-        message: messageOf(row),
-        allowed: row.allowed,
-        ...(row.checkedAt === null ? {} : { checkedAt: row.checkedAt }),
-      }));
-      const result = outgoing
+      });
+      const check = outgoing
         ? yield* firewall.checkOutgoing(message, earlier)
         : yield* firewall.checkIncoming(message, earlier);
-      if (
-        result.kind === "refused" &&
-        (outgoing || result.reason === "check-unavailable")
-      ) {
-        if (result.record !== undefined) {
-          yield* storeDecision(sql, result.record);
+      if (check.kind === "refused") {
+        if (check.record !== undefined) {
+          yield* tables.record(check.record);
         }
-        return yield* refusalOf(result);
+        return yield* new FirewallRefusal({
+          reason: "firewall-refused",
+          checkId: check.checkId,
+          refusal: check.reason,
+          rule: check.rule,
+          feedback: check.feedback,
+          detail: check.detail,
+        });
       }
-      const reply =
-        result.kind === "refused" && result.reply !== undefined
-          ? yield* Message.create({
-              author: server.name,
-              recipient: client,
-              text: result.reply.text,
-              replyToMsgId: message.msgId,
-            }).pipe(Effect.option)
-          : Option.none();
-      const replyRecord =
-        result.kind === "refused" ? result.reply?.record : undefined;
-      yield* sql
-        .withTransaction(
-          Effect.gen(function* () {
-            yield* sql`SELECT pg_advisory_xact_lock(${STORE_LOCK})`;
-            yield* storeMessage(sql, client, message, {
-              allowed: result.kind === "allowed",
-              ...(result.kind === "allowed" && result.guidance !== undefined
-                ? { guidance: result.guidance }
-                : {}),
-              ...(result.record === undefined ? {} : { record: result.record }),
-            });
-            if (Option.isSome(reply)) {
-              yield* storeMessage(sql, client, reply.value, {
+      yield* deliver(
+        check.kind === "allowed"
+          ? [
+              {
+                message,
                 allowed: true,
-                ...(replyRecord === undefined ? {} : { record: replyRecord }),
-              });
-            }
-          }),
-        )
-        .pipe(Effect.orDie);
-      if (result.kind === "allowed") {
-        yield* PubSub.publish(readable, recipient);
-      } else if (Option.isSome(reply)) {
-        yield* PubSub.publish(readable, author);
-      }
+                guidance: check.guidance,
+                record: check.record,
+              },
+            ]
+          : [
+              { message, allowed: false, record: check.record },
+              ...(yield* replyTo(message, check.reply)),
+            ],
+      );
       return { id: message.msgId };
     },
     Effect.scoped,
@@ -552,47 +571,34 @@ export const serverFactory = Effect.fn("serverFactory")(function* (
     reader: AgentName,
     { limit, cursor }: { readonly limit: number; readonly cursor?: string },
   ) {
-    const [newest] = yield* sql<{
-      sequence: number;
-    }>`SELECT COALESCE(MAX(sequence), 0) AS sequence FROM messages`;
-    const from = Number(cursor ?? newest?.sequence ?? 0);
-    const rows = yield* messagesWhere(
-      sql,
-      reader === server.name
-        ? sql`NOT from_server AND allowed AND sequence > ${from}`
-        : sql`client = ${reader} AND from_server AND sequence > ${from}`,
-      limit + 1,
-    );
-    const page = rows.slice(0, limit);
+    const from = Number(cursor ?? (yield* tables.newest));
+    const stored = yield* tables.inbox(reader, from, limit + 1);
+    const page = stored.slice(0, limit);
     return {
-      entries: page.map(entryOf),
+      entries: page.flatMap(readBy(reader)),
       nextCursor: String(page.at(-1)?.sequence ?? from),
-      hasMore: rows.length > limit,
+      hasMore: stored.length > limit,
     };
-  }, Effect.orDie);
+  });
 
   /** A waiting read subscribes before it reads, so an entry that becomes readable after the read is not missed. */
   const receive = Effect.fn("receive")(function* (
     reader: AgentName,
     { cursor, wait }: ReceiveRequest,
   ) {
-    const read = (from: typeof cursor) =>
-      readInbox(reader, { limit: PAGE_SIZE, cursor: from }).pipe(
-        Effect.map(({ entries, nextCursor }) => ({ entries, nextCursor })),
-      );
-    if (wait === undefined) {
-      return yield* read(cursor);
-    }
     const woken = yield* PubSub.subscribe(readable);
-    const page = yield* read(cursor);
-    if (page.entries.length > 0) {
+    const page = yield* readInbox(reader, { limit: PAGE_SIZE, cursor });
+    if (wait === undefined || page.entries.length > 0) {
       return page;
     }
     yield* Queue.take(woken).pipe(
       Effect.repeat({ until: (name) => name === reader }),
       Effect.timeoutOption(Duration.seconds(wait)),
     );
-    return yield* read(page.nextCursor);
+    return yield* readInbox(reader, {
+      limit: PAGE_SIZE,
+      cursor: page.nextCursor,
+    });
   }, Effect.scoped);
 
   /** One check of the inbox event for the agent `principal` names. */
@@ -640,26 +646,21 @@ export const serverFactory = Effect.fn("serverFactory")(function* (
       run(inboxOccurrences(principal, { cursor, maxEvents }), { signal }),
   });
 
-  /** Each message `reader` sent in `client`'s conversation, and each one it received unless it was withheld. */
+  /** A page of `client`'s conversation as `reader` reads it. */
   const history = Effect.fn("historyRecords")(function* (
     reader: AgentName,
     client: AgentName,
     cursor?: string,
   ) {
-    const stored = yield* messagesWhere(
-      sql,
-      sql`client = ${client} AND sequence > ${Number(cursor ?? 0)}`,
+    const stored = yield* tables.conversation(
+      client,
+      Number(cursor ?? 0),
       PAGE_SIZE + 1,
     );
     const page = stored.slice(0, PAGE_SIZE);
     const last = page.at(-1);
     return {
-      records: page.flatMap((row): InboxEntry[] => {
-        if ((row.fromServer ? server.name : row.client) === reader) {
-          return [{ message: messageOf(row) }];
-        }
-        return row.allowed ? [entryOf(row)] : [];
-      }),
+      records: page.flatMap(readBy(reader)),
       ...(stored.length > PAGE_SIZE && last !== undefined
         ? { nextCursor: String(last.sequence) }
         : {}),
@@ -669,8 +670,7 @@ export const serverFactory = Effect.fn("serverFactory")(function* (
   /** The server agent's page of its conversation with `client`, which must have a message. */
   const historyWith = (client: AgentName, cursor?: string) =>
     Effect.gen(function* () {
-      const [found] = yield* messagesWhere(sql, sql`client = ${client}`, 1);
-      if (found === undefined) {
+      if ((yield* tables.conversation(client, 0, 1)).length === 0) {
         return yield* new AddressError({
           reason: "unknown-agent",
           name: client,
@@ -678,19 +678,6 @@ export const serverFactory = Effect.fn("serverFactory")(function* (
       }
       return yield* history(server.name, client, cursor);
     });
-
-  const conversations = sql<{
-    client: string;
-  }>`SELECT DISTINCT client FROM messages`.pipe(
-    Effect.flatMap((rows) =>
-      Schema.decodeUnknown(Schema.Array(AgentName))(
-        rows.map((row) => row.client),
-      ),
-    ),
-    Effect.map((clients) => ({ clients: [...clients].sort(Order.string) })),
-    Effect.orDie,
-    Effect.withSpan("conversationsOf"),
-  );
 
   /**
    * Registers a tool whose calls `execute` answers. A call runs with `run` and
@@ -867,7 +854,7 @@ export const serverFactory = Effect.fn("serverFactory")(function* (
         output: Schema.Struct({ clients: Schema.Array(AgentName) }),
         readOnly: true,
       },
-      () => conversations,
+      () => Effect.map(tables.clients, (clients) => ({ clients })),
     );
     register(
       mcp,
@@ -879,7 +866,10 @@ export const serverFactory = Effect.fn("serverFactory")(function* (
         output: Schema.Struct({ decisions: Schema.Array(checkRecordSchema) }),
         readOnly: true,
       },
-      ({ since }) => readDecisions(sql, since ?? 0),
+      ({ since }) =>
+        Effect.map(tables.decisions(since ?? 0), (decisions) => ({
+          decisions,
+        })),
     );
   };
 
@@ -929,7 +919,24 @@ export const serverFactory = Effect.fn("serverFactory")(function* (
   return factory;
 });
 
-/** A typed failure of a tool: what a model reads of it, and its own fields, which a host reads. */
+/**
+ * What `reader` reads of a stored message: one it sent, without the guidance
+ * its recipient got, and one it received, with its guidance, unless that
+ * message was withheld.
+ */
+function readBy(reader: AgentName) {
+  return ({ message, allowed, guidance }: StoredMessage): InboxEntry[] => {
+    if (message.author === reader) {
+      return [{ message }];
+    }
+    if (!allowed) {
+      return [];
+    }
+    return [{ message, ...(guidance === undefined ? {} : { guidance }) }];
+  };
+}
+
+/** A typed failure of a tool: what a model reads of it, and the fields it has, which a host reads. */
 interface Failure {
   readonly message: string;
   readonly reason: string;
@@ -940,7 +947,9 @@ function failed(failure: Failure) {
     isError: true as const,
     content: [{ type: "text" as const, text: failure.message }],
     structuredContent: Object.fromEntries(
-      Object.entries(failure).filter(([field]) => field !== "_tag"),
+      Object.entries(failure).filter(
+        ([field, held]) => field !== "_tag" && held !== undefined,
+      ),
     ),
   };
 }

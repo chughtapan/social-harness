@@ -17,7 +17,6 @@ import {
   Data,
   Effect,
   Exit,
-  Option,
   type Redacted,
   Schedule,
   Schema,
@@ -166,37 +165,49 @@ export type StructureCheck = (
 >;
 
 /**
- * What a check concludes. `record` is what the caller saves of the decision;
- * a message of an agent without a message policy and a check that could not
- * run have none. A refused incoming message is withheld from the agent, and
- * `reply` is the text its sender is to receive as an ordinary message from
- * this agent, with the record of that reply as a message this firewall
- * allowed.
+ * A check that allowed its message. `guidance` is for the agent that reads an
+ * incoming message the provider was unsure about. `record` is what the caller
+ * saves of the decision; an agent without a message policy has none.
  */
-type CheckResult =
-  | {
-      readonly kind: "allowed";
-      readonly guidance?: LocalGuidance;
-      readonly record?: CheckRecord;
-    }
-  | {
-      readonly kind: "refused";
-      readonly checkId: string;
-      readonly reason: FirewallRefusalReason;
-      readonly rule?: string;
-      readonly feedback: readonly string[];
-      readonly detail?: StructureDetail;
-      readonly reply?: { readonly text: string; readonly record: CheckRecord };
-      readonly record?: CheckRecord;
-    };
+interface Allowed {
+  readonly kind: "allowed";
+  readonly guidance?: LocalGuidance;
+  readonly record?: CheckRecord;
+}
+
+/**
+ * A check that fails its message's send: a message the agent may not send, or
+ * a message in either direction whose check could not run, which has no
+ * record. `rule` and `detail` are those of a structure check.
+ */
+interface Refused {
+  readonly kind: "refused";
+  readonly checkId: string;
+  readonly reason: FirewallRefusalReason;
+  readonly rule?: string;
+  readonly feedback: readonly string[];
+  readonly detail?: StructureDetail;
+  readonly record?: CheckRecord;
+}
+
+/**
+ * A check that keeps a peer's message from the agent. `reply` is the text its
+ * sender is to receive as an ordinary message from this agent, with the
+ * record of that reply as a message this firewall allowed.
+ */
+interface Withheld {
+  readonly kind: "withheld";
+  readonly record: CheckRecord;
+  readonly reply?: { readonly text: string; readonly record: CheckRecord };
+}
 
 /** One agent's message checks. `earlier` is the conversation's earlier messages in order. */
 export interface Firewall {
-  /** Checks a message its agent sends. A refusal exposes feedback and never a reply. */
+  /** Checks a message its agent sends. */
   readonly checkOutgoing: (
     message: Message,
     earlier: readonly EarlierMessage[],
-  ) => Effect.Effect<CheckResult>;
+  ) => Effect.Effect<Allowed | Refused>;
   /**
    * Checks a message a peer wrote. An allowed message the provider was unsure
    * about carries guidance.
@@ -204,17 +215,15 @@ export interface Firewall {
   readonly checkIncoming: (
     message: Message,
     earlier: readonly EarlierMessage[],
-  ) => Effect.Effect<CheckResult>;
+  ) => Effect.Effect<Allowed | Refused | Withheld>;
 }
 
 /** What a firewall is made with. */
 interface Installation {
   /** The message policy the firewall applies for its whole lifetime. Without one it allows every message. */
-  readonly source?: LoadedMessagePolicy;
-  /** The name of the agent whose messages the firewall checks. */
-  readonly me: AgentName;
-  /** The most earlier messages the provider reads. */
-  readonly historyLimit: number;
+  readonly policy?: MessagePolicy;
+  /** The most earlier messages the provider reads: 256 when unset. */
+  readonly historyLimit?: number;
   /**
    * What the sender of a message withheld for breaking a rule is told when no
    * rule and no structure check answers it; a structure check's explanation
@@ -223,26 +232,6 @@ interface Installation {
   readonly notice?: string;
   /** Judges each message before the text rules, and gives the text rules that join them. */
   readonly structureCheck?: StructureCheck;
-  /** Judges the text rules in place of the provider the policy names. */
-  readonly provider?: DecisionProvider;
-}
-
-/**
- * A message policy as loaded from its file, with the provider's credential
- * redacted. A policy that names no `decisionProvider` has no provider.
- */
-export interface LoadedMessagePolicy {
-  readonly policy: typeof MessagePolicy.Type;
-  readonly provider?: {
-    readonly model: string;
-    readonly apiKey: Redacted.Redacted;
-  };
-}
-
-/** A firewall's installation under a message policy: its provider and the permits its checks share. */
-interface Installed extends Installation {
-  readonly source: LoadedMessagePolicy;
-  readonly permits: Effect.Semaphore;
 }
 
 /** One check's subject: the message, whether its agent sends or receives it, and the time of the check. */
@@ -252,7 +241,7 @@ interface Checked {
   readonly now: number;
 }
 
-/** What a refusal is built from: the check's conclusion and the text that answers a withheld message. */
+/** What a check that does not allow its message concluded, and the text that answers a withheld message. */
 interface Refusal extends Pick<CheckRecord, "decidedBy" | "checkedRuleIds"> {
   readonly reason: FirewallRefusalReason;
   readonly rule?: string;
@@ -261,91 +250,92 @@ interface Refusal extends Pick<CheckRecord, "decidedBy" | "checkedRuleIds"> {
   readonly reply?: string;
 }
 
-/**
- * The firewall of the agent `installation` names, under its message policy.
- * Without `provider`, Jev judges the text rules of a policy that names it.
- * At most `maximumConcurrentChecks` requests to the provider run at once,
- * four when the policy sets none.
- */
-export function makeFirewall(installation: Installation): Firewall {
-  const { source } = installation;
-  if (source === undefined) {
-    const allowed = () => Effect.succeed<CheckResult>({ kind: "allowed" });
-    return { checkOutgoing: allowed, checkIncoming: allowed };
-  }
-  const provider =
-    installation.provider ??
-    (source.provider === undefined
-      ? undefined
-      : jevDecisionProvider(source.provider));
-  const installed = {
-    ...installation,
-    source,
-    ...(provider === undefined ? {} : { provider }),
-    permits: Effect.unsafeMakeSemaphore(
-      source.policy.maximumConcurrentChecks ?? 4,
-    ),
-  };
-  return {
-    checkOutgoing: (message, earlier) =>
-      check(installed, message, earlier, "outgoing"),
-    checkIncoming: (message, earlier) =>
-      check(installed, message, earlier, "incoming"),
-  };
-}
+/** What a refusal is in one direction of checks. */
+type Refuse<Unallowed> = (checked: Checked, refusal: Refusal) => Unallowed;
+
+const DEFAULT_HISTORY_LIMIT = 256;
 
 /**
- * Checks one message. The structure check judges it first, with the earlier
- * messages; its refusal refuses the message. The text rules that apply to the
- * message's direction then judge it: the owner's rules and those the
- * structure check gives it. Each answer complies, violates or is unsure. A
- * violation refuses. An unsure answer refuses an outgoing draft as unresolved
- * evidence, so its agent can revise it, and allows an incoming message with
- * the rule's guidance. History cut at the byte limit is unresolved evidence
- * too. A provider that gives no usable answer makes the check unavailable. A
- * refusal of a message the structure check passed carries that check's
- * detail. A withheld message is answered as that check phrases the reply,
- * else with the feedback of the `reply` rules it broke, else, when it broke a
- * rule, with the notice.
+ * The firewall of an agent under the message policy of `installation`. At
+ * most `maximumConcurrentChecks` requests to the provider run at once, four
+ * when the policy sets none.
+ *
+ * A check has the structure check judge its message first, with the earlier
+ * messages; that check's refusal refuses the message. The text rules that
+ * apply to the message's direction then judge it: the owner's rules and those
+ * the structure check gives it. Each answer complies, violates or is unsure.
+ * A violation refuses. An unsure answer refuses an outgoing draft as
+ * unresolved evidence, so its agent can revise it, and allows an incoming
+ * message with the rule's guidance. History cut at the byte limit is
+ * unresolved evidence too. A provider that gives no usable answer makes the
+ * check unavailable. A refusal of a message the structure check passed
+ * carries that check's detail. A withheld message is answered as that check
+ * phrases the reply, else with the feedback of the `reply` rules it broke,
+ * else, when it broke a rule, with the notice.
  */
-function check(
-  installed: Installed,
-  message: Message,
-  earlier: readonly EarlierMessage[],
-  direction: Direction,
-): Effect.Effect<CheckResult> {
-  return Effect.gen(function* () {
-    const structure = yield* (
-      installed.structureCheck?.(message, earlier) ?? Effect.succeed(undefined)
-    );
-    const checked = { message, direction, now: yield* Clock.currentTimeMillis };
-    if (structure?.kind === "refused") {
-      return refusedByStructure(checked, structure, installed.notice);
-    }
-    const rules = [
-      ...installed.source.policy.rules,
-      ...(structure?.textRules ?? []),
-    ].filter((rule) => rule.applies === "both" || rule.applies === direction);
-    const window = historyWindow(earlier, installed.historyLimit);
-    const answers = yield* askProvider(installed, rules, {
-      ...checked,
-      window,
-      protocol: structure?.protocol,
-    }).pipe(
-      Effect.catchTag("DecisionProviderError", () => Effect.succeed(undefined)),
-      markCheckActivity(direction),
-      Effect.withSpan("assessMessage"),
-      installed.permits.withPermits(1),
-    );
-    return conclude(checked, {
-      answers,
-      gap: window.gap,
-      checkedRuleIds: rules.map((rule) => rule.id),
-      detail: structure?.detail,
-      replyTo: structure?.replyTo,
-      notice: installed.notice,
+export function makeFirewall(installation: Installation): Firewall {
+  const { policy, notice } = installation;
+  if (policy === undefined) {
+    const allowed = () => Effect.succeed<Allowed>({ kind: "allowed" });
+    return { checkOutgoing: allowed, checkIncoming: allowed };
+  }
+  const permits = Effect.unsafeMakeSemaphore(
+    policy.maximumConcurrentChecks ?? 4,
+  );
+  const check = <Unallowed>(
+    message: Message,
+    earlier: readonly EarlierMessage[],
+    direction: Direction,
+    refuse: Refuse<Unallowed>,
+  ): Effect.Effect<Allowed | Unallowed> =>
+    Effect.gen(function* () {
+      const structure = yield* (
+        installation.structureCheck?.(message, earlier) ??
+          Effect.succeed(undefined)
+      );
+      const checked = {
+        message,
+        direction,
+        now: yield* Clock.currentTimeMillis,
+      };
+      if (structure?.kind === "refused") {
+        return refuse(checked, refusedByStructure(structure, notice));
+      }
+      const rules = [...policy.rules, ...(structure?.textRules ?? [])].filter(
+        (rule) => rule.applies === "both" || rule.applies === direction,
+      );
+      const window = historyWindow(
+        earlier,
+        installation.historyLimit ?? DEFAULT_HISTORY_LIMIT,
+      );
+      const answers = yield* askProvider(policy, rules, {
+        ...checked,
+        window,
+        protocol: structure?.protocol,
+      }).pipe(
+        Effect.catchTag("DecisionProviderError", () =>
+          Effect.succeed(undefined),
+        ),
+        markCheckActivity(direction),
+        Effect.withSpan("assessMessage"),
+        permits.withPermits(1),
+      );
+      const judged = {
+        answers,
+        gap: window.gap,
+        checkedRuleIds: rules.map((rule) => rule.id),
+        detail: structure?.detail,
+        replyTo: structure?.replyTo,
+        notice,
+      };
+      return conclude(checked, judged, refuse);
     });
-  });
+  return {
+    checkOutgoing: (message, earlier) =>
+      check(message, earlier, "outgoing", refused),
+    checkIncoming: (message, earlier) =>
+      check(message, earlier, "incoming", withheld),
+  };
 }
 
 /** What a structure check says of a message it refuses. */
@@ -360,24 +350,23 @@ type StructureRefusal = Extract<
  * with the notice and the check's explanation.
  */
 function refusedByStructure(
-  checked: Checked,
   structure: StructureRefusal,
   notice?: string,
-): CheckResult {
-  const reply =
-    structure.reply ??
-    (structure.reason === "rule-violation" && notice !== undefined
-      ? `${notice} ${structure.feedback}`
-      : undefined);
-  return refused(checked, {
-    reason: structure.reason,
-    rule: structure.ruleId,
-    decidedBy: [{ ruleId: structure.ruleId }],
-    checkedRuleIds: [structure.ruleId],
-    feedback: [structure.feedback],
-    ...(structure.detail === undefined ? {} : { detail: structure.detail }),
-    ...(reply === undefined ? {} : { reply }),
-  });
+): Refusal {
+  const { reason, ruleId, feedback } = structure;
+  return {
+    reason,
+    rule: ruleId,
+    decidedBy: [{ ruleId }],
+    checkedRuleIds: [ruleId],
+    feedback: [feedback],
+    detail: structure.detail,
+    reply:
+      structure.reply ??
+      (reason === "rule-violation" && notice !== undefined
+        ? `${notice} ${feedback}`
+        : undefined),
+  };
 }
 
 /** One rule's answer as the check reads it. */
@@ -388,7 +377,7 @@ type Answer = Effect.Effect.Success<ReturnType<typeof askProvider>>[number];
  * `gap` says the history was cut at the byte limit; `detail` and `replyTo`
  * are what the structure check gave of the message it passed.
  */
-function conclude(
+function conclude<Unallowed>(
   checked: Checked,
   judged: {
     readonly answers?: readonly Answer[];
@@ -398,7 +387,8 @@ function conclude(
     readonly replyTo?: (feedback: string) => string;
     readonly notice?: string;
   },
-): CheckResult {
+  refuse: Refuse<Unallowed>,
+): Allowed | Unallowed {
   const { checkedRuleIds, detail } = judged;
   const { reason, deciding } = verdict(checked.direction, judged);
   if (reason === "eligible") {
@@ -413,13 +403,13 @@ function conclude(
     judged.replyTo?.(
       feedback.join(" ") || `The semantic policy check returned ${reason}.`,
     ) ?? textReply(reason === "rule-violation" ? deciding : [], judged.notice);
-  return refused(checked, {
+  return refuse(checked, {
     reason,
     decidedBy,
     checkedRuleIds,
     feedback,
-    ...(detail === undefined ? {} : { detail }),
-    ...(reply === undefined ? {} : { reply }),
+    detail,
+    reply,
   });
 }
 
@@ -479,10 +469,10 @@ function textReply(violated: readonly Answer[], notice?: string) {
  * the provider was unsure of give the guidance of an incoming message.
  */
 function allowed(
-  { message, direction, now }: Checked,
+  checked: Checked,
   unsure: readonly Answer[],
   checkedRuleIds: readonly string[],
-): CheckResult {
+): Allowed {
   const checkId = mintCheckId();
   const advised = unsure.map(({ rule, choice, probability }) => ({
     ruleId: rule.id,
@@ -497,66 +487,87 @@ function allowed(
     ...(instructions.length === 0
       ? {}
       : { guidance: { checkId, instructions } }),
-    record: {
-      checkId,
-      direction,
-      decision: "allowed",
-      time: now,
-      peer: peerOf(message, direction),
+    record: recordOf(checked, checkId, "allowed", {
       reason: "eligible",
       decidedBy: advised.map(({ ruleId, advice }) => ({ ruleId, advice })),
       checkedRuleIds,
-    },
+    }),
   };
 }
 
 /**
- * The refusal of a checked message, with its record. A check that could not
- * run gives no record. Only a withheld message has a reply: its record is
- * that of a message this agent sends to the withheld message's author, which
- * this firewall allows without checking its own words.
+ * What a refusal is for a message a peer wrote: the message is withheld,
+ * unless its check could not run, which fails its sender's send. A reply's
+ * record is that of a message this agent sends to the withheld message's
+ * author, which this firewall allows without checking its own words.
  */
-function refused(
-  { message, direction, now }: Checked,
-  { reply, rule, feedback, detail, ...concluded }: Refusal,
-): CheckResult {
-  const checkId = mintCheckId();
+function withheld(checked: Checked, refusal: Refusal): Refused | Withheld {
+  if (refusal.reason === "check-unavailable") {
+    return refused(checked, refusal);
+  }
   return {
-    kind: "refused",
-    checkId,
-    reason: concluded.reason,
-    ...(rule === undefined ? {} : { rule }),
-    feedback,
-    ...(detail === undefined ? {} : { detail }),
-    ...(concluded.reason === "check-unavailable"
-      ? {}
-      : {
-          record: {
-            ...concluded,
-            checkId,
-            direction,
-            decision: direction === "outgoing" ? "refused" : "withheld",
-            time: now,
-            peer: peerOf(message, direction),
-          },
-        }),
-    ...(reply === undefined || direction === "outgoing"
+    kind: "withheld",
+    record: recordOf(checked, mintCheckId(), "withheld", refusal),
+    ...(refusal.reply === undefined
       ? {}
       : {
           reply: {
-            text: reply,
+            text: refusal.reply,
             record: {
               checkId: mintCheckId(),
               direction: "outgoing",
               decision: "allowed",
-              time: now,
-              peer: message.author,
+              time: checked.now,
+              peer: checked.message.author,
               reason: "eligible",
               decidedBy: [],
               checkedRuleIds: [],
             },
           },
         }),
+  };
+}
+
+/**
+ * The refusal that fails a send. A check that could not run gives no record
+ * of it.
+ */
+function refused(checked: Checked, refusal: Refusal): Refused {
+  const checkId = mintCheckId();
+  const { reason, rule, feedback, detail } = refusal;
+  return {
+    kind: "refused",
+    checkId,
+    reason,
+    rule,
+    feedback,
+    detail,
+    ...(reason === "check-unavailable"
+      ? {}
+      : { record: recordOf(checked, checkId, "refused", refusal) }),
+  };
+}
+
+/** The record of the decision a check applied to its message. */
+function recordOf(
+  { message, direction, now }: Checked,
+  checkId: string,
+  decision: CheckRecord["decision"],
+  {
+    reason,
+    decidedBy,
+    checkedRuleIds,
+  }: Pick<CheckRecord, "reason" | "decidedBy" | "checkedRuleIds">,
+): CheckRecord {
+  return {
+    checkId,
+    direction,
+    decision,
+    time: now,
+    peer: peerOf(message, direction),
+    reason,
+    decidedBy,
+    checkedRuleIds,
   };
 }
 
@@ -684,20 +695,20 @@ const complianceQuestion = {
  * left without one of its choices fails the request.
  */
 function askProvider(
-  installed: Installed,
+  policy: MessagePolicy,
   rules: readonly TextRule[],
   candidate: Checked & {
     readonly window: ReturnType<typeof historyWindow>;
     readonly protocol: unknown;
   },
 ) {
-  const { settings } = installed.source.policy;
+  const { settings } = policy;
   const unavailable = new DecisionProviderError({ transient: false });
   if (rules.length === 0) {
     return Effect.succeed([]);
   }
   const request = {
-    state: providerState(installed.me, rules, candidate),
+    state: providerState(rules, candidate),
     questions: Object.fromEntries(
       rules.map((rule, index) => [
         `q${index}`,
@@ -710,7 +721,7 @@ function askProvider(
     ),
   };
   return Effect.suspend(
-    () => installed.provider?.decide(request) ?? Effect.fail(unavailable),
+    () => policy.provider?.decide(request) ?? Effect.fail(unavailable),
   ).pipe(
     Effect.retry({
       times: 2,
@@ -754,13 +765,14 @@ function askProvider(
   );
 }
 
-/** The state of one provider request, as JSON text. */
+/** The state of one provider request, as JSON text. The agent the firewall checks for wrote an outgoing message and receives an incoming one. */
 function providerState(
-  self: AgentName,
   rules: readonly TextRule[],
   candidate: Parameters<typeof askProvider>[2],
 ) {
   const { message, window } = candidate;
+  const self =
+    candidate.direction === "outgoing" ? message.author : message.recipient;
   return JSON.stringify({
     questionEdition: textQuestionEdition,
     instructions: providerInstructions,
@@ -877,10 +889,11 @@ const unloadable = (message: string) =>
 /**
  * A message-policy file. Omitted settings take defaults: an answer below a
  * probability of 0.8 is unsure, and one request to the provider may take 15
- * seconds. Text rules need a provider, and rule ids are unique. Jev judges
- * text rules with the key `SHARNESS_DECISION_PROVIDER_KEY` holds.
+ * seconds. Text rules need a provider, and rule ids are unique. Unknown
+ * properties are rejected, so a misspelled setting cannot silently weaken the
+ * policy.
  */
-const MessagePolicy = Schema.Struct({
+const messagePolicyFile = Schema.Struct({
   rules: Schema.optionalWith(Schema.Array(TextRule), { default: () => [] }),
   decisionProvider: Schema.optional(
     Schema.Struct({ model: Schema.NonEmptyTrimmedString }),
@@ -911,36 +924,46 @@ const MessagePolicy = Schema.Struct({
 );
 
 /**
- * Resolves the configured policy during setup, returning none when unset.
- * Unknown properties are rejected, so a misspelled setting cannot silently
- * weaken the policy. A policy that names a `decisionProvider` reads its key
- * from the environment variable `SHARNESS_DECISION_PROVIDER_KEY`, even
- * without text rules of its own: a structure check can add rules for it to
- * judge. A file that cannot be read or decoded fails with a message naming
- * it.
+ * A message policy as a firewall applies it: the rules and settings of its
+ * file, and the provider that judges text rules. A file that names no
+ * `decisionProvider` gives none.
+ */
+export interface MessagePolicy
+  extends Omit<typeof messagePolicyFile.Type, "decisionProvider"> {
+  readonly provider?: DecisionProvider;
+}
+
+/**
+ * Loads the message-policy file at `path`. A file that names a
+ * `decisionProvider` gets Jev under that model, with the key the environment
+ * variable `SHARNESS_DECISION_PROVIDER_KEY` holds, even without text rules of
+ * its own: a structure check can add rules for it to judge. A file that
+ * cannot be read or decoded fails with a message naming it.
  */
 export const loadMessagePolicy = Effect.fn("loadMessagePolicy")(function* (
-  path?: string,
-) {
-  if (path === undefined) {
-    return Option.none<LoadedMessagePolicy>();
-  }
+  path: string,
+): Effect.fn.Return<
+  MessagePolicy,
+  MessagePolicyConfigurationError,
+  FileSystem.FileSystem
+> {
   const filesystem = yield* FileSystem.FileSystem;
-  const policy = yield* filesystem.readFileString(path).pipe(
-    Effect.flatMap(
-      Schema.decodeUnknown(Schema.parseJson(MessagePolicy), {
-        onExcessProperty: "error",
-      }),
-    ),
-    Effect.mapError((error) =>
-      unloadable(
-        `The message policy file ${path} is unreadable or invalid: ${error.message}`,
+  const { decisionProvider, ...policy } = yield* filesystem
+    .readFileString(path)
+    .pipe(
+      Effect.flatMap(
+        Schema.decodeUnknown(Schema.parseJson(messagePolicyFile), {
+          onExcessProperty: "error",
+        }),
       ),
-    ),
-  );
-  const setting = policy.decisionProvider;
-  if (setting === undefined) {
-    return Option.some<LoadedMessagePolicy>({ policy });
+      Effect.mapError((error) =>
+        unloadable(
+          `The message policy file ${path} is unreadable or invalid: ${error.message}`,
+        ),
+      ),
+    );
+  if (decisionProvider === undefined) {
+    return policy;
   }
   const apiKey = yield* Config.redacted(
     Config.nonEmptyString("SHARNESS_DECISION_PROVIDER_KEY"),
@@ -951,10 +974,10 @@ export const loadMessagePolicy = Effect.fn("loadMessagePolicy")(function* (
       ),
     ),
   );
-  return Option.some<LoadedMessagePolicy>({
-    policy,
-    provider: { model: setting.model, apiKey },
-  });
+  return {
+    ...policy,
+    provider: jevDecisionProvider({ ...decisionProvider, apiKey }),
+  };
 });
 
 /** Pairs a pending and a settled span around one check, even when it fails or is cancelled. */

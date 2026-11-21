@@ -8,7 +8,8 @@ import { createHash } from "node:crypto";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { expect, it as vitestIt } from "vitest";
-import { compileNorm, loadNorms } from "./compiler.js";
+import { compileNorm } from "./compiler.js";
+import { loadNorms } from "./index.js";
 
 const shipped = fileURLToPath(
   new URL("../../config/norms/examples/", import.meta.url),
@@ -209,7 +210,10 @@ it("loads the norm of every .lisp document directly in a directory, and nothing 
 
     const loaded = yield* loadNorms(directory);
 
-    expect(loaded.map((norm) => norm.name)).toEqual(["first", "second"]);
+    expect(loaded.documents.map((norm) => norm.name)).toEqual([
+      "first",
+      "second",
+    ]);
   }).pipe(Effect.provide(NodeContext.layer)));
 
 it("refuses a directory that holds a document that does not compile or two documents of one norm", () =>

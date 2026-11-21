@@ -10,10 +10,13 @@ import {
 } from "@modelcontextprotocol/client";
 import { createMcpHandler } from "@modelcontextprotocol/server";
 import { Effect, Schema } from "effect";
-import type { TestPolicy } from "./decision-provider.js";
-import { type Firewall, makeFirewall } from "../../src/firewall.js";
+import type { HeldNorms } from "../../src/norms/index.js";
+import {
+  type Firewall,
+  makeFirewall,
+  type MessagePolicy,
+} from "../../src/firewall.js";
 import { AgentName } from "../../src/messages.js";
-import { type InstalledNorms, structureCheck } from "../../src/norms/index.js";
 import { serverFactory } from "../../src/server.js";
 import { openTestDatabase } from "./database.js";
 import { callTool, type SignedIn } from "./host.js";
@@ -45,40 +48,28 @@ export const decisionState = Schema.decodeUnknownSync(
  */
 export const inProcessServer = Effect.fn("inProcessServer")(function* (
   options: {
-    readonly policy?: TestPolicy;
-    readonly norms?: InstalledNorms;
+    readonly policy?: MessagePolicy;
+    readonly norms?: HeldNorms;
     readonly notice?: string;
     readonly historyLimit?: number;
     readonly firewall?: Partial<Firewall>;
   } = {},
 ) {
   const database = yield* openTestDatabase();
-  const { norms } = options;
   const factory = yield* serverFactory(database.url, {
     issuer,
     subject: "alice",
     name: AgentName.make("alice"),
     firewall: {
       ...makeFirewall({
-        ...(options.policy ?? {}),
-        me: AgentName.make("alice"),
-        historyLimit: options.historyLimit ?? 256,
-        ...(options.notice === undefined ? {} : { notice: options.notice }),
-        ...(norms === undefined
-          ? {}
-          : { structureCheck: structureCheck(norms) }),
+        policy: options.policy,
+        historyLimit: options.historyLimit,
+        notice: options.notice,
+        structureCheck: options.norms?.structureCheck,
       }),
       ...options.firewall,
     },
-    ...(norms === undefined
-      ? {}
-      : {
-          norms: norms.map((norm) => ({
-            name: norm.name,
-            description: norm.description,
-            document: norm.source,
-          })),
-        }),
+    norms: options.norms?.documents,
   }).pipe(Effect.orDie);
   const handler = createMcpHandler(factory);
   return {

@@ -130,9 +130,6 @@ export type Norm = typeof normSchema.Type;
 /** Reads a value as a norm, or says where it is not one. */
 export const decodeNorm = Schema.decodeUnknownEither(normSchema);
 
-/** The settings' copy of a norms directory: its compiled norms. */
-export type InstalledNorms = readonly Norm[];
-
 /**
  * One act as a message states it: its performative in `name`, the norm its
  * `:ontology` names and its fields, each with the type its text gave it.
@@ -166,11 +163,6 @@ export type SExpression =
 interface SExpressionError {
   readonly offset: number;
   readonly detail: string;
-}
-
-/** Whether the norms have English rules, which need a decision provider. */
-export function initialNormsHaveRules(installed: InstalledNorms): boolean {
-  return installed.some((norm) => norm.textRules.length > 0);
 }
 
 /**

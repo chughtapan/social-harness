@@ -18,10 +18,14 @@ export const AgentName = Schema.String.pipe(
 /** Validated nominal value decoded by {@link AgentName}. */
 export type AgentName = typeof AgentName.Type;
 
-/** A refused send names this reason. */
-export class CommunicationError extends Data.TaggedError("CommunicationError")<{
+/** A send whose text cannot be a message: it is malformed or too long. */
+class CommunicationError extends Data.TaggedError("CommunicationError")<{
   readonly reason: "content-invalid";
-}> {}
+}> {
+  override get message(): string {
+    return "send failed: the message content is invalid";
+  }
+}
 
 /**
  * One message's id: `msg_` then 32 random bytes in canonical base64url, whose
