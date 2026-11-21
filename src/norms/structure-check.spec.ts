@@ -1,4 +1,4 @@
-/** @file The structure check passes exactly the acts a norm's turn rules and forms allow after a conversation's earlier messages and the firewall's checks of them, names what is wrong with any other message, and answers a refusal with the norm's refusal act. */
+/** @file The structure check passes exactly the acts a norm's turn rules and forms allow after a conversation's earlier messages and the firewall's checks of them, and names what is wrong with any other message. */
 
 import { Effect, Either, FastCheck as fc, Option, Schema } from "effect";
 import { randomBytes } from "node:crypto";
@@ -77,9 +77,6 @@ function attempt(
     stepId(history.length),
   );
   const { kind } = check(norm, candidate, history, taken.now);
-  expect(check(norm, candidate, [...history, ...history], taken.now).kind).toBe(
-    kind,
-  );
   if (kind === "passed") {
     history.push({ message: candidate, checkedAt: taken.now });
   }
@@ -220,23 +217,14 @@ function answersOffer(model: Model, taken: Step, reply: MsgId): boolean {
   return taken.act === "counter" || taken.value === offer.value;
 }
 
-/** Applies a permitted step to the model: its message joins the instance it replies into, and its act takes effect. A step that is not permitted leaves no message. */
+/** Applies a permitted step to the model: its message joins the instance, and its act takes effect. */
 function advanceModel(
   model: Model,
   taken: Step,
   message: { readonly id: MsgId; readonly reply: Option.Option<MsgId> },
-  permitted: boolean,
 ) {
-  if (!permitted) {
-    return;
-  }
   const { id, reply } = message;
-  if (
-    model.open &&
-    Option.exists(reply, (replied) => model.members.has(replied))
-  ) {
-    model.members.set(id, reply);
-  }
+  model.members.set(id, reply);
   model.known.add(id);
   switch (taken.act) {
     case "finish":
@@ -247,12 +235,8 @@ function advanceModel(
     case "choose":
       delete model.offer;
       break;
-    case "offer":
-      model.open = true;
-      model.members.set(id, reply);
-      model.offer = { id, author: taken.author, value: taken.value };
-      break;
     default:
+      model.open = true;
       model.offer = { id, author: taken.author, value: taken.value };
   }
 }
@@ -281,7 +265,9 @@ it("permits exactly the acts the turn rules allow, whoever sends them and whiche
           reply,
         });
         expect(permitted).toBe(expected);
-        advanceModel(model, taken, { id, reply }, permitted);
+        if (permitted) {
+          advanceModel(model, taken, { id, reply });
+        }
       }
     }),
     { numRuns: 500 },

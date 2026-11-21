@@ -65,7 +65,7 @@ interface FittedAct extends HeldAct {
  * The structure check of a firewall whose agent holds `installed`. It replays
  * the earlier messages to find the instance in progress,
  * then reads the message as an act of that instance or, when none is, of the
- * norm it names. An act that fits passes with its norm's English rules for
+ * norm it names. An act that fits passes with its norm's text rules for
  * it. Any other message is refused under a rule named for the norm of the
  * instance in progress and the stage that failed. Without norms every message
  * passes.
@@ -127,7 +127,7 @@ function refusal(
 }
 
 /**
- * The pass of an act that fits: the English rules its norm gives the act and
+ * The pass of an act that fits: the text rules its norm gives the act and
  * every act, and what the decision provider reads of the instance.
  */
 function pass(view: ProtocolView, { act, norm, form }: FittedAct): Result {
@@ -162,23 +162,13 @@ function projectProtocol(
 ): ProtocolView {
   const referenceActs = new Map<string, string | undefined>();
   let view: ProtocolView = { referenceActs };
-  const seen = new Set<string>();
   for (const entry of earlier) {
-    const { message } = entry;
-    const key = `${message.author}/${message.msgId}`;
-    if (seen.has(key)) {
-      continue;
-    }
-    seen.add(key);
     const act = replayed(view, installed, entry);
     if (act !== undefined) {
       view = advance(view, act);
     }
-    view = retainInteractionReference(view, message);
-    referenceActs.set(
-      message.msgId,
-      act?.act.name ?? referenceActs.get(message.msgId),
-    );
+    view = retainInteractionReference(view, entry.message);
+    referenceActs.set(entry.message.msgId, act?.act.name);
   }
   return view;
 }
@@ -238,18 +228,21 @@ function fitAct(
   });
 }
 
-/** Why the view does not permit `act`, stated by `message`, next. */
+/**
+ * Why the view does not permit the fitted act, which `message` states, next.
+ * A continuation that replies outside the instance, comes before its delay
+ * or breaks a relation gets the one refusal of an act that may not follow.
+ */
 function checkProtocol(
   view: ProtocolView,
-  { act, norm, form }: FittedAct,
+  fitted: FittedAct,
   message: Message,
   now: number,
 ): Either.Either<void, NormProblem> {
+  const { act, norm, form } = fitted;
   const invalid = invalidTransition(view, norm, message, act);
-  const orInvalid = (problem: NormProblem) =>
-    problem.reason === "rule-violation" ? invalid : problem;
   return Either.gen(function* () {
-    yield* checkReference(view, form, message, invalid);
+    yield* checkReference(view, form, message);
     const instance = view.instance;
     if (instance === undefined) {
       return yield* form.starts ? Either.void : Either.left(invalid);
@@ -260,6 +253,9 @@ function checkProtocol(
     const author = message.author;
     const role = roleOf(instance, author);
     const ancestry = referenceAncestry(instance, message.replyToMsgId);
+    if (ancestry.size === 0) {
+      return yield* Either.left(invalid);
+    }
     const anchor =
       "recipient" in form.by
         ? instance.facts.get(form.by.recipient.fact)
@@ -281,12 +277,9 @@ function checkProtocol(
       return yield* Either.left(invalid);
     }
     if (form.delay !== undefined) {
-      yield* Either.mapLeft(checkDelay(instance, form.delay, now), orInvalid);
+      yield* checkDelay(instance, form.delay, now, invalid);
     }
-    return yield* Either.mapLeft(
-      checkRelations(instance, form, act, ancestry),
-      orInvalid,
-    );
+    return yield* checkRelations(instance, fitted, ancestry, invalid);
   });
 }
 
@@ -343,14 +336,12 @@ function invalidTransition(
   return violation(`${act.name} is not valid${after} for ${norm.name}.`);
 }
 
-/** Whether the message's reply reference suits `form`; `invalid` refuses a continuation that replies outside the instance. */
+/** Whether the message's reply reference suits `form`: an opening may omit it, and a reference names a message of the conversation. */
 function checkReference(
   view: ProtocolView,
   form: MessageForm,
   { replyToMsgId }: Message,
-  invalid: NormProblem,
 ): Either.Either<void, NormProblem> {
-  const instance = view.instance;
   if (replyToMsgId === undefined) {
     return form.starts
       ? Either.void
@@ -361,28 +352,21 @@ function checkReference(
           ),
         );
   }
-  const known =
-    view.referenceActs.has(replyToMsgId) ||
-    instance?.references.has(replyToMsgId);
-  if (!known) {
-    return Either.left(
-      violation(
-        "replyToMsgId does not identify a preceding message in this conversation.",
-        "replyToMsgId",
-      ),
-    );
-  }
-  return !form.starts &&
-    instance !== undefined &&
-    !instance.references.has(replyToMsgId)
-    ? Either.left(invalid)
-    : Either.void;
+  return view.referenceActs.has(replyToMsgId)
+    ? Either.void
+    : Either.left(
+        violation(
+          "replyToMsgId does not identify a preceding message in this conversation.",
+          "replyToMsgId",
+        ),
+      );
 }
 
 function checkDelay(
   instance: Instance,
   delay: NonNullable<MessageForm["delay"]>,
   now: number,
+  invalid: NormProblem,
 ): Either.Either<void, NormProblem> {
   const permittedAt = permittedTime(instance, delay);
   if (permittedAt === undefined) {
@@ -390,35 +374,21 @@ function checkDelay(
       unavailable("The declared delay has no retained numeric anchor."),
     );
   }
-  return now < permittedAt
-    ? Either.left(
-        violation(
-          `This act is permitted at or after ${permittedAt} Unix milliseconds. The host may schedule the next attempt.`,
-        ),
-      )
-    : Either.void;
+  return now < permittedAt ? Either.left(invalid) : Either.void;
 }
 
 function checkRelations(
   instance: Instance,
-  form: MessageForm,
-  act: Act,
+  { form, act }: FittedAct,
   ancestry: ReadonlySet<string>,
+  invalid: NormProblem,
 ): Either.Either<void, NormProblem> {
   return Either.gen(function* () {
-    for (const relation of form.relations) {
-      const expected = yield* sourceValue(instance, relation.source, ancestry);
-      const actual = act.fields[relation.field];
-      if (
-        actual === undefined ||
-        !related(relation.operator, actual, expected)
-      ) {
-        return yield* Either.left(
-          violation(
-            `The field does not satisfy its declared ${relation.operator} relation to preceding messages.`,
-            relation.field,
-          ),
-        );
+    for (const { field, operator, source } of form.relations) {
+      const expected = yield* sourceValue(instance, source, ancestry, invalid);
+      const actual = act.fields[field];
+      if (actual === undefined || !related(operator, actual, expected)) {
+        return yield* Either.left(invalid);
       }
     }
   });
@@ -529,14 +499,11 @@ function sourceValue(
   instance: Instance,
   source: MessageForm["relations"][number]["source"],
   ancestry: ReadonlySet<string>,
+  invalid: NormProblem,
 ): Checked<Act["fields"][string]> {
   const fields = referencedAct(instance, source.act, ancestry)?.act.fields;
   if (fields === undefined) {
-    return Either.left(
-      violation(
-        "The referenced exchange does not contain the declared source act.",
-      ),
-    );
+    return Either.left(invalid);
   }
   if (source.kind === "field") {
     const value = fields[source.field];
@@ -556,7 +523,7 @@ function sourceValue(
   const keys =
     source.kind === "field-values"
       ? Either.right(present(source.fields))
-      : sourceValue(instance, source.keys, ancestry);
+      : sourceValue(instance, source.keys, ancestry, invalid);
   return Either.flatMap(keys, (selected) => {
     if (typeof selected !== "object") {
       return Either.left(
