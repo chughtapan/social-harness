@@ -384,34 +384,39 @@ it.each(directions)(
     }),
 );
 
-it.each([true, false])(
-  "with no rules, holds a message as unresolved evidence exactly when its earlier messages exceed the evidence byte limit (incoming: %s)",
-  (isIncoming) =>
-    Effect.gen(function* () {
-      const large = {
-        message: yield* Message.create({
-          author: bob,
-          recipient: alice,
-          text: "x".repeat(32_000),
-        }),
-        checkedAt: 1,
-      };
-      const direction = isIncoming ? "incoming" : "outgoing";
-      const within = yield* check(direction, {
-        rules: [],
-        earlier: Array.from({ length: 8 }, () => large),
-      });
-      const beyond = yield* check(direction, {
-        rules: [],
-        earlier: Array.from({ length: 80 }, () => large),
-      });
-      expect(within.kind).toBe("allowed");
-      expect(beyond).toMatchObject({
-        kind: "refused",
-        reason: "unresolved-evidence",
-      });
-    }),
-);
+it("shows the provider only the latest earlier messages that fit its byte limit, says it left earlier ones out, and still decides", () =>
+  Effect.gen(function* () {
+    const requests: DecisionRequest[] = [];
+    const large = {
+      message: yield* Message.create({
+        author: bob,
+        recipient: alice,
+        text: "x".repeat(32_000),
+      }),
+      checkedAt: 1,
+    };
+
+    const result = yield* check("incoming", {
+      rules: [proposal],
+      provider: answering({}, requests),
+      earlier: Array.from({ length: 80 }, () => large),
+    });
+
+    const [shown] = requests.map(({ state }) =>
+      Schema.decodeUnknownSync(
+        Schema.parseJson(
+          Schema.Struct({
+            history: Schema.Array(Schema.Unknown),
+            earlierHistoryOmitted: Schema.Boolean,
+          }),
+        ),
+      )(state),
+    );
+    expect(result.kind).toBe("allowed");
+    expect(shown?.history.length).toBeGreaterThan(0);
+    expect(shown?.history.length).toBeLessThan(80);
+    expect(shown?.earlierHistoryOmitted).toBe(true);
+  }));
 
 it.prop(
   "makes the check unavailable exactly when the provider answers after the request deadline",

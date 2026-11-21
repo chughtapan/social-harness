@@ -177,9 +177,8 @@ interface Refusal extends Pick<CheckRecord, "decidedBy" | "checkedRuleIds"> {
  * messages; that check's refusal refuses the message. The text rules that
  * apply to the message's direction then judge it: the owner's rules and those
  * the structure check gives it. Each answer complies, violates or is unsure.
- * A violation refuses. An unsure answer refuses as unresolved evidence, and
- * so does history cut at the byte limit. A provider that gives no usable
- * answer makes the check unavailable. A refusal of a message the structure
+ * A violation refuses, and an unsure answer refuses as unresolved evidence.
+ * A provider that gives no usable answer makes the check unavailable. A refusal of a message the structure
  * check passed carries that check's detail.
  */
 export function makeFirewall(applies: {
@@ -224,7 +223,7 @@ export function makeFirewall(applies: {
         historyLimit: applies.historyLimit,
         protocol: structure?.protocol,
       }).pipe(
-        Effect.map((asked) => conclude(checked, asked, structure?.detail)),
+        Effect.map((answers) => conclude(checked, answers, structure?.detail)),
         Effect.catchTag("DecisionProviderError", () =>
           Effect.succeed(unavailable(structure?.detail)),
         ),
@@ -237,26 +236,23 @@ export function makeFirewall(applies: {
 }
 
 /**
- * What a check concludes from the provider's answers. A violation refuses.
- * An unsure answer refuses the message as unresolved evidence, and so does a
- * `gap`: history cut at the byte limit. Otherwise the message is allowed.
- * `detail` is what the structure check gave of the message it passed.
+ * What a check concludes from the provider's answers. A violation refuses,
+ * and an unsure answer refuses the message as unresolved evidence. Otherwise
+ * the message is allowed. `detail` is what the structure check gave of the
+ * message it passed.
  */
 function conclude(
   checked: Checked,
-  asked: {
-    readonly answers: ReadonlyArray<Answer<TextRule>>;
-    readonly gap: boolean;
-  },
+  answers: ReadonlyArray<Answer<TextRule>>,
   detail?: StructureDetail,
 ): Allowed | Refused {
-  const checkedRuleIds = asked.answers.map(({ rule }) => rule.id);
-  const violated = asked.answers.filter((answer) => answer.violates);
+  const checkedRuleIds = answers.map(({ rule }) => rule.id);
+  const violated = answers.filter((answer) => answer.violates);
   const deciding =
     violated.length === 0
-      ? asked.answers.filter((answer) => answer.unsure)
+      ? answers.filter((answer) => answer.unsure)
       : violated;
-  if (deciding.length === 0 && !asked.gap) {
+  if (deciding.length === 0) {
     return {
       kind: "allowed",
       record: recordOf(checked, mintCheckId(), {

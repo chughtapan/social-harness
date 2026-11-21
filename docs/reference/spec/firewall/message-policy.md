@@ -37,12 +37,11 @@ rules. A reject or hold judgment refuses the message, whichever agent sent
 it: the send fails. Findings combine in priority order:
 
 1. A settled rule violation rejects.
-2. Required missing evidence, unavailable checks or an unsure answer hold.
+2. An unavailable check or an unsure answer holds.
 3. Otherwise, allow.
 
 Every active rule needs a finding. A pass cannot erase another rule's violation.
-Checks use the captured message and evidence and cannot alter them. An empty
-policy still validates required evidence.
+Checks use the captured message and evidence and cannot alter them.
 
 A check without a valid answer for every rule is unavailable.
 Cancellation produces no decision.
@@ -67,8 +66,7 @@ than the other answer's.
 | Unsure | Held as unresolved evidence and refused with the rule's feedback, so its sender can revise it |
 
 Settled violations retain
-their effect. Invalid output or provider failure is unavailable; required
-missing evidence still holds. Accepting nonempty rule text promises no
+their effect. Invalid output or provider failure is unavailable. Accepting nonempty rule text promises no
 accuracy of its checks in any language.
 
 ## Incoming messages
@@ -103,10 +101,9 @@ checked recipient, text and message identity.
 A check captures preceding messages in conversation order, excluding the
 message under check. The limit defaults to 256 entries, configurable from 1–1024.
 Outgoing checks use the destination conversation; other conversations and host
-private context are excluded. `earlierHistoryOmitted` alone causes no hold.
-Exceeding the
-history window's separate 2 MiB budget creates an evidence gap. Required
-missing evidence holds. Installed structured
+private context are excluded. The window also holds at most 2 MiB of
+messages, the latest that fit. `earlierHistoryOmitted` tells the provider that
+earlier messages were left out, and causes no hold. Installed structured
 contracts separately receive the complete preceding history with the time of
 each local check, outside the bounded history window.
 

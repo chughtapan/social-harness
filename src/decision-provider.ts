@@ -134,27 +134,20 @@ const DEFAULT_HISTORY_LIMIT = 256;
  * asked about. A transient failure is asked again twice, and all attempts
  * share the time limit. An answer is unsure below the minimum probability or
  * when another choice is more probable. A question left without one of its
- * choices fails the request. `gap` says the window was cut at the byte limit.
+ * choices fails the request.
  */
 export function askProvider<Rule extends RuleText>(
   judge: Judge,
   rules: readonly Rule[],
   candidate: Candidate,
-): Effect.Effect<
-  { readonly answers: ReadonlyArray<Answer<Rule>>; readonly gap: boolean },
-  DecisionProviderError
-> {
+): Effect.Effect<ReadonlyArray<Answer<Rule>>, DecisionProviderError> {
   const { settings } = judge;
   const unavailable = new DecisionProviderError({ transient: false });
-  const window = historyWindow(
-    candidate.earlier,
-    candidate.historyLimit ?? DEFAULT_HISTORY_LIMIT,
-  );
   if (rules.length === 0) {
-    return Effect.succeed({ answers: [], gap: window.gap });
+    return Effect.succeed([]);
   }
   const request = {
-    state: providerState(rules, candidate, window),
+    state: providerState(rules, candidate),
     questions: Object.fromEntries(
       rules.map((rule, index) => [
         `q${index}`,
@@ -198,7 +191,7 @@ export function askProvider<Rule extends RuleText>(
         ];
       });
       return answers.length === rules.length
-        ? Effect.succeed({ answers, gap: window.gap })
+        ? Effect.succeed(answers)
         : Effect.fail(unavailable);
     }),
     Effect.withSpan("TextPolicy.check"),
@@ -279,12 +272,12 @@ export function jevDecisionProvider(options: {
 }
 
 /** The state of one provider request, as JSON text. The agent the firewall checks for wrote an outgoing message and receives an incoming one. */
-function providerState(
-  rules: readonly RuleText[],
-  candidate: Candidate,
-  window: ReturnType<typeof historyWindow>,
-) {
+function providerState(rules: readonly RuleText[], candidate: Candidate) {
   const { message } = candidate;
+  const window = historyWindow(
+    candidate.earlier,
+    candidate.historyLimit ?? DEFAULT_HISTORY_LIMIT,
+  );
   const self =
     candidate.direction === "outgoing" ? message.author : message.recipient;
   return JSON.stringify({
@@ -297,9 +290,6 @@ function providerState(
     history: window.history.map((entry) => assessmentText(entry.message)),
     earlierHistoryOmitted: window.earlierHistoryOmitted,
     now: candidate.now,
-    gaps: window.gap
-      ? ["The preceding history exceeds the evidence byte limit."]
-      : [],
     protocol: candidate.protocol,
   });
 }
@@ -321,9 +311,8 @@ const MAXIMUM_RUNTIME_ITEM_BYTES = 2 * 1024 * 1024;
 
 /**
  * The provider's window of the earlier messages: the latest `historyLimit`
- * of them within the byte limit of one runtime item. `gap` says the byte
- * limit cut the window; older messages outside the limit of entries are not
- * a gap.
+ * of them that fit the byte limit of one runtime item.
+ * `earlierHistoryOmitted` says the window leaves some earlier message out.
  */
 function historyWindow(earlier: readonly Earlier[], historyLimit: number) {
   const latest = earlier.slice(-historyLimit);
@@ -339,6 +328,5 @@ function historyWindow(earlier: readonly Earlier[], historyLimit: number) {
   return {
     history: latest.slice(latest.length - kept),
     earlierHistoryOmitted: kept < earlier.length,
-    gap: kept < latest.length,
   };
 }
