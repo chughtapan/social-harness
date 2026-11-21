@@ -99,15 +99,17 @@ A norm document and a message's text are both sequences of these tokens:
 | String | A JSON string literal: text in double quotes with JSON escapes, on one line. It must decode to well-formed Unicode. |
 | Symbol | Any other run of characters that holds no whitespace, parenthesis, `;` or `"`. |
 
-Symbols divide by their form:
+A symbol has one of these forms, or none of them:
 
 | Symbol | Form |
 | --- | --- |
 | Name | A lowercase letter followed by lowercase letters, digits or hyphens, 64 characters at most. Norms, performatives, fields and facts have names. |
-| Keyword | `:` followed by the name of an attribute or a field, such as `:max-items`. |
-| Number | A JSON number, such as `3`, `-2` or `1.5e3`. |
-| Truth value | `true` or `false`. |
+| Keyword | `:` followed by a name, such as `:max-items`. |
+| Number | A JSON number, such as `3`, `-2` or `1.5e3`. A number is whole when its value has no fractional part, so `10`, `1e1` and `2.0` are whole. |
+| Truth value | `true` or `false`, which are also names. |
 
+`Tue` and `0x2` are symbols of no form. Two texts are equal when they are the
+same sequence of code points, and two numbers when they have the same value.
 Nothing in a document or a message is evaluated.
 
 ## Norm documents
@@ -159,16 +161,21 @@ source     = "(" , "previous" , ( name | "(" , "fact" , name , ")" ) , name , ")
 
 The grammar leaves these rules to prose:
 
-- The name of a declaration follows its first word. After it, attributes
-  come in any order, and in a `content` declaration they may stand between
-  fields and relations.
-- A declaration takes each attribute at most once, and an attribute it does
-  not take is an error. A misspelled attribute therefore fails the document.
-- `:by` and `:type` are required. `:after`, `:delay` and `:unit` come
-  together or not at all.
-- A field takes only the bounds of its type: `:min-length` and `:max-length`
-  for a string, `:minimum` and `:maximum` for an integer, `:min-items` and
-  `:max-items` for a list.
+1. The name of a declaration follows its first word. After it, attributes
+   come in any order, and in a `content` declaration they may stand between
+   fields and relations.
+2. A declaration takes each attribute at most once, and no attribute but
+   those the grammar gives it. A misspelled attribute is therefore an error.
+3. `:by` and `:type` are required. `:after`, `:delay` and `:unit` come
+   together or not at all.
+4. A field takes only the bounds of its type: `:min-length` and `:max-length`
+   for a string, `:minimum` and `:maximum` for an integer, `:min-items` and
+   `:max-items` for a list.
+
+A role may be repeated in a sender list without effect, and a list of facts
+may be empty, which is the same as leaving the attribute out. A text that
+does not match the grammar and these rules is not a norm document, and does
+not compile.
 
 ## Acts
 
@@ -184,14 +191,18 @@ value     = string | symbol | "(" , { string | symbol } , ")" ;
 (offer :ontology booking :slots ("Mon 10:00-10:30 UTC" "Tue 14:00-14:30 UTC"))
 ```
 
-- Each keyword is `:` and a name, and appears at most once.
-- `:ontology` is required and names the act's norm. Every other pair is a
-  field of the act.
-- A string is text. A symbol in the form of a number is that number, and any
-  other symbol is its own text. A list holds the text of each of its items,
-  so a number inside a list is text.
-- Text outside the list, a second list, a comment, a Markdown fence or an
-  unclosed parenthesis makes the message no act.
+1. The performative is a name, and each keyword is `:` and a name.
+2. No keyword appears twice.
+3. `:ontology` is present, and its value is text that names the act's norm.
+   Every other pair is a field of the act.
+4. A string is text. A symbol in the form of a number is that number, and any
+   other symbol is its own text, whatever its form: `Tue` and `"Tue"` are the
+   same value. A list holds the text of each of its items, so a number inside
+   a list is text.
+
+A message whose text does not match the grammar and these rules is no act.
+That includes a text with anything outside the one list, such as prose, a
+second list, a comment or a Markdown fence.
 
 The message a continuation replies to is not part of the act. The sender
 supplies it as `replyToMsgId` in the
@@ -244,7 +255,7 @@ Each part of a document maps to one part of the norm:
 | `(content name …)` | A form whose `performative` is the name | |
 | `:by` | `by` | Required. |
 | `:starts`, `:ends` | `starts`, `ends` | False. |
-| `:when`, `:terminates`, `:initiates` | `when`, `terminates`, `initiates` | No facts. |
+| `:when`, `:terminates`, `:initiates` | `when`, `terminates`, `initiates` | No facts, as for an empty list. |
 | `:max` | `max` | No limit. |
 | `:after f :delay d :unit seconds` | `delay` with `fact` f and `field` d | No delay. |
 | `(field name …)` | A field | |
@@ -279,21 +290,25 @@ digest, which names the exact text both members read.
 
 ## Well-formed norms
 
-A document compiles only when the norm it denotes is well formed. The daemon
-refuses to start with a document that does not compile.
+A document compiles when it is a norm document and the norm it denotes is
+well formed. The daemon refuses to start with a document that does not
+compile. The rules read the norm, so they hold for a norm however it was
+written.
 
 1. The name of the norm, of every performative, of every field and of every
-   fact is a name. No field is named `ontology`.
+   fact is a name, which the grammar already requires of a document. No field
+   is named `ontology`.
 2. No two forms declare the same performative, and no two fields of a form
    have the same name.
 3. At least one form starts an instance.
 4. A field's lower bound is not above its upper bound. The bounds of a string
-   and of a list are nonnegative integers.
-5. `max` is a positive integer.
+   and of a list are whole numbers of zero or more. The bounds of an integer
+   are any numbers.
+5. `max` is a whole number of one or more.
 6. Every fact in a `when`, a `terminates`, a `recipient` sender, a delay or
    a fact reference is in the `initiates` of some form.
-7. A form that starts an instance names its senders by role, has no `when`,
-   no delay and no relation.
+7. A form that starts an instance names its senders by role, and has no fact
+   in `when`, no delay and no relation.
 8. For a delay, every form that initiates the delay's fact declares the
    delay's field as a required integer whose `minimum` is zero or more.
 9. For a relation, the form declares the relation's field, and every form
@@ -314,8 +329,8 @@ A norms directory must also give each norm a different name.
 The structure check judges one message at a time. Its inputs are the held
 norms, the message with its sender's role and optional `replyToMsgId`, the
 time of the check, and the conversation's stored messages, each with the
-time of its own check. Its result allows the act and names its
-[text rules](#text-rules), or refuses the message with
+time of its own check. Times are Unix milliseconds. Its result allows the act
+and names its [text rules](#text-rules), or refuses the message with
 [feedback](#refusals). A server that holds no norm allows every message.
 
 ### State of a conversation
@@ -343,8 +358,8 @@ refuses the message at the stage shown.
 | Step | The message is refused when | Stage |
 | --- | --- | --- |
 | 1 | Its text is not an [act](#acts). | Structural |
-| 2 | No instance is in progress and `:ontology` names no held norm. | Structural |
-| 3 | An instance is in progress and `:ontology` names another norm than the instance's. | Protocol |
+| 2 | No instance is in progress and `:ontology` is not the name of a held norm. | Structural |
+| 3 | An instance is in progress and `:ontology` is not the name of the instance's norm. | Protocol |
 | 4 | The norm declares no form for the performative. | Structural |
 | 5 | A required field is missing, a stated field is not declared, or a value is not of its field's type or within its bounds. The feedback names every such field. | Structural |
 | 6 | The form does not start an instance and the message has no `replyToMsgId`. | Protocol |
@@ -354,12 +369,14 @@ refuses the message at the stage shown.
 | 10 | The sender is a `recipient` sender and its fact does not hold, or the act that set it is not in the reply chain. | Protocol |
 | 11 | The sender is not one `by` permits: it lacks every listed role, or it is not the recipient of the message that set the fact. | Protocol |
 | 12 | A fact of `when` does not hold, or the instance already allowed `max` acts of this performative. | Protocol |
-| 13 | The form has a delay and the time of the check is earlier than the time the act that set the delay's fact was checked, plus as many seconds as that act's delay field says. | Protocol |
-| 14 | A relation does not hold. | Protocol |
+| 13 | The form has a delay and the time of the check is earlier than the time the act that set the delay's fact was checked, plus 1000 milliseconds for each second that act's delay field says. The delay reads the fact whether or not the reply chain holds that act. | Protocol |
+| 14 | A relation does not hold. Relations are tried in the order the form declares them. | Protocol |
 
-From step 2 on, the norm is the instance's norm when an instance is in
-progress, and the norm `:ontology` names otherwise. An opening act is judged
-by steps 1 to 8 and then step 11.
+From step 2 on, the message is judged under one norm: the instance's norm
+when an instance is in progress, and the norm `:ontology` names otherwise. An
+opening act is judged by steps 1 to 8 and then step 11. It may carry a
+`replyToMsgId` that names a known message, which changes nothing: the
+instance it opens begins with it.
 
 A field's value fits its type as follows:
 
@@ -376,18 +393,20 @@ the fact, when the chain holds it.
 
 | Operator | Holds when |
 | --- | --- |
-| `equals` | The field has exactly the earlier value. |
-| `member` | The field is one of the earlier list's items. |
-| `subset` | Every item of the field is one of the earlier list's items. |
+| `equals` | The field has exactly the earlier value: the same text, the same number, or the same items in the same order. |
+| `member` | The field is equal to one of the earlier list's items. |
+| `subset` | Every item of the field is equal to one of the earlier list's items. |
 
 A relation fails when the earlier act is not in the chain, when the act does
 not state the relation's field, or when the operator does not hold. Setting a
 fact again replaces the act a fact reference finds, so an old offer cannot
 authorize a selection after a new one.
 
-Two cases settle nothing and refuse the message as unresolved evidence, not
-as a violation: a delay whose fact does not hold, and a relation whose
-earlier act left out the source's optional field.
+Two cases settle nothing. At step 13, the delay's fact does not hold. At
+step 14, the earlier act is in the chain and left out the source's optional
+field. Each refuses the message at the protocol stage like any other failed
+step, but with the reason `unresolved-evidence`. Every other refusal on this
+page has the reason `rule-violation`.
 
 ### Effects of an allowed act
 
@@ -459,8 +478,10 @@ allowed act.
 | Protocol stage | `<norm>-protocol` | `pick is not valid after offer for booking.` |
 | A text rule | `<norm>.<performative>.<field>` | The rule's text. |
 
-In a structure check's rule id, the norm is that of the instance in
-progress, and the word `norm` when there is none: `norm-structural`.
+In a structure check's rule id, the norm is the one the message was judged
+under. For a message refused at step 1, that is the norm of the instance in
+progress. A message refused at step 1 or 2 while no instance is in progress
+was judged under no norm, and its rule is `norm-structural`.
 
 The server agent's failure also holds diagnostics: the norm, its digest, the
 performative and the field when they are known, and the stage, which is

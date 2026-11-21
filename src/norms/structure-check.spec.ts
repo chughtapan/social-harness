@@ -388,7 +388,7 @@ it("refuses an act from the member whose role may not send it, to open an instan
 
   expect(
     check(exchange, message(bob, actText("open", "exchange", { value: "x" }))),
-  ).toMatchObject({ kind: "refused", ruleId: "norm-protocol" });
+  ).toMatchObject({ kind: "refused", ruleId: "exchange-protocol" });
   expect(
     check(
       exchange,

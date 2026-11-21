@@ -168,7 +168,7 @@ holds no message content, message id or private evidence.
 | `reason` | `eligible` for an allowed message, `rule-violation` or `unresolved-evidence` for a refused one. |
 | `time` | When the check ran, in Unix milliseconds. |
 | `checkedRuleIds` | The rules the check judged. |
-| `decidedBy` | The deciding rules, each with its `feedback`. A text rule is its norm, act and field: `office-hours.request.topic`. A structure check's rule is the stage that refused, `structural` or `protocol`, after the name of the norm of the instance in progress, or after `norm` when there is none: `office-hours-protocol`. Its feedback is not saved. |
+| `decidedBy` | The deciding rules, each with its `feedback`. A text rule is its norm, act and field: `office-hours.request.topic`. A structure check's rule is the stage that refused, `structural` or `protocol`, after the name of the norm the message was judged under: `office-hours-protocol`. Its feedback is not saved. |
 
 | Reason | Deciding rules |
 | --- | --- |
