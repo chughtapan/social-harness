@@ -37,7 +37,7 @@ The settings file is a JSON document that takes these properties. Unknown proper
 | --- | --- |
 | `port` | Required integer from 1 to 65535 |
 | `host` | Required listener address |
-| `authentication` | Required: the OAuth configuration below, or `"development"` |
+| `authentication` | Required: the OAuth configuration below |
 | `serverAgent` | Required `name` and `subject` of the [server agent](./modes.md#server-agent-and-clients) |
 | `normsDirectory` | Optional [norms directory](./norms/norms.md#publishing-norms), resolved relative to the settings file. Norms that describe a string or list field need `decisionProvider` |
 | `decisionProvider` | Optional [decision provider](./firewall.md#decision-provider) that judges the norms' text rules |
@@ -52,8 +52,8 @@ OAuth authentication takes these properties:
 
 | Property | Requirement |
 | --- | --- |
-| `resource` | Canonical HTTPS URL whose path is exactly `/mcp`, without credentials, query or fragment |
-| `issuer` | HTTPS issuer URL; HTTP is accepted only for `127.0.0.1` issuer fixtures |
+| `resource` | URL of the server's `/mcp` endpoint |
+| `issuer` | Issuer URL |
 | `scope` | Required access-token scope |
 
 A request's Host header names the resource's hostname, and so does its Origin
@@ -64,19 +64,6 @@ that runs unattended presents a token the identity provider issued to it, and
 the daemon treats it like any other.
 A token is checked when its request arrives; hosts renew their
 authorization before the next request.
-
-### Development authentication
-
-`"authentication": "development"` verifies no caller. A request acts as the
-owner its bearer token names: `Authorization: Bearer alice` signs in the owner
-whose subject is `alice`, under the issuer `development`, and a request
-without a bearer token is refused. Whoever can reach the listener can act as
-any agent, the server agent included, so the daemon prints a warning at every
-start in this mode. Use it only on a machine or network you control.
-
-The daemon checks no Host header in this mode. It refuses a request that
-carries an Origin header unless the origin is on the same machine, so a site
-the operator visits cannot act through their browser.
 
 ## Firewall
 

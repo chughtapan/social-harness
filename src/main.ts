@@ -11,7 +11,15 @@
 import * as NodeSdk from "@effect/opentelemetry/NodeSdk";
 import { FileSystem } from "@effect/platform";
 import { NodeFileSystem, NodeRuntime } from "@effect/platform-node";
+import { discoverAuthorizationServerMetadata } from "@modelcontextprotocol/client";
+import {
+  createMcpExpressApp,
+  getOAuthProtectedResourceMetadataUrl,
+  mcpAuthMetadataRouter,
+  requireBearerAuth,
+} from "@modelcontextprotocol/express";
 import { toNodeHandler } from "@modelcontextprotocol/node";
+import { OAuthError, OAuthErrorCode } from "@modelcontextprotocol/server";
 import { diag, DiagConsoleLogger, DiagLogLevel } from "@opentelemetry/api";
 import { OTLPTraceExporter } from "@opentelemetry/exporter-trace-otlp-proto";
 import { BatchSpanProcessor } from "@opentelemetry/sdk-trace-base";
@@ -26,10 +34,8 @@ import {
   Schema,
   Struct,
 } from "effect";
-// eslint-disable-next-line agent-code-guard/prefer-effect-platform -- The MCP SDK's Node handler serves on a node:http server.
-import { createServer } from "node:http";
+import { createRemoteJWKSet, jwtVerify } from "jose";
 import { dirname, join, resolve } from "node:path";
-import { type Admission, admission, authentication } from "./authentication.js";
 import {
   decisionProviderSetting,
   jevDecisionProvider,
@@ -54,7 +60,11 @@ const settingsError = (message: string) => new SettingsError({ message });
 const settingsFile = Schema.Struct({
   port: Schema.Int.pipe(Schema.between(1, 65535)),
   host: Schema.NonEmptyString,
-  authentication,
+  authentication: Schema.Struct({
+    resource: Schema.URL,
+    issuer: Schema.NonEmptyString,
+    scope: Schema.NonEmptyString,
+  }),
   serverAgent: Schema.Struct({
     name: AgentName,
     subject: Schema.NonEmptyString,
@@ -146,42 +156,78 @@ const loadSettings = Effect.fn("loadSettings")(function* () {
 });
 
 /**
- * Listens on the settings' host and port. A request the admission answers
- * gets that answer, any path but `/mcp` answers 404, and every other request
- * reaches the MCP handler as the owner it is admitted as. Returns once the
- * listener accepts connections.
+ * Listens on the settings' host and port as the MCP SDK's example of an
+ * OAuth-protected server does: the SDK's Express app validates the Host and
+ * Origin headers against the resource's hostname, serves the OAuth discovery
+ * documents, and checks each request's bearer token before the MCP handler
+ * answers it at `/mcp`. A token is a JWT the issuer signed for the resource
+ * with a subject, verified against the key set the issuer's metadata names.
+ * Returns once the listener accepts connections.
  */
 const listen = Effect.fn("listen")(function* (
-  { host, port }: typeof settingsFile.Type,
-  admitted: Admission,
+  { host, port, authentication }: typeof settingsFile.Type,
   handler: McpHandler,
 ) {
-  // eslint-disable-next-line agent-code-guard/async-keyword -- The MCP SDK's Node handler takes a promise-based fetch function.
-  const fetch = async (request: Request) => {
-    const answered = admitted.answer(request);
-    if (answered !== undefined) {
-      return answered;
-    }
-    if (new URL(request.url).pathname !== "/mcp") {
-      return new Response(null, { status: 404 });
-    }
-    const authInfo = await admitted.owner(request);
-    return authInfo instanceof Response
-      ? authInfo
-      : await handler.fetch(request, { authInfo });
-  };
-  // eslint-disable-next-line @typescript-eslint/no-misused-promises -- The MCP SDK's Node handler is a request listener that returns a promise it never rejects.
-  const listener = createServer(toNodeHandler({ fetch }));
+  const { issuer, resource, scope } = authentication;
+  const metadata = yield* Effect.tryPromise(() =>
+    discoverAuthorizationServerMetadata(issuer),
+  ).pipe(Effect.orElseSucceed(() => undefined));
+  if (typeof metadata?.jwks_uri !== "string") {
+    return yield* settingsError(
+      `The OAuth issuer ${issuer} did not answer with its configuration. Check authentication.issuer and that the server can reach it.`,
+    );
+  }
+  const keys = createRemoteJWKSet(new URL(metadata.jwks_uri));
+  const bearerAuth = requireBearerAuth({
+    requiredScopes: [scope],
+    resourceMetadataUrl: getOAuthProtectedResourceMetadataUrl(resource),
+    verifier: {
+      // eslint-disable-next-line agent-code-guard/async-keyword -- The MCP SDK's authorization API is promise-based.
+      verifyAccessToken: async (token) => {
+        const signed = await jwtVerify(token, keys, {
+          issuer,
+          audience: resource.href,
+          algorithms: ["RS256"],
+        }).catch(() => undefined);
+        if (!signed?.payload.sub) {
+          throw new OAuthError(OAuthErrorCode.InvalidToken, "Invalid token");
+        }
+        const { sub, scope: granted, exp } = signed.payload;
+        return {
+          token,
+          clientId: "",
+          scopes: typeof granted === "string" ? granted.split(" ") : [],
+          expiresAt: exp,
+          extra: { issuer, subject: sub },
+        };
+      },
+    },
+  });
+  const app = createMcpExpressApp({
+    host,
+    allowedHosts: [resource.hostname],
+    allowedOrigins: [resource.hostname],
+  });
+  app.use(
+    mcpAuthMetadataRouter({
+      oauthMetadata: metadata,
+      resourceServerUrl: resource,
+      scopesSupported: [scope],
+    }),
+  );
+  const node = toNodeHandler(handler);
+  app.all("/mcp", bearerAuth, (request, response) =>
+    node(request, response, request.body),
+  );
   yield* Effect.async<undefined, SettingsError>((resume) => {
-    listener.once("error", () => {
+    app.listen(port, host, (failed) => {
       resume(
-        settingsError(
-          `The server could not listen on ${host}:${port}. Stop the process that uses the port, or set another port.`,
-        ),
+        failed === undefined
+          ? Effect.succeed(undefined)
+          : settingsError(
+              `The server could not listen on ${host}:${port}. Stop the process that uses the port, or set another port.`,
+            ),
       );
-    });
-    listener.listen(port, host, () => {
-      resume(Effect.succeed(undefined));
     });
   });
 });
@@ -195,10 +241,6 @@ const HELP_MESSAGE = [
   "SHARNESS_DECISION_PROVIDER_KEY: API key of the decision provider the settings name",
   "Standard OTEL_* variables configure telemetry.",
 ].join("\n");
-
-/** Printed at every start that verifies no caller. */
-const DEVELOPMENT_WARNING =
-  'sharnessd verifies no caller: authentication is "development", so whoever reaches this port acts as the owner its bearer token names. Do not expose it.';
 
 /** Printed for a startup failure that names no setting of its own. */
 const UNEXPLAINED_FAILURE =
@@ -262,10 +304,6 @@ const serve = Effect.gen(function* () {
   );
   const settings = yield* loadSettings();
   const { serverAgent, norms } = settings;
-  const admitted = yield* admission(settings.authentication);
-  if (settings.authentication === "development") {
-    yield* Console.error(DEVELOPMENT_WARNING);
-  }
   const server = yield* openServer(
     url,
     serverAgent.name,
@@ -277,10 +315,10 @@ const serve = Effect.gen(function* () {
   );
   const handler = yield* mcpHandler(
     server,
-    { issuer: admitted.issuer, subject: serverAgent.subject },
+    { issuer: settings.authentication.issuer, subject: serverAgent.subject },
     norms,
   );
-  yield* listen(settings, admitted, handler);
+  yield* listen(settings, handler);
   yield* Console.log(
     `sharnessd listening on http://${settings.host}:${settings.port}/mcp (package ${packageVersion})`,
   );
@@ -304,7 +342,6 @@ NodeRuntime.runMain(
   }).pipe(
     Effect.catchTag(
       "SettingsError",
-      "IssuerError",
       "DatabasePreparationError",
       ({ message }) => exitUnsuccessfully(message),
     ),
