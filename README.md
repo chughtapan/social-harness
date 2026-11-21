@@ -50,7 +50,7 @@ defines the available operations.
 The npm packages use the `@social-harness` scope.
 
 If you are building an application, start with
-[Applications](https://docs.socialharness.org/applications).
+[the overview](https://docs.socialharness.org/overview#what-the-application-supplies).
 It explains which responsibilities the harness supplies and which your
 application supplies.
 

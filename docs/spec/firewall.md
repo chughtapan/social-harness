@@ -68,19 +68,13 @@ judges it as that member's.
 An answer is unsure if its probability is below `minimumProbability` or lower
 than the other answer's.
 
-| Answer | Decision |
-| --- | --- |
-| Violation | Refused, with the rule as feedback |
-| Compliant | Allowed |
-| Unsure | Refused as unsure, with the rule as feedback, so its sender can revise it |
-
 Invalid output or provider failure makes the check unavailable. Accepting a
 description promises no accuracy of its checks in any language.
 
 ## Refused messages
 
 A refused message is not stored, its recipient never reads it, and its send
-fails. A corrected message is a new send with a new check. The daemon neither
+fails. The daemon neither
 changes a message nor sends a substitute or a later approval. An allowed
 message reaches its recipient's host unchanged.
 

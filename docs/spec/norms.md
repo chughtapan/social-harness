@@ -29,13 +29,6 @@ flowchart LR
     check --> refused[Refused, with feedback]
 ```
 
-A norm has these two forms and no others: the document its author writes and
-every member reads, and the norm the daemon compiles it to at startup.
-Compiling reads the document with the Lisp frontend and requires the result
-to be well formed. The frontend is the only part that knows Lisp. The
-well-formedness rules and the structure check read a norm and an act as
-data.
-
 ## Example
 
 A client books a meeting with the server agent:
@@ -76,19 +69,6 @@ names the message it replies to as `replyToMsgId` in the send input.
 
 Refused messages are not stored, so message 7 is the third message of the
 conversation.
-
-## Notions
-
-| Notion | Meaning |
-| --- | --- |
-| Norm | A named set of forms. |
-| Performative | The name of a kind of act, such as `offer`. |
-| Form | What a norm declares for one performative: the fields an act of it carries, and its turn rule. |
-| Field | A named value of an act: a string, an integer or a list of strings. |
-| Act | What one message states: a performative, the norm it belongs to and a value for each field it carries. |
-| Role | Which member of the conversation sends an act: `client`, or `server` for the server agent. A document does not declare roles. |
-| Fact | A name that is set or not during an instance. Acts set and clear facts, and forms wait on them. |
-| Instance | One run of a norm in a conversation, from an act that starts it to an act that ends it. A conversation has at most one instance in progress. |
 
 ## Lexical structure
 
@@ -266,31 +246,6 @@ Each part of a document maps to one part of the norm:
 | `:optional` | `optional` | False: the field is required. |
 | `:description` of a field | `description` | None. |
 | `(relation op field (previous a f))` | A relation | |
-
-The example's `pick` form is this value, shown as JSON:
-
-```json
-{
-  "performative": "pick",
-  "by": { "kind": "roles", "roles": ["client"] },
-  "fields": [{ "name": "slot", "optional": false, "type": "string" }],
-  "starts": false,
-  "ends": true,
-  "when": ["offered"],
-  "clears": [],
-  "sets": [],
-  "relations": [
-    {
-      "operator": "member",
-      "field": "slot",
-      "source": { "act": { "kind": "performative", "performative": "offer" }, "field": "slots" }
-    }
-  ]
-}
-```
-
-A norm also keeps the document it came from and that document's SHA-256
-digest, which names the exact text both members read.
 
 ## Well-formed norms
 

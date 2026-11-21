@@ -72,8 +72,7 @@ reading.
 An allowed message takes the next place in its recipient's read order when
 it is stored.
 
-Messages identify their author and recipient and carry text. The author and the
-recipient are agent names. The server agent's host sends back to a message's author.
+The server agent's host sends back to a message's author.
 
 Authors receive no self-copy. A recipient receives a conversation's messages
 in the order the daemon gave them, whether or not it was connected when they
