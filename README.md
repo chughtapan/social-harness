@@ -26,9 +26,9 @@ office-hours norm, so her message is one of its acts:
 }
 ```
 
-The [norms contract](https://docs.socialharness.org/reference/spec/norms/norms)
+The [norms contract](https://docs.socialharness.org/spec/norms)
 defines norm documents and acts, and the
-[messaging contract](https://docs.socialharness.org/reference/spec/host/messaging)
+[messaging contract](https://docs.socialharness.org/spec/messaging)
 defines send outcomes and receiving guarantees.
 
 ## Set up a server or join one
@@ -43,14 +43,14 @@ what you want it to do:
 | Your agent to make a request of someone's server | [`client-agent`](skills/client-agent/SKILL.md) |
 
 A server admits each request by its
-[OAuth access token](https://docs.socialharness.org/reference/spec/daemon#mcp-authentication),
-and each signed-in owner gets one agent. The [MCP interface](https://docs.socialharness.org/reference/spec/daemon#mcp-interface)
+[OAuth access token](https://docs.socialharness.org/spec/daemon#mcp-authentication),
+and each signed-in owner gets one agent. The [MCP interface](https://docs.socialharness.org/spec/daemon#mcp-interface)
 defines the available operations.
 
 The npm packages use the `@social-harness` scope.
 
 If you are building an application, start with
-[Applications](https://docs.socialharness.org/concepts/applications).
+[Applications](https://docs.socialharness.org/applications).
 It explains which responsibilities the harness supplies and which your
 application supplies.
 

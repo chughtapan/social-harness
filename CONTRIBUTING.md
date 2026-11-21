@@ -7,7 +7,6 @@ Set up a Social Harness checkout, verify your change, and submit it for review.
 - A local checkout of [the repository](https://github.com/social-harness/social-harness).
 - The Node.js version in `.node-version` and the pnpm version in
   `package.json`. With Corepack, `corepack enable` selects the package manager.
-- The root `AGENTS.md` and instructions for the package you are changing.
 - A PostgreSQL server for the tests, with `SHARNESS_PG_TEST_URL` set to a
   login on it that can create schemas and roles. Each test creates a schema
   of its own and drops it afterward. For example:
@@ -38,17 +37,13 @@ Branch from `main` and keep one coherent change in the pull request, including
 its tests and documentation. Follow the repository's
 [conventions](AGENTS.md).
 
-The [constitution](docs/reference/constitution.md) and
-[specifications](docs/reference/spec/index.md) define the public contracts. Reconcile
+The [constitution](docs/constitution.md) and
+[specifications](docs/spec/) define the public contracts. Reconcile
 an interface change with its specification before implementation.
 
 ## Before submitting a PR
 
-Build, run the affected tests, and check lint and formatting:
-
-```bash
-pnpm build
-```
+Build as above, run the affected tests, and check lint and formatting:
 
 ```bash
 pnpm test:affected
@@ -88,46 +83,18 @@ Every daemon keeps its agents on the PostgreSQL server that
 `SHARNESS_PG_TEST_URL` names. Each scenario also creates a restricted login
 for its daemon, and removes it afterward.
 
-## Architecture checks
-
-`pnpm lint` includes the package architecture checks. To run them separately:
-
-```bash
-pnpm arch:check
-```
-
-Analysis exits with status 0 when it succeeds, 1 for findings, or 2 when it
-cannot analyze a project. The root package's hand-maintained
-`safer-architecture.config.json` owns its budgets, domains, and entrypoints.
-Explain changes to those constraints or `safer-arch-ignore` directives in the
-PR description so reviewers can assess them.
-
-## Container images
-
-CI builds every image a release publishes. See the
-[image contract](docs/reference/spec/releases.md#service-images) for published names,
-architectures, and signature requirements.
-
 ## Documentation
 
-Choose a document's home and review its prose with the
-[writing guide](.agents/skills/docs/SKILL.md).
-Edit hand-written pages at their source. Shared site values live in
-`docs/docs.json`.
-
-| Command | Result |
-| --- | --- |
-| `pnpm docs:dev` | Preview the Mintlify site locally. |
-| `pnpm docs:open` | Preview the site and open it in a browser. |
-| `pnpm docs:check` | Check internal site links. |
+Review a document's prose with the
+[writing guide](.agents/skills/docs/SKILL.md). `pnpm docs:dev` previews the
+Mintlify site locally.
 
 ## Open the pull request
 
 Open against `main`. Explain the problem, the resulting behavior, and which
-checks ran. Link the issue when one exists. Obtain independent review and
-resolve material findings before merging.
+checks ran. Link the issue when one exists.
 
 For a vulnerability, use the
 [security reporting procedure](SECURITY.md).
 Maintainer release behavior is defined in
-[Publication and versions](docs/reference/spec/releases.md#publication-and-versions).
+[Publication and versions](docs/spec/releases.md#publication-and-versions).

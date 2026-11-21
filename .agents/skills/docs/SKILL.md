@@ -47,7 +47,7 @@ orient a reference reader. Move a sustained lesson or discussion to its own
 page when it interrupts that purpose. Create pages for actual needs rather
 than four pages for every feature.
 
-The site uses `concepts/` for explanations. Setup instructions live in `skills/`, for an agent to follow.
+Setup instructions live in `skills/`, for an agent to follow.
 
 Choose a reader as well as a document type. Application developers need to
 know which collaboration responsibilities the harness supplies and which they
@@ -415,7 +415,7 @@ hold advanced material. Reserve warnings for data loss or security. Include
 notes and follow-up links only when they add useful context.
 
 Hand-written `.mdx` pages use root-relative site links for content the site
-hosts. The `docs/reference/spec/*.md` pages also serve GitHub readers and can use relative
+hosts. The `docs/spec/*.md` pages also serve GitHub readers and can use relative
 file links. Choose the folder from the
 [reader's purpose](#choose-the-readers-purpose), and use the same reader purposes
 in site navigation. When a page moves, update repository links and code

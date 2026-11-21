@@ -15,5 +15,5 @@ Resolves #
 
 ## Contracts
 
-- [ ] A change to a public contract updates its page under `docs/reference/spec/`.
+- [ ] A change to a public contract updates its page under `docs/spec/`.
 - [ ] The title says what changed for a user; release notes are built from it.

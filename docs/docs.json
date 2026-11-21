@@ -16,33 +16,23 @@
           {
             "group": "Start here",
             "pages": [
-              "concepts/overview"
-            ]
-          },
-          {
-            "group": "Concepts",
-            "pages": [
-              "concepts/applications"
+              "overview",
+              "applications"
             ]
           },
           {
             "group": "Reference",
             "pages": [
-              "reference/constitution",
+              "constitution",
               {
                 "group": "Specifications",
                 "pages": [
-                  "reference/spec/index",
-                  "reference/spec/vocabulary",
-                  "reference/spec/host/messaging",
-                  "reference/spec/host/receiving",
-                  "reference/spec/daemon",
-                  "reference/spec/firewall",
-                  "reference/spec/norms/norms",
-                  "reference/spec/identity/identity-and-attribution",
-                  "reference/spec/modes",
-                  "reference/spec/package-boundaries",
-                  "reference/spec/releases"
+                  "spec/vocabulary",
+                  "spec/messaging",
+                  "spec/daemon",
+                  "spec/firewall",
+                  "spec/norms",
+                  "spec/releases"
                 ]
               }
             ]
@@ -70,8 +60,5 @@
     "socials": {
       "github": "https://github.com/social-harness/social-harness"
     }
-  },
-  "variables": {
-    "node-version-range": "22.19.0"
   }
 }
