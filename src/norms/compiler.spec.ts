@@ -86,7 +86,7 @@ vitestIt(
       fc.property(fields, (declared) => {
         const source = document(declared);
         const norm = Either.getOrThrow(compileNorm(source));
-        const open = norm.forms.find((form) => form.act === "open");
+        const open = norm.forms.find((form) => form.performative === "open");
         expect(norm.source).toBe(source);
         expect(norm.digest).toBe(
           createHash("sha256").update(source, "utf8").digest("hex"),

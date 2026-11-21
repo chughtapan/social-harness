@@ -6,6 +6,7 @@ import { expect, it } from "vitest";
 import type { CheckedMessage } from "../firewall.js";
 import { AgentName, Message, MsgId } from "../messages.js";
 import { compileNorm } from "./compiler.js";
+import { readAct } from "./lisp.js";
 import { structureCheck } from "./structure-check.js";
 
 /** The client of every conversation here. */
@@ -109,7 +110,7 @@ function check(
   now = 0,
 ) {
   return Effect.runSync(
-    structureCheck([norm])(
+    structureCheck([norm], readAct)(
       candidate.author === alice ? "client" : "server",
       candidate,
       history,

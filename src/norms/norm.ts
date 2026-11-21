@@ -1,103 +1,140 @@
 /**
- * @file A norm as compiled: the form and the turn rules of each of its acts.
- * A message is read as one act, written as parenthesized data, and the act is
- * fitted to the form its norm declares for it.
+ * @file The norm IR: a norm as the data a frontend produces and the
+ * structure check runs over. A norm is a set of forms. Each form declares
+ * one performative: the fields an act of it carries, which member may send
+ * it, the facts that must hold before it, and the facts it sets and clears.
+ * An act is what one message states: a performative, the norm it belongs to
+ * and a value for each field it carries. Every value here is plain data, so
+ * a norm prints as JSON.
  */
 
-import { Either, Schema } from "effect";
-import { type Message, wellFormedString } from "../messages.js";
-
-const name = Schema.String.pipe(Schema.pattern(/^[a-z][a-z0-9-]{0,63}$/u));
-const names = Schema.Array(name);
-const actReference = Schema.Union(name, Schema.Struct({ fact: name }));
-
-const bound = Schema.optionalWith(Schema.Number.pipe(Schema.finite()), {
-  exact: true,
-});
-
-/** What every field carries. A description says what the field holds, and a decision provider judges the text of a string or list field against it. */
-const described = {
-  name,
-  optional: Schema.Boolean,
-  description: Schema.optionalWith(Schema.String, { exact: true }),
-};
+import type { Role } from "../messages.js";
 
 /**
- * One field of a form: a string, an integer or a list of nonempty strings,
- * with its bounds. An act must state it unless it is optional.
+ * One norm. `source` is the document it was compiled from and `digest` the
+ * SHA-256 of that document, which names the exact text both members read.
  */
-const fieldSchema = Schema.Union(
-  Schema.Struct({
-    ...described,
-    type: Schema.Literal("string"),
-    minLength: bound,
-    maxLength: bound,
-  }),
-  Schema.Struct({
-    ...described,
-    type: Schema.Literal("integer"),
-    minimum: bound,
-    maximum: bound,
-  }),
-  Schema.Struct({
-    ...described,
-    type: Schema.Literal("list"),
-    minItems: bound,
-    maxItems: bound,
-  }),
+export interface Norm {
+  readonly name: string;
+  readonly description: string;
+  readonly forms: readonly Form[];
+  readonly source: string;
+  readonly digest: string;
+}
+
+/**
+ * The form of one performative, and its turn rule. An act of it may follow
+ * when its sender is one `by` permits, every fact of `when` holds, fewer
+ * than `max` acts of it were sent in the instance, its `delay` has passed
+ * and each of its `relations` holds. Once allowed, it clears the facts of
+ * `terminates`, then sets those of `initiates`. A form that `starts` opens
+ * an instance, and one that `ends` closes it.
+ */
+export interface Form {
+  readonly performative: string;
+  readonly by: Sender;
+  readonly fields: readonly Field[];
+  readonly starts: boolean;
+  readonly ends: boolean;
+  readonly when: readonly string[];
+  readonly terminates: readonly string[];
+  readonly initiates: readonly string[];
+  readonly max?: number;
+  readonly delay?: Delay;
+  readonly relations: readonly Relation[];
+}
+
+/**
+ * Which member may send an act: one that has any of `roles`, or the
+ * recipient of the message that set `fact`, whichever role that is.
+ */
+export type Sender =
+  | { readonly kind: "roles"; readonly roles: readonly Role[] }
+  | { readonly kind: "recipient"; readonly fact: string };
+
+/**
+ * One field of a form. An act must state it unless it is `optional`. A
+ * string's bounds count code points, an integer's bounds are inclusive, and
+ * a list holds nonempty strings whose number its bounds limit. A
+ * `description` says what the field holds, and a decision provider judges
+ * the text of a string or list field against it.
+ */
+export type Field = {
+  readonly name: string;
+  readonly optional: boolean;
+  readonly description?: string;
+} & (
+  | {
+      readonly type: "string";
+      readonly minLength?: number;
+      readonly maxLength?: number;
+    }
+  | {
+      readonly type: "integer";
+      readonly minimum?: number;
+      readonly maximum?: number;
+    }
+  | {
+      readonly type: "list";
+      readonly minItems?: number;
+      readonly maxItems?: number;
+    }
 );
 
-const formSchema = Schema.Struct({
-  act: name,
-  by: Schema.Union(
-    Schema.Array(Schema.Literal("client", "server")),
-    Schema.Struct({ recipient: Schema.Struct({ fact: name }) }),
-  ),
-  fields: Schema.Array(fieldSchema),
-  starts: Schema.Boolean,
-  ends: Schema.Boolean,
-  when: names,
-  initiates: names,
-  terminates: names,
-  maximum: Schema.optional(Schema.Positive.pipe(Schema.int())),
-  delay: Schema.optional(Schema.Struct({ fact: name, field: name })),
-  relations: Schema.Array(
-    Schema.Struct({
-      operator: Schema.Literal("equals", "member", "subset"),
-      field: name,
-      source: Schema.Struct({ act: actReference, field: name }),
-    }),
-  ),
-});
+/**
+ * A wait before an act: it may follow only once the act that set `fact` is
+ * as many seconds old as that act's integer `field` says.
+ */
+export interface Delay {
+  readonly fact: string;
+  readonly field: string;
+}
 
 /**
- * The form of one performative: its fields, which members may send it, and
- * the facts it needs, sets and clears. `by` lists roles, or names a fact
- * whose message's recipient is the one member that may send the act. A
- * relation holds a field to a field of an earlier act: equal to it, a member
- * of its list or a subset of its list. The earlier act is the latest of a
- * name, or the one that set a fact.
+ * What holds a field to a field of an earlier act: `equals` it, is a
+ * `member` of its list, or is a `subset` of its list.
  */
-export type MessageForm = typeof formSchema.Type;
+export interface Relation {
+  readonly operator: "equals" | "member" | "subset";
+  readonly field: string;
+  readonly source: { readonly act: ActReference; readonly field: string };
+}
+
+/** An earlier act of the instance: the latest of a performative, or the one that set a fact. */
+export type ActReference =
+  | { readonly kind: "act"; readonly performative: string }
+  | { readonly kind: "fact"; readonly fact: string };
+
+/** What a field of an act holds: text, a number or a list of texts. */
+export type Value = string | number | readonly string[];
+
+/** One act as a message states it: its performative, the norm it names and the value of each field it carries. */
+export interface Act {
+  readonly performative: string;
+  readonly norm: string;
+  readonly fields: Readonly<Record<string, Value>>;
+}
 
 /**
- * One norm as compiled. `digest` is the SHA-256 of `source`, the norm document
- * it was compiled from.
+ * Whether `text` may name a norm, a performative, a field or a fact: a
+ * lowercase letter, then lowercase letters, digits or hyphens, 64 characters
+ * at most.
  */
-const normSchema = Schema.Struct({
-  name,
-  digest: Schema.String.pipe(Schema.pattern(/^[a-f0-9]{64}$/u)),
-  source: Schema.String,
-  description: Schema.String,
-  forms: Schema.Array(formSchema),
-});
+export function isName(text: string): boolean {
+  return /^[a-z][a-z0-9-]{0,63}$/u.test(text);
+}
+
+/** The field `name` of a form. */
+export function fieldOf(form: Form, name: string): Field | undefined {
+  return form.fields.find((field) => field.name === name);
+}
 
 /**
  * The fields of `form` whose text a decision provider judges: the string
  * and list fields that have a description, each with what the description
  * holds to it. An integer is held by its bounds alone.
  */
-export function describedFields(form: MessageForm) {
+export function describedFields(form: Form) {
   return form.fields.flatMap((field) =>
     field.type === "integer" || field.description === undefined
       ? []
@@ -110,297 +147,4 @@ export function describedFields(form: MessageForm) {
           },
         ],
   );
-}
-
-/** A compiled norm: data messages are checked against, with no code of its own. */
-export type Norm = typeof normSchema.Type;
-
-/** Reads a value as a norm, or says where it is not one. */
-export const decodeNorm = Schema.decodeUnknownEither(normSchema);
-
-/**
- * One act as a message states it: its performative in `name`, the norm its
- * `:ontology` names and its fields, each with the type its text gave it.
- */
-export interface Act {
-  readonly name: string;
-  readonly norm: string;
-  readonly fields: Readonly<
-    Record<string, string | number | readonly string[]>
-  >;
-}
-
-/** Why a message fails its norm: the stage that failed, and the text its sender reads. */
-export interface NormProblem {
-  readonly stage: "structural" | "protocol";
-  readonly reason: "rule-violation" | "unresolved-evidence";
-  readonly detail: string;
-  readonly field?: string;
-}
-
-/**
- * One value of parenthesized data, as norm documents and acts are written: a
- * symbol, a quoted string or a list. It is inert: nothing in it is evaluated.
- */
-export type SExpression =
-  | { readonly kind: "symbol"; readonly value: string }
-  | { readonly kind: "string"; readonly value: string }
-  | { readonly kind: "list"; readonly values: readonly SExpression[] };
-
-/** Why text is not parenthesized data, with the offset of the token at fault. */
-interface SExpressionError {
-  readonly offset: number;
-  readonly detail: string;
-}
-
-/**
- * Whether `text` may name a norm, an act, a field or a fact: a lowercase
- * letter, then lowercase letters, digits or hyphens, 64 characters at most.
- */
-export const isName = Schema.is(name);
-
-/** Reads a message as one act: the whole text is one parenthesized act. */
-export function readAct(message: Message): Either.Either<Act, NormProblem> {
-  return readSExpressions(message.text, false).pipe(
-    Either.mapLeft((error) => structural(error.detail)),
-    Either.flatMap(([form, ...extra]) => {
-      if (form?.kind !== "list" || extra.length !== 0) {
-        return Either.left(
-          structural("The message is not exactly one parenthesized act."),
-        );
-      }
-      const [head, ...parameters] = form.values;
-      return head?.kind !== "symbol" ||
-        !isName(head.value) ||
-        parameters.length % 2 !== 0
-        ? Either.left(
-            structural(
-              "An act names a performative followed by :field value pairs.",
-            ),
-          )
-        : readParameters(head.value, parameters);
-    }),
-  );
-}
-
-/** The form `norm` declares for `act`, once the act's fields fit it. */
-export function checkStructure(
-  norm: Norm,
-  act: Act,
-): Either.Either<MessageForm, NormProblem> {
-  const form = norm.forms.find((entry) => entry.act === act.name);
-  if (norm.name !== act.norm) {
-    return Either.left({
-      stage: "protocol",
-      reason: "rule-violation",
-      detail: `${act.name} is not valid for the active norm ${norm.name}.`,
-    });
-  }
-  if (form === undefined) {
-    return Either.left(
-      structural(`${act.name} is not a valid act in ${act.norm}.`),
-    );
-  }
-  const failures = [
-    ...form.fields.flatMap((field) => {
-      const value = Object.hasOwn(act.fields, field.name)
-        ? act.fields[field.name]
-        : undefined;
-      if (value === undefined) {
-        return field.optional
-          ? []
-          : [`${field.name} is required for ${act.name} in ${act.norm}.`];
-      }
-      return accepts(field, value)
-        ? []
-        : [`${field.name} is not valid for ${act.name} in ${act.norm}.`];
-    }),
-    ...Object.keys(act.fields)
-      .filter((stated) => form.fields.every((field) => field.name !== stated))
-      .map(
-        (stated) =>
-          `${stated} is not a valid field of ${act.name} in ${act.norm}.`,
-      ),
-  ];
-  return failures.length === 0
-    ? Either.right(form)
-    : Either.left(structural(failures.join(" ")));
-}
-
-/**
- * Reads every expression of `source`. A document may carry `;` comments; a
- * reader of a message passes `comments` false, so that every token of the
- * text is accounted for.
- */
-export function readSExpressions(
-  source: string,
-  comments = true,
-): Either.Either<readonly SExpression[], SExpressionError> {
-  const roots: SExpression[] = [];
-  const stack: SExpression[][] = [roots];
-  const tokens = /\s+|;[^\r\n]*|[()]|"(?:[^"\\]|\\[\s\S])*"|[^\s();"]+/uy;
-  let offset = 0;
-  while (offset < source.length) {
-    tokens.lastIndex = offset;
-    const token = tokens.exec(source)?.[0];
-    const refusal =
-      token === undefined
-        ? "Expected a complete token."
-        : acceptToken(token, stack, comments);
-    if (refusal !== undefined) {
-      return Either.left({ offset, detail: refusal });
-    }
-    offset = tokens.lastIndex;
-  }
-  return stack.length === 1
-    ? Either.right(roots)
-    : Either.left({ offset, detail: "An opening parenthesis is not closed." });
-}
-
-/** Whether `value` has the type of `field` and lies within its bounds. A string's length counts code points. */
-function accepts(
-  field: MessageForm["fields"][number],
-  value: Act["fields"][string],
-): boolean {
-  switch (field.type) {
-    case "string":
-      return (
-        typeof value === "string" &&
-        within(Array.from(value).length, field.minLength, field.maxLength)
-      );
-    case "integer":
-      return (
-        typeof value === "number" &&
-        Number.isInteger(value) &&
-        within(value, field.minimum, field.maximum)
-      );
-    case "list":
-      return (
-        typeof value === "object" &&
-        value.every((item) => item !== "") &&
-        within(value.length, field.minItems, field.maxItems)
-      );
-    default: {
-      const exhaustive: never = field;
-      return exhaustive;
-    }
-  }
-}
-
-function within(value: number, minimum?: number, maximum?: number) {
-  return (
-    (minimum === undefined || value >= minimum) &&
-    (maximum === undefined || value <= maximum)
-  );
-}
-
-function readParameters(
-  performative: string,
-  parameters: readonly SExpression[],
-): Either.Either<Act, NormProblem> {
-  return Either.gen(function* () {
-    const fields = new Map<string, Act["fields"][string]>();
-    for (let index = 0; index < parameters.length; index += 2) {
-      const key = parameters[index];
-      const value = parameters[index + 1];
-      if (
-        key?.kind !== "symbol" ||
-        !key.value.startsWith(":") ||
-        !isName(key.value.slice(1)) ||
-        value === undefined
-      ) {
-        return yield* Either.left(
-          structural(
-            "Parameters must have distinct :names and one value each.",
-          ),
-        );
-      }
-      const field = key.value.slice(1);
-      if (fields.has(field)) {
-        return yield* Either.left(
-          structural(`${field} appears more than once.`, field),
-        );
-      }
-      fields.set(field, yield* readValue(value));
-    }
-    const norm = fields.get("ontology");
-    if (typeof norm !== "string") {
-      return yield* Either.left(
-        structural(":ontology must name a held norm.", "ontology"),
-      );
-    }
-    fields.delete("ontology");
-    return { name: performative, norm, fields: Object.fromEntries(fields) };
-  });
-}
-
-function readValue(
-  node: SExpression,
-): Either.Either<Act["fields"][string], NormProblem> {
-  if (node.kind === "string") {
-    return Either.right(node.value);
-  }
-  if (node.kind === "list") {
-    const choices = node.values.flatMap((choice) =>
-      choice.kind === "list" ? [] : [choice.value],
-    );
-    return choices.length === node.values.length
-      ? Either.right(choices)
-      : Either.left(structural("A list holds strings, not lists."));
-  }
-  if (!/^-?(?:0|[1-9]\d*)(?:\.\d+)?(?:[eE][+-]?\d+)?$/u.test(node.value)) {
-    return Either.right(node.value);
-  }
-  return Number.isFinite(Number(node.value))
-    ? Either.right(Number(node.value))
-    : Either.left(structural("Numbers must be finite."));
-}
-
-function structural(detail: string, field?: string): NormProblem {
-  return { stage: "structural", reason: "rule-violation", detail, field };
-}
-
-/** Adds one token to the innermost open list, and gives why the token cannot stand where it does. */
-function acceptToken(
-  token: string,
-  stack: SExpression[][],
-  comments: boolean,
-): string | undefined {
-  const parent = stack.at(-1);
-  if (parent === undefined || /^\s/u.test(token)) {
-    return undefined;
-  }
-  if (token.startsWith(";")) {
-    return comments
-      ? undefined
-      : "A message cannot carry a comment outside its declared fields.";
-  }
-  if (token === "(") {
-    const values: SExpression[] = [];
-    parent.push({ kind: "list", values });
-    stack.push(values);
-    return undefined;
-  }
-  if (token === ")") {
-    if (stack.length === 1) {
-      return "Unexpected closing parenthesis.";
-    }
-    stack.pop();
-    return undefined;
-  }
-  if (!token.startsWith('"')) {
-    parent.push({ kind: "symbol", value: token });
-    return undefined;
-  }
-  const value = Either.getOrUndefined(
-    Either.try((): unknown => JSON.parse(token)),
-  );
-  if (value === undefined) {
-    return "Use JSON escaping inside quoted strings.";
-  }
-  if (!Schema.is(wellFormedString)(value)) {
-    return "Expected a well-formed Unicode string.";
-  }
-  parent.push({ kind: "string", value });
-  return undefined;
 }

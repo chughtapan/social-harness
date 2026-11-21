@@ -5,6 +5,7 @@ import { Data, Effect, Either, Order } from "effect";
 import { join } from "node:path";
 import type { StructureCheck } from "../firewall.js";
 import { compileNorm } from "./compiler.js";
+import { readAct } from "./lisp.js";
 import { describedFields } from "./norm.js";
 import { structureCheck } from "./structure-check.js";
 
@@ -68,7 +69,7 @@ export function holdNorms(
     Either.mapBoth({
       onLeft: (reason) => new NormsConfigurationError({ reason }),
       onRight: (norms) => ({
-        structureCheck: structureCheck(norms),
+        structureCheck: structureCheck(norms, readAct),
         documents: norms.map((norm) => ({
           name: norm.name,
           description: norm.description,

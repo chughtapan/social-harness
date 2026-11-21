@@ -1,7 +1,9 @@
 /**
- * @file The structure check of a server that holds norms. It replays a
- * conversation's earlier messages to find the instance in progress, then
- * says whether a further message is an act its sender may send next.
+ * @file The structure check of a server that holds norms: what runs a norm.
+ * It replays a conversation's earlier messages to find the instance in
+ * progress, then says whether a further message is an act its sender may
+ * send next. It reads norms and acts as data, and is handed the reader that
+ * turns a message's text into an act.
  */
 
 import { Effect, Either } from "effect";
@@ -9,13 +11,28 @@ import type { CheckedMessage, StructureCheck } from "../firewall.js";
 import type { Message, Role } from "../messages.js";
 import {
   type Act,
-  checkStructure,
+  type ActReference,
+  type Delay,
   describedFields,
-  type MessageForm,
+  type Field,
+  type Form,
   type Norm,
-  type NormProblem,
-  readAct,
+  type Relation,
+  type Value,
 } from "./norm.js";
+
+/** Reads a message's text as an act, or says why it is none and which field is at fault. */
+type ActReader = (
+  text: string,
+) => Either.Either<Act, { readonly detail: string; readonly field?: string }>;
+
+/** Why a message fails its norm: the stage that failed, and the text its sender reads. */
+interface NormProblem {
+  readonly stage: "structural" | "protocol";
+  readonly reason: "rule-violation" | "unresolved-evidence";
+  readonly detail: string;
+  readonly field?: string;
+}
 
 /** A message as the structure check judges it: which member sent it, and the time of the firewall's check of it. */
 interface Sent {
@@ -58,40 +75,54 @@ interface HeldAct {
 
 /** A held act whose fields fit `form`, the form its norm declares for it. */
 interface FittedAct extends HeldAct {
-  readonly form: MessageForm;
+  readonly form: Form;
+}
+
+/** The norms a server holds, with the reader of its messages. */
+interface Held {
+  readonly norms: readonly Norm[];
+  readonly readAct: ActReader;
 }
 
 /**
- * The structure check of a server that holds `norms`. It replays the
- * earlier messages to find the instance in progress, then reads the message
- * as an act of that instance or, when none is, of the norm it names. An act
- * that fits passes with a text rule for each described string field it states. Any
- * other message is refused under a rule named for the norm of the instance
- * in progress and the stage that failed. Without norms every message passes.
+ * The structure check of a server that holds `norms` and reads each
+ * message's text with `readAct`. It replays the earlier messages to find the
+ * instance in progress, then reads the message as an act of that instance
+ * or, when none is, of the norm it names. An act that fits passes with a
+ * text rule for each described field it states. Any other message is refused
+ * under a rule named for the norm of the instance in progress and the stage
+ * that failed. Without norms every message passes.
  */
-export function structureCheck(norms: readonly Norm[]): StructureCheck {
+export function structureCheck(
+  norms: readonly Norm[],
+  readAct: ActReader,
+): StructureCheck {
   return (sender, message, earlier, now) =>
     Effect.sync(
       (): Result =>
         norms.length === 0
           ? { kind: "passed", textRules: [] }
-          : checkMessage(norms, { message, role: sender, at: now }, earlier),
+          : checkMessage(
+              { norms, readAct },
+              { message, role: sender, at: now },
+              earlier,
+            ),
     ).pipe(Effect.withSpan("structureCheck"));
 }
 
 /** What the structure check says of `sent`, after the `earlier` messages of its conversation. */
 function checkMessage(
-  norms: readonly Norm[],
+  held: Held,
   sent: Sent,
   earlier: readonly CheckedMessage[],
 ): Result {
-  const view = projectProtocol(norms, earlier, sent);
-  const held = readHeldAct(view, norms, sent.message);
+  const view = projectProtocol(held, earlier, sent);
+  const read = readHeldAct(view, held, sent.message);
   return Either.match(
-    Either.flatMap(held, (read) => fitAct(view, read, sent)),
+    Either.flatMap(read, (act) => fitAct(view, act, sent)),
     {
       onLeft: (problem) =>
-        refusal(view, problem, Either.getOrUndefined(held)?.norm),
+        refusal(view, problem, Either.getOrUndefined(read)?.norm),
       onRight: (fitted) => pass(view, fitted),
     },
   );
@@ -138,7 +169,7 @@ function pass(view: ProtocolView, { act, norm, form }: FittedAct): Result {
         Object.hasOwn(act.fields, name)
           ? [
               {
-                id: `${norm.name}.${act.name}.${name}`,
+                id: `${norm.name}.${act.performative}.${name}`,
                 text: `${subject} must hold what its description says and nothing else: ${description}`,
               },
             ]
@@ -146,12 +177,12 @@ function pass(view: ProtocolView, { act, norm, form }: FittedAct): Result {
     ),
     protocol: {
       ...named,
-      act: act.name,
+      act: act.performative,
       description: norm.description,
       state: [...(view.instance?.facts.keys() ?? [])],
       form: form.fields,
     },
-    detail: { ...named, act: act.name, stage: "semantic" },
+    detail: { ...named, act: act.performative, stage: "semantic" },
   };
 }
 
@@ -163,7 +194,7 @@ function pass(view: ProtocolView, { act, norm, form }: FittedAct): Result {
  * under check, when the same agent wrote it, and the other role otherwise.
  */
 function projectProtocol(
-  norms: readonly Norm[],
+  held: Held,
   earlier: readonly CheckedMessage[],
   next: Sent,
 ): ProtocolView {
@@ -175,20 +206,20 @@ function projectProtocol(
     const act =
       checkedAt === undefined
         ? undefined
-        : replayed(view, norms, { message, role, at: checkedAt });
+        : replayed(view, held, { message, role, at: checkedAt });
     if (act !== undefined) {
       view = advance(view, act);
     }
     view = retainInteractionReference(view, message);
-    referenceActs.set(message.msgId, act?.act.name);
+    referenceActs.set(message.msgId, act?.act.performative);
   }
   return view;
 }
 
 /** The act of an earlier message, as the view permitted it at the time of the firewall's check, or nothing when the message is no such act. */
-function replayed(view: ProtocolView, norms: readonly Norm[], sent: Sent) {
-  return readHeldAct(view, norms, sent.message).pipe(
-    Either.flatMap((held) => fitAct(view, held, sent)),
+function replayed(view: ProtocolView, held: Held, sent: Sent) {
+  return readHeldAct(view, held, sent.message).pipe(
+    Either.flatMap((act) => fitAct(view, act, sent)),
     Either.map((fitted) => ({ ...fitted, ...sent })),
     Either.getOrUndefined,
   );
@@ -200,21 +231,19 @@ function replayed(view: ProtocolView, norms: readonly Norm[], sent: Sent) {
  */
 function readHeldAct(
   view: ProtocolView,
-  norms: readonly Norm[],
+  { norms, readAct }: Held,
   message: Message,
 ): Checked<HeldAct> {
-  return Either.flatMap(readAct(message), (act) => {
-    const norm =
-      view.instance?.norm ?? norms.find((held) => held.name === act.norm);
-    return norm === undefined
-      ? Either.left({
-          stage: "structural",
-          reason: "rule-violation",
-          detail: "ontology must name a held norm.",
-          field: "ontology",
-        })
-      : Either.right({ act, norm });
-  });
+  return readAct(message.text).pipe(
+    Either.mapLeft(({ detail, field }) => structural(detail, field)),
+    Either.flatMap((act) => {
+      const norm =
+        view.instance?.norm ?? norms.find(({ name }) => name === act.norm);
+      return norm === undefined
+        ? Either.left(structural("ontology must name a held norm.", "ontology"))
+        : Either.right({ act, norm });
+    }),
+  );
 }
 
 /** The act of `sent` with its form, once its structure fits its norm and the view permits it at the time of its check. */
@@ -223,7 +252,7 @@ function fitAct(
   held: HeldAct,
   sent: Sent,
 ): Checked<FittedAct> {
-  return Either.flatMap(checkStructure(held.norm, held.act), (form) => {
+  return Either.flatMap(fitForm(held.norm, held.act), (form) => {
     const fitted = { ...held, form };
     return Either.map(checkProtocol(view, fitted, sent), () => fitted);
   });
@@ -243,7 +272,7 @@ function checkProtocol(
   const { message, role } = sent;
   const invalid = invalidTransition(view, norm, message, act);
   const notTheirs = violation(
-    `${act.name} is not the ${role}'s to send in ${norm.name}.`,
+    `${act.performative} is not the ${role}'s to send in ${norm.name}.`,
   );
   return Either.gen(function* () {
     yield* checkReference(view, form, message);
@@ -262,11 +291,11 @@ function checkProtocol(
       return yield* Either.left(invalid);
     }
     const anchor =
-      "recipient" in form.by
-        ? instance.facts.get(form.by.recipient.fact)
+      form.by.kind === "recipient"
+        ? instance.facts.get(form.by.fact)
         : undefined;
     if (
-      "recipient" in form.by &&
+      form.by.kind === "recipient" &&
       (anchor === undefined || !ancestry.has(anchor.message.msgId))
     ) {
       return yield* Either.left(invalid);
@@ -286,13 +315,13 @@ function checkProtocol(
 
 /** Whether the form lets the sender of `sent` send its act: by its role, or as the recipient of the message that set the form's fact. */
 function senderPermitted(
-  form: MessageForm,
+  { by }: Form,
   { message, role }: Sent,
   anchor?: ReplayedAct,
 ) {
-  return "recipient" in form.by
+  return by.kind === "recipient"
     ? anchor?.message.recipient === message.author
-    : form.by.includes(role);
+    : by.roles.includes(role);
 }
 
 /** A message that replies into the instance belongs to it, whether or not it advanced the instance, so a later reply may name it. */
@@ -331,13 +360,15 @@ function invalidTransition(
       ? undefined
       : view.referenceActs.get(message.replyToMsgId);
   const after = preceding === undefined ? "" : ` after ${preceding}`;
-  return violation(`${act.name} is not valid${after} for ${norm.name}.`);
+  return violation(
+    `${act.performative} is not valid${after} for ${norm.name}.`,
+  );
 }
 
 /** Whether the message's reply reference suits `form`: an opening may omit it, and a reference names a message of the conversation. */
 function checkReference(
   view: ProtocolView,
-  form: MessageForm,
+  form: Form,
   { replyToMsgId }: Message,
 ): Either.Either<void, NormProblem> {
   if (replyToMsgId === undefined) {
@@ -362,7 +393,7 @@ function checkReference(
 
 function checkDelay(
   instance: Instance,
-  delay: NonNullable<MessageForm["delay"]>,
+  delay: Delay,
   now: number,
   invalid: NormProblem,
 ): Either.Either<void, NormProblem> {
@@ -416,18 +447,19 @@ function advance(
   for (const fact of form.initiates) {
     facts.set(fact, entry);
   }
-  counts.set(form.act, (counts.get(form.act) ?? 0) + 1);
+  counts.set(form.performative, (counts.get(form.performative) ?? 0) + 1);
   return {
     ...view,
     instance: { ...prior, facts, counts, acts: [...prior.acts, entry] },
   };
 }
 
-function enabled(form: MessageForm, instance: Instance) {
+/** Whether every fact the form needs holds and fewer acts of it than its limit were sent. */
+function enabled(form: Form, instance: Instance) {
   const facts = form.when.every((fact) => instance.facts.has(fact));
   const count =
-    form.maximum === undefined ||
-    (instance.counts.get(form.act) ?? 0) < form.maximum;
+    form.max === undefined ||
+    (instance.counts.get(form.performative) ?? 0) < form.max;
   return facts && count;
 }
 
@@ -446,10 +478,7 @@ function referenceAncestry(instance: Instance, reference?: string) {
   return ancestry;
 }
 
-function permittedTime(
-  instance: Instance,
-  delay: NonNullable<MessageForm["delay"]>,
-) {
+function permittedTime(instance: Instance, delay: Delay) {
   const fact = instance.facts.get(delay.fact);
   const duration = fact?.act.fields[delay.field];
   return fact !== undefined && typeof duration === "number"
@@ -458,9 +487,9 @@ function permittedTime(
 }
 
 function related(
-  operator: MessageForm["relations"][number]["operator"],
-  actual: Act["fields"][string],
-  expected: Act["fields"][string],
+  operator: Relation["operator"],
+  actual: Value,
+  expected: Value,
 ) {
   switch (operator) {
     case "equals":
@@ -485,10 +514,10 @@ function related(
 /** The value a relation holds a field to: the source's field of the earlier act it names, which the reply chain must hold. An optional field the act left out settles nothing. */
 function sourceValue(
   instance: Instance,
-  source: MessageForm["relations"][number]["source"],
+  source: Relation["source"],
   ancestry: ReadonlySet<string>,
   invalid: NormProblem,
-): Checked<Act["fields"][string]> {
+): Checked<Value> {
   const fields = referencedAct(instance, source.act, ancestry)?.act.fields;
   if (fields === undefined) {
     return Either.left(invalid);
@@ -503,13 +532,14 @@ function sourceValue(
     : Either.right(value);
 }
 
+/** The earlier act a reference names, when the reply chain holds it: the one that set a fact, or the latest of a performative. */
 function referencedAct(
   instance: Instance,
-  act: MessageForm["relations"][number]["source"]["act"],
+  reference: ActReference,
   ancestry: ReadonlySet<string>,
 ) {
-  if (typeof act !== "string") {
-    const anchor = instance.facts.get(act.fact);
+  if (reference.kind === "fact") {
+    const anchor = instance.facts.get(reference.fact);
     return anchor === undefined || !ancestry.has(anchor.message.msgId)
       ? undefined
       : anchor;
@@ -517,8 +547,95 @@ function referencedAct(
   return [...instance.acts]
     .reverse()
     .find(
-      (entry) => ancestry.has(entry.message.msgId) && entry.act.name === act,
+      (entry) =>
+        ancestry.has(entry.message.msgId) &&
+        entry.act.performative === reference.performative,
     );
+}
+
+/**
+ * The form `norm` declares for `act`, once the act names that norm and its
+ * fields fit the form: every required field stated, every stated field
+ * declared, and each value of its field's type and within its bounds. The
+ * refusal names every field at fault.
+ */
+function fitForm(norm: Norm, act: Act): Checked<Form> {
+  const { performative, fields } = act;
+  const form = norm.forms.find((entry) => entry.performative === performative);
+  if (norm.name !== act.norm) {
+    return Either.left(
+      violation(
+        `${performative} is not valid for the active norm ${norm.name}.`,
+      ),
+    );
+  }
+  if (form === undefined) {
+    return Either.left(
+      structural(`${performative} is not a valid act in ${act.norm}.`),
+    );
+  }
+  const failures = [
+    ...form.fields.flatMap((field) => {
+      const value = Object.hasOwn(fields, field.name)
+        ? fields[field.name]
+        : undefined;
+      if (value === undefined) {
+        return field.optional
+          ? []
+          : [`${field.name} is required for ${performative} in ${act.norm}.`];
+      }
+      return accepts(field, value)
+        ? []
+        : [`${field.name} is not valid for ${performative} in ${act.norm}.`];
+    }),
+    ...Object.keys(fields)
+      .filter((stated) => form.fields.every((field) => field.name !== stated))
+      .map(
+        (stated) =>
+          `${stated} is not a valid field of ${performative} in ${act.norm}.`,
+      ),
+  ];
+  return failures.length === 0
+    ? Either.right(form)
+    : Either.left(structural(failures.join(" ")));
+}
+
+/** Whether `value` has the type of `field` and lies within its bounds. A string's length counts code points. */
+function accepts(field: Field, value: Value): boolean {
+  switch (field.type) {
+    case "string":
+      return (
+        typeof value === "string" &&
+        within(Array.from(value).length, field.minLength, field.maxLength)
+      );
+    case "integer":
+      return (
+        typeof value === "number" &&
+        Number.isInteger(value) &&
+        within(value, field.minimum, field.maximum)
+      );
+    case "list":
+      return (
+        typeof value === "object" &&
+        value.every((item) => item !== "") &&
+        within(value.length, field.minItems, field.maxItems)
+      );
+    default: {
+      const exhaustive: never = field;
+      return exhaustive;
+    }
+  }
+}
+
+function within(value: number, minimum?: number, maximum?: number) {
+  return (
+    (minimum === undefined || value >= minimum) &&
+    (maximum === undefined || value <= maximum)
+  );
+}
+
+function structural(detail: string, field?: string): NormProblem {
+  return { stage: "structural", reason: "rule-violation", detail, field };
 }
 
 function violation(detail: string, field?: string): NormProblem {
