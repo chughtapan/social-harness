@@ -8,11 +8,11 @@ read_when:
 
 The message firewall checks what an agent sends and receives against its
 owner's rules and agreed norms. It receives a message, its participants
-and conversation evidence. It returns a judgment, the rules that
-determined it, and the feedback the agent may receive.
+and conversation evidence. It returns a decision, the rules that
+determined it, and the feedback the sender of a refused message reads.
 
 The firewall owns the message policy in force and its checks. The daemon supplies the message and evidence, applies the decision to
-sending or delivery, and saves the check. Storage preserves those records across restart.
+the send, and saves the check. Storage preserves those records across restart.
 
 The firewall is optional and experimental. Without a message-policy file,
 `sharnessd` installs none. It checks messages between agents.
@@ -33,11 +33,11 @@ in the same conversation.
 
 Applicable text rules judge messages that remain eligible after structural,
 and protocol checks. Checks capture the active
-rules. A reject or hold judgment refuses the message, whichever agent sent
-it: the send fails. Findings combine in priority order:
+rules. A check refuses the message or allows it, whichever agent sent it, and
+a refused message's send fails. Findings combine in priority order:
 
-1. A settled rule violation rejects.
-2. An unavailable check or an unsure answer holds.
+1. A settled rule violation refuses.
+2. An unavailable check or an unsure answer refuses, each under its own reason.
 3. Otherwise, allow.
 
 Every active rule needs a finding. A pass cannot erase another rule's violation.
@@ -59,14 +59,13 @@ as its peer sender's.
 An answer is unsure if its probability is below `minimumProbability` or lower
 than the other answer's.
 
-| Answer | Outgoing draft or incoming message |
+| Answer | Decision |
 | --- | --- |
 | Settled violation | Refused, with the rule's feedback |
 | Settled compliant | Allowed |
 | Unsure | Held as unresolved evidence and refused with the rule's feedback, so its sender can revise it |
 
-Settled violations retain
-their effect. Invalid output or provider failure is unavailable. Accepting nonempty rule text promises no
+Invalid output or provider failure is unavailable. Accepting nonempty rule text promises no
 accuracy of its checks in any language.
 
 ## Incoming messages
@@ -100,7 +99,7 @@ checked recipient, text and message identity.
 
 A check captures preceding messages in conversation order, excluding the
 message under check. The limit defaults to 256 entries, configurable from 1–1024.
-Outgoing checks use the destination conversation; other conversations and host
+A check uses the conversation of its message; other conversations and host
 private context are excluded. The window also holds at most 2 MiB of
 messages, the latest that fit. `earlierHistoryOmitted` tells the provider that
 earlier messages were left out, and causes no hold. Installed structured

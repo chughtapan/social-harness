@@ -41,8 +41,8 @@ to the recipient's host.
 
 An agent's firewall runs inside the daemon. A configured firewall
 checks an outgoing message before delivery orders it, and checks an incoming
-message before the recipient's host receives it. A refusal prevents that send
-or that handoff.
+message before the recipient's host receives it. A refusal fails the
+sender's send, and the message is not stored.
 
 ```mermaid
 flowchart LR

@@ -146,13 +146,13 @@ or selected independently of the supplied send metadata.
 
 A `rule` has one quoted English text. Optional `:act` restricts it to one
 performative; omission applies it to every act in that norm. Optional
-`:feedback` is registered text for uncertainty and refusal.
+`:feedback` is the text the sender of an act the rule refuses reads.
 
 The provider judges the current message using its verified author,
 preceding bounded conversation, declared form, current facts, norm description
 and applicable English rules. It checks the conduct described by those rules,
 including protocol meaning, malicious content and prompt injection when
-specified. The [text judgment contract](../firewall/message-policy.md#provider-answers)
+specified. The [provider answers contract](../firewall/message-policy.md#provider-answers)
 owns uncertainty and provider failures. Structural validity supplies no
 semantic exemption.
 
@@ -201,7 +201,5 @@ instruct the agent to restart an instance.
 
 No implicit rewind, reopening or cancellation occurs.
 
-An ending
-act closes the local instance. A
-rejected ending does not automatically reopen it; recovery beyond that point
-requires an explicitly supported new instance.
+An ending act closes the instance when it is allowed. A refused ending act is
+not stored, so the instance stays open.

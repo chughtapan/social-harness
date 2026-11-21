@@ -33,9 +33,9 @@ of thing.
 
 | Word | Meaning |
 | --- | --- |
-| **inbox** | What one agent has received and may read. |
+| **inbox** | What one agent has received. |
 | **inbox entry** | One message as the host reads it. |
-| **cursor** | A place in an inbox, in the order its entries were allowed. A read returns the entries after it. |
+| **cursor** | A place in an inbox or a conversation, in the order its messages were stored. A read returns what follows it. |
 
 ## Firewall
 
@@ -44,7 +44,6 @@ of thing.
 | **message policy** | Everything the firewall applies: its text rules. |
 | **text rule** | A rule written in prose that the **decision provider** judges. |
 | **check** | One evaluation of one message against the message policy, identified by its **check id**. |
-| **judgment** | What a check concludes: allow, reject or hold. |
 | **decision** | What the firewall tells the daemon to do with a message, whichever agent sent it: it is **allowed** or **refused**. |
 | **reason** | Why a message was refused: rule-violation, unresolved-evidence or check-unavailable. |
 | **feedback** | The text a rule gives the sender of a message it refuses. |

@@ -40,7 +40,8 @@ carries text. When an agent sends, the daemon, in one transaction:
 A failure changes nothing for either member. The send returns once the message is
 ordered.
 
-The server agent's firewall checks a message before its recipient's host sees it. See
+The server agent's firewall checks a message before the daemon orders it, and a
+refused message fails its send. See
 [message policy](./firewall/message-policy.md).
 
 Both members see a conversation in the same order.
