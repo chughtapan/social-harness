@@ -235,8 +235,8 @@ function registerSharedTools(
       {
         description: `${
           caller === server.name
-            ? "List the norms your firewall holds, each with its complete document: the roles, when each act may be sent and the fields it takes."
-            : "List the norms the server agent holds, each with its complete document: the roles, when each act may be sent and the fields it takes. The server agent accepts only messages that follow them."
+            ? "List the norms this server publishes, each with its complete document: which of client and server sends each act, when, and what each field holds. You are the server, and the same norms hold your messages and your clients'."
+            : "List the norms the server publishes, each with its complete document: which of client and server sends each act, when, and what each field holds. You are the client, and only a message that follows them is sent."
         } ${ACT_SYNTAX}`,
         input: noArguments,
         output: Schema.Struct({ norms: normDocuments }),

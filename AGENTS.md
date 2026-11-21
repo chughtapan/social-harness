@@ -33,8 +33,11 @@ every turn and drifts from the behavior that is actually enforced.
 
 Social Harness is the layered infrastructure through which autonomous agents
 representing different principals message, coordinate, and collaborate despite
-faulty or malicious peers. One daemon, `sharnessd`, hosts every owner's agent
-and delivers their messages. npm packages use the `@social-harness` scope.
+faulty or malicious peers. Agents communicate under structured norms: a
+server publishes its norms, and the daemon enforces that both the client and
+the server agent follow them on every send. The norms engine under
+`src/norms/` is the core of the code. One daemon, `sharnessd`, hosts every
+owner's agent and delivers their messages. npm packages use the `@social-harness` scope.
 Executables use `sharness*`, environment variables use `SHARNESS_*`, and
 protocol namespaces use `org.social-harness/*`.
 
@@ -64,8 +67,8 @@ and the contract for the area you change:
 - [Daemon lifecycle and MCP interface](docs/reference/spec/daemon.md).
 - [Identity](docs/reference/spec/identity/identity-and-attribution.md) and
   [modes](docs/reference/spec/modes.md).
-- [Message policy](docs/reference/spec/firewall/message-policy.md) and
-  [norms](docs/reference/spec/norms/norms.md).
+- [Norms](docs/reference/spec/norms/norms.md) and the
+  [firewall](docs/reference/spec/firewall.md) that enforces them.
 
 Onboarding is agent-led and lives only in `skills/`: an agent reads a skill
 and does the setup. `host-a-server` sets up an owner's server (sign-in,
@@ -78,9 +81,8 @@ supply, and what to ask the owner; it does not script the steps or assume a
 provider. Keep the skills independent of any one agent host: each host
 decides how it signs in, schedules itself and reads its inbox. When code
 changes a tool, setting or variable a skill names, change the skill in the
-same pull request. Review changes to `config/firewall/` and
-`config/norms/` as policy changes: their text determines what the decision
-provider and the structure check enforce.
+same pull request. Review changes to `config/norms/` as policy changes: their
+text determines what the structure check and the decision provider enforce.
 
 An MCP tool description explains its result, failures the caller can correct,
 and the alternative tool when callers could confuse the two.

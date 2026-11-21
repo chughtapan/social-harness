@@ -1,20 +1,21 @@
 ---
 title: Applications
-description: What an application supplies and how Social Harness connects its participants.
+description: What an application supplies, and how Social Harness connects its participants under published norms.
 read_when:
   - You are building an application used by agents from different owners
   - You want to understand admission, shared rules and application access
 ---
 
 Social Harness helps applications connect agents that act for different people
-or organizations. The application defines the work they do together. The
-daemon its participants share identifies each agent, carries its messages,
-and checks each message against the server agent's rules before storing it.
+or organizations. The application defines the work they do together and
+publishes it as norms. The daemon its participants share identifies each
+agent, holds each message to those norms, and carries the messages that
+follow them.
 
 A scheduling application, for example, supplies the booking logic. A
 professor's agent is the server agent, and students' agents send it requests
-as clients. The application may ask participants to follow shared booking
-rules, which the server's owner configures as norms and text rules.
+as clients. The server's owner publishes the booking rules as norms, and the
+daemon holds both sides to them.
 
 ## What the application supplies
 
@@ -25,7 +26,7 @@ Shared rules explain how its agents should cooperate. The application also
 needs a policy for changing or ending access.
 
 Those choices are application responsibilities. Social Harness provides
-messaging and the server agent's message policy. It provides no protocol for
+messaging and the enforcement of published norms. It provides no protocol for
 application admission, roles or revocation, no firewall for a client, and no
 disclosure, investigation or sanction protocol. The constitution lists the
 [deferred work](/reference/constitution#deliberate-deferrals).
@@ -54,11 +55,11 @@ defines the name precisely.
 
 An application states how its members work together as
 [norms](/reference/spec/norms/norms): each has a protocol that orders its acts
-and a form for each performative.
-The server agent holds the norms, and a client reads them before a task. The
-server agent's firewall checks every act of that task, whichever member sends
-it, against the conversation's history, and refuses acts out of turn or with
-invalid fields.
+and a form that says what each field of an act holds. The server publishes
+the norms, and a client reads them before a task. The server agent's firewall
+checks every act of that task, whichever member sends it, against the
+conversation's history. It refuses an act out of turn, from the wrong member,
+or with a field that does not hold what the norm says.
 
 An instance of a norm covers one task in one conversation and ends when an
 act of the norm ends it. The daemon does not track application

@@ -37,7 +37,7 @@
                   "reference/spec/host/messaging",
                   "reference/spec/host/receiving",
                   "reference/spec/daemon",
-                  "reference/spec/firewall/message-policy",
+                  "reference/spec/firewall",
                   "reference/spec/norms/norms",
                   "reference/spec/identity/identity-and-attribution",
                   "reference/spec/modes",

@@ -6,9 +6,8 @@ description: Act as the server agent of a Social Harness server — receive requ
 # Be the server agent
 
 Many client agents send you requests, and none of them can reach anyone but
-you. The server checks every message, yours and theirs, against the norms and
-rules your owner configured, so a message that reaches you already has a
-valid form.
+you. The server holds every message, yours and theirs, to the norms your
+owner published, so a message that reaches you already follows them.
 
 ## Ask your owner first
 
@@ -29,8 +28,8 @@ client: stop and tell your owner.
 
 ## Serve
 
-`read_norms` returns the norms: your role, the acts you may send and when,
-and how to write one. `receive_messages` returns what clients sent, each
+`read_norms` returns the norms: the acts you send as `server`, when you may
+send each, what each field holds, and how to write one. `receive_messages` returns what clients sent, each
 with its `author`, the client's name. Answer a client with `send_message`
 `to` that `author`, naming the message you answer.
 

@@ -144,7 +144,7 @@ const DEFAULT_HISTORY_LIMIT = 256;
  * Asks the provider whether the candidate breaks each of `rules`, in one
  * request, and reads the answer to each question; no rules ask nothing. The
  * request's state holds the provider's instructions, the candidate with its
- * verified participants, the window of earlier messages, the protocol
+ * sender and both members' names, the window of earlier messages, the protocol
  * context of a message the structure check passed, and the text of the rules
  * asked about. A transient failure is asked again twice, and all attempts
  * share the time limit. An answer is unsure below the minimum probability or
@@ -209,7 +209,7 @@ export function askProvider<Rule extends RuleText>(
         ? Effect.succeed(answers)
         : Effect.fail(unavailable);
     }),
-    Effect.withSpan("TextPolicy.check"),
+    Effect.withSpan("askProvider"),
   );
 }
 
@@ -228,9 +228,7 @@ export function jevDecisionProvider(options: {
 }): DecisionProvider {
   const failed = (transient: boolean) => () =>
     Effect.fail(new DecisionProviderError({ transient }));
-  const decide = Effect.fn("MessagePolicy.Jev.decide")(function* (
-    request: DecisionRequest,
-  ) {
+  const decide = Effect.fn("Jev.decide")(function* (request: DecisionRequest) {
     const client = yield* HttpClient.HttpClient;
     const response = yield* HttpClientRequest.post(jevUrl).pipe(
       HttpClientRequest.bearerToken(options.apiKey),
@@ -297,7 +295,7 @@ function providerState(rules: readonly RuleText[], candidate: Candidate) {
     instructions: providerInstructions,
     sender: candidate.sender,
     candidate: assessmentText(candidate.message),
-    policy: { rules: rules.map(({ id, text }) => ({ id, text })) },
+    rules: rules.map(({ id, text }) => ({ id, text })),
     history: window.history.map((entry) => assessmentText(entry.message)),
     earlierHistoryOmitted: window.earlierHistoryOmitted,
     now: candidate.now,

@@ -41,26 +41,27 @@ of thing.
 
 | Word | Meaning |
 | --- | --- |
-| **message policy** | The text rules and settings a firewall applies. |
-| **text rule** | A rule written in prose, in a message policy or a norm, that the **decision provider** judges. |
+| **firewall** | What holds every message of the server agent's conversations to the held norms when it is sent. |
+| **check** | One evaluation of one message against the held norms, identified by its **check id**. |
+| **text rule** | The requirement that a string field hold what its description says and nothing else, which the **decision provider** judges. |
 | **decision provider** | The service that answers whether a message breaks a text rule. |
-| **check** | One evaluation of one message against the message policy, identified by its **check id**. |
-| **decision** | What the firewall tells the daemon to do with a message, whichever agent sent it: it is **allowed** or **refused**. |
+| **decision** | What the firewall tells the daemon to do with a message, whichever member sent it: it is **allowed** or **refused**. |
 | **reason** | Why a check decided as it did: eligible, rule-violation or unresolved-evidence. A message whose check could not run is refused as check-unavailable. |
-| **feedback** | The text a rule gives the sender of a message it refuses. |
+| **feedback** | What the sender of a refused message reads: what in it does not fit the norm. The firewall derives it. |
 | **evidence** | The conversation history a check may read. |
 
 ## Norms
 
 | Word | Meaning |
 | --- | --- |
-| **norm** | An agreement on which **acts** members may send and in what order, identified by its **norm name**. |
+| **norm** | Which **acts** the client and the server agent may send each other, in what order and with what in each field, identified by its **norm name**. A server publishes its norms. |
 | **norm document** | The text that defines one norm. |
 | **act** | A message's text when it is a FIPA ACL act: a **performative** and its parameters. |
-| **form** | The fields a norm requires of one performative. |
-| **protocol** | A norm's turn rules: who may send which act next. Its roles are **initiator** and **participant**. |
+| **form** | The fields a norm requires of one performative, each with the **description** of what it holds. |
+| **role** | Which member of a conversation an agent is. A norm document writes the roles `client` and `server`, the server agent. |
+| **protocol** | A norm's turn rules: which role may send which act next. |
 | **instance** | One run of a norm's protocol in a conversation. |
-| **held norms** | The norms an agent's firewall applies. |
+| **held norms** | The norms a server publishes and its firewall applies. |
 | **structure check** | The part of a firewall that holds each message to the held norms' forms and protocols, before the text rules judge it. |
 
 ## Daemon

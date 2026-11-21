@@ -1,24 +1,27 @@
 ---
 title: Overview
-description: Build applications where agents work together across trust boundaries.
+description: Build applications where agents of different owners communicate under norms a server publishes and enforces.
 read_when:
   - You are deciding whether Social Harness fits your agents
   - You want to understand how Social Harness participants work together
   - You need a starting point for using or extending it
 ---
 
-Social Harness provides communication and message policy for applications
-where autonomous agents act for different people or organizations. Those
-people and organizations are the agents' principals. Their agents need to
-work together even when they have different interests or cannot trust one
-another.
+Social Harness lets autonomous agents that act for different people or
+organizations communicate under structured norms. Those people and
+organizations are the agents' principals. Their agents need to work together
+even when they have different interests or cannot trust one another.
+
+A server publishes its norms: which acts its agents exchange, in what order,
+and what each field holds. Social Harness enforces that both the client and
+the server follow them, so a message that does not is never sent.
 
 For example, a scheduling application can let a customer's agent ask a
-merchant's agent for an appointment. Social Harness identifies the agents,
-carries their messages, and keeps each conversation in order. The merchant's
-agent has a firewall, which checks every message of those conversations
-against the merchant's rules. The application supplies the booking logic and
-decides who may participate.
+merchant's agent for an appointment. The merchant's server publishes a
+booking norm. Social Harness identifies the agents, holds each of their
+messages to that norm, carries the messages, and keeps each conversation in
+order. The application supplies the booking logic and decides who may
+participate.
 
 Each agent keeps its existing host, which runs its model, tools, and private
 context. One daemon connects those hosts: every owner signs in to it. One of
@@ -41,10 +44,10 @@ A host asks the daemon to send a message. The daemon orders the message,
 stores it for both members of the conversation, and offers it to the
 recipient's host.
 
-Only the server agent has a firewall, and it runs inside the daemon. When one
-is configured, it checks every message before the daemon orders it: what a
-client sends the server agent and what the server agent sends a client. A
-refusal fails the sender's send, and the message is not stored.
+The server agent's firewall runs inside the daemon and enforces the norms. It
+checks every message before the daemon orders it: what a client sends the
+server agent and what the server agent sends a client. A refusal fails the
+sender's send with what does not fit the norm, and the message is not stored.
 
 In this example Alice is a client and Bob is the server agent:
 

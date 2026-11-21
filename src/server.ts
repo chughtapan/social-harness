@@ -184,10 +184,10 @@ export const openServer = Effect.fn("openServer")(function* (
       client: AgentName,
       sent: { readonly text: string; readonly replyToMsgId?: MsgId },
     ) {
-      const outgoing = author === name;
+      const fromServer = author === name;
       yield* lockConversation(conversationLocks, client);
       const earlier = yield* database.conversation(client);
-      if (outgoing && earlier.length === 0) {
+      if (fromServer && earlier.length === 0) {
         return yield* new AddressError({
           reason: "unknown-agent",
           name: client,
@@ -195,12 +195,12 @@ export const openServer = Effect.fn("openServer")(function* (
       }
       const message = yield* Message.create({
         author,
-        recipient: outgoing ? client : name,
+        recipient: fromServer ? client : name,
         text: sent.text,
         replyToMsgId: sent.replyToMsgId,
       });
       const decision = yield* firewall.check(
-        outgoing ? "server" : "client",
+        fromServer ? "server" : "client",
         message,
         earlier,
       );

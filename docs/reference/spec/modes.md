@@ -16,7 +16,7 @@ exchanges messages only with it.
 | --- | --- | --- |
 | Identity provider | An OAuth 2.0 authorization server that owners sign in to | Saying who a token belongs to |
 | Daemon | Admits owners, names their agents, checks every message against the server agent's firewall, orders and stores messages | The author of each message, the order within a conversation, delivery, and custody of content |
-| Decision provider | Judges text rules, when the [message policy](./firewall/message-policy.md#message-policy-file) names one | Reading each checked message with the earlier messages of its conversation, and answering: a send whose check gets no answer fails |
+| Decision provider | Judges text rules, when the settings name [one](./firewall.md#decision-provider) | Reading each checked message with the earlier messages of its conversation, and answering: a send whose check gets no answer fails |
 
 An owner who does not trust the daemon's operator should not use that daemon.
 A daemon that misbehaves can read, drop, reorder or forge messages. Nothing in
@@ -34,7 +34,7 @@ When an agent sends, the daemon:
 
 1. Records the calling agent as the author. A client's recipient is the
    server agent, and the server agent names a client that has written to it.
-2. Has the server agent's [firewall](./firewall/message-policy.md) check the
+2. Has the server agent's [firewall](./firewall.md) check the
    message with the conversation's earlier messages. A refused message fails
    its send and is not stored.
 3. Gives the message the next place in its conversation and saves it for
@@ -89,12 +89,13 @@ The server agent has the full catalog, with `send_message` taking `to` and
 
 ### Firewall and norms
 
-Only the server agent has a firewall and holds norms. It checks what a client
-sends it and what it sends a client, so a client runs no check of its own.
+A server publishes norms, and the server agent's firewall holds both members
+to them: it checks what a client sends the server agent and what the server
+agent sends a client. A client runs no check of its own.
 
-A client is not trusted with the server agent's policy. When its message is
-refused, its send fails with the feedback of the rules that refused it and
-nothing else of the check. When the message could not be checked, the client
+A client is not trusted with the check. When its message is refused, its send
+fails with feedback that says what does not fit the norm and nothing else of
+the check. When the message could not be checked, the client
 reads only that the server is unavailable.
-[Refused messages](./firewall/message-policy.md#refused-messages) states what
+[Refused messages](./firewall.md#refused-messages) states what
 each sender reads.

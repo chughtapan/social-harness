@@ -16,7 +16,7 @@ processing, scheduling and replies.
 An inbox entry holds one message a peer sent the agent. A message is checked
 and stored when it is sent, whether or not its recipient is reading.
 
-The server agent's [firewall](../firewall/message-policy.md) allows a
+The server agent's [firewall](../firewall.md) allows a
 message, which becomes an inbox entry, or refuses it, which fails its
 sender's send. Checks follow conversation order.
 

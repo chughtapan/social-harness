@@ -24,10 +24,9 @@ docker run --rm --network none \
   "ghcr.io/social-harness/daemon:<version>" --help
 ```
 
-Supply `SHARNESS_DATABASE_URL`, `SHARNESS_CONFIG_FILE` and, when the policy
-names a decision provider, `SHARNESS_DECISION_PROVIDER_KEY` in `daemon.env`.
-Mount the settings file with the policy file and norms directory it names,
-read-only.
+Supply `SHARNESS_DATABASE_URL`, `SHARNESS_CONFIG_FILE` and, when the settings
+name a decision provider, `SHARNESS_DECISION_PROVIDER_KEY` in `daemon.env`.
+Mount the settings file with the norms directory it names, read-only.
 
 ```bash
 docker run --detach --name agent-daemon \

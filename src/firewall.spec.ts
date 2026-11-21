@@ -261,7 +261,7 @@ it.each(senders)(
         Schema.parseJson(
           Schema.Struct({
             sender: Schema.String,
-            policy: Schema.Struct({ rules: Schema.Array(Schema.Unknown) }),
+            rules: Schema.Array(Schema.Unknown),
           }),
         ),
       )(request?.state);
@@ -274,7 +274,7 @@ it.each(senders)(
       expect(
         Object.values(request?.questions ?? {}).map(({ ruleId }) => ruleId),
       ).toEqual([proposal.id, privacy.id]);
-      expect(state).toEqual({ sender, policy: { rules } });
+      expect(state).toEqual({ sender, rules });
     }),
 );
 

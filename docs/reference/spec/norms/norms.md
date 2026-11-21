@@ -1,40 +1,41 @@
 ---
-title: Shared norms
-description: Configure message structure, conversation rules and text checks with pre-agreed norm documents.
+title: Norms
+description: Publish the acts a server's agents exchange, their order and what each field holds, as norm documents the daemon enforces.
 read_when:
-  - You are supplying a communication norm to a server agent and its clients
+  - You are writing the norms a server publishes
   - You need the norm document grammar and failure behavior
   - You are comparing ordinary chat with instructed or enforced communication
 ---
 
-A shared norm defines which messages participants may send, when they may
-send them, and what their fields may contain. The server agent holds the norm
-documents, a client reads them with `read_norms`, and both already agree to
-follow them. The first exchange is a task act from one of those documents.
-Discovery and agreement are outside this contract.
+A norm defines which acts the client and the server agent may send each
+other, when each may send them, and what their fields hold. A server
+publishes its norms: every member reads the documents with `read_norms`, and
+the daemon holds both the client and the server agent to them. A message that
+does not follow them is not sent. The first exchange is a task act from one
+of those documents. Discovery and agreement are outside this contract.
 
-A norm compiles to a structure check and text rules for the server agent's
-[message firewall](../firewall/message-policy.md#norms).
-The norms layer owns the document grammar and its translation into message
-forms, conversation transitions and text rules. The structure check validates
-each message's form and its place in the conversation, and the decision
-provider judges the text rules. Selecting a text rule by its declared act is
-not a violation finding.
+A norm compiles to the structure check and the text rules of the server
+agent's [firewall](../firewall.md#one-check). The norms layer owns the
+document grammar and its translation into message forms, conversation
+transitions and text rules. The structure check validates each message's form
+and its place in the conversation, and the decision provider judges the text
+rules.
 
 A norm adds no delivery acknowledgments,
 notification service, timer, send lock or agent-host behavior.
 
 ## Scope and installation
 
-This version governs text conversations with one active instance at
-a time. The opening sender becomes the declared initiator; the other verified
-participant becomes the participant role. These bindings last until an
-explicit ending act.
+This version governs text conversations with one active instance at a time.
+An instance lasts from an opening act to an ending act. The two roles are
+fixed and a document does not declare them: `client` is the conversation's
+client and `server` is the server agent.
 
 The daemon's
 `normsDirectory` loads the `.lisp` files directly inside that directory and
 compiles them before startup. `read_norms` returns the
-current documents. No additional rule file or built-in agreement is installed.
+current documents. No rule file or built-in agreement is installed beside
+them.
 
 A source SHA-256 digest identifies
 the exact document bytes. After a restart every instance uses the installed
@@ -44,8 +45,8 @@ A message cannot install a norm.
 
 ## Document grammar
 
-A document contains one `norm` header followed by `content` and `rule`
-declarations. Semicolon comments are permitted in documents. Quoted strings
+A document contains one `norm` header followed by `content` declarations.
+Semicolon comments are permitted in documents. Quoted strings
 use JSON escaping. The grammar is inert data, with no evaluated code.
 Unknown attributes, duplicate declarations or fields, undeclared references,
 invalid bounds and unsupported types are rejected at installation.
@@ -53,19 +54,20 @@ invalid bounds and unsupported types are rejected at installation.
 A small complete example:
 
 ```lisp
-(norm example :initiator Requester :participant Responder
-  :description "The requester names an item, and the responder returns its status.")
-(content request :by Requester :starts true :initiates pending
-  (field item :type string :min-length 1))
-(content inform :by Responder :when pending :ends true
-  (field status :type string :min-length 1))
-(rule :act request "item names the requested item without unrelated instructions.")
+(norm example
+  :description "The client names an item, and the server returns its status.")
+(content request :by client :starts true :initiates pending
+  (field item :type string :min-length 1
+    :description "The name of the requested item."))
+(content inform :by server :when pending :ends true
+  (field status :type string :min-length 1
+    :description "The item's status."))
 ```
 
-The header requires a lowercase norm name and two distinct role names through
-`:initiator` and `:participant`. Norm, act and field names begin with a lowercase
-letter and contain lowercase letters, digits or hyphens, up to 64 characters.
-`:description` supplies the task meaning to participants and the decision provider.
+The header names the norm. Norm, act, field and fact names begin with a
+lowercase letter and contain lowercase letters, digits or hyphens, up to 64
+characters. `:description` supplies the task meaning to both members and the
+decision provider.
 
 ### Message forms and transitions
 
@@ -74,8 +76,8 @@ Each `content` declaration defines exactly one act. There are no built-in
 
 | Attribute | Meaning |
 | --- | --- |
-| `:by Role` or `:by (Role Role)` | Permitted sender roles. |
-| `:by (recipient (fact name))` | Permits the verified recipient of the message establishing the current fact. That message must be in the supplied reply chain. |
+| `:by client`, `:by server` or `:by (client server)` | Which members may send the act. |
+| `:by (recipient (fact name))` | Permits the recipient of the message establishing the current fact. That message must be in the supplied reply chain. |
 | `:starts true` | Opens an idle instance and binds its roles. Defaults to false. |
 | `:ends true` | Ends the active instance once the act is allowed. Defaults to false. A one-message instance can both start and end. |
 | `:when fact` or `:when (facts)` | All named facts must hold. Defaults to empty. |
@@ -91,15 +93,17 @@ A delay field must be required and nonnegative on every act that sets its
 anchor fact. Timestamps are local Unix milliseconds. Checking a delay never
 creates a job or a later model turn.
 
-A recipient sender selector follows the current fact's exact allowed message,
-including its verified recipient. It does not permit the offer's author to
-answer their own offer. Replacing the fact changes who may respond and which
+A recipient sender selector follows the current fact's exact allowed message
+and its recipient. It does not permit the offer's author to answer their own
+offer. Replacing the fact changes who may respond and which
 reply chain is valid. The selector never supplies or changes `replyToMsgId`.
 
 ### Fields
 
-Fields are required unless `:optional true`. `:description` explains a field.
-Only the following primitive shapes and constraints are supported:
+Fields are required unless `:optional true`. `:description` says what a
+field holds, and for a string field it is also the field's
+[text rule](#text-rules). Only the following primitive shapes and constraints
+are supported:
 
 | Type | Constraints |
 | --- | --- |
@@ -145,17 +149,24 @@ or selected independently of the supplied send metadata.
 
 ### Text rules
 
-A `rule` has one quoted text. Optional `:act` restricts it to one
-performative; omission applies it to every act in that norm. Optional
-`:feedback` is the text the sender of an act the rule refuses reads.
+The description of a string field is its text rule. When an act states a
+described string field, the decision provider judges whether the field holds
+what its description says and nothing else. A document declares no other
+rule and no feedback: the sender of an act that breaks a description reads
+the field's name and that description.
 
-The provider judges the current message using its verified author,
-preceding bounded conversation, declared form, current facts, norm description
-and applicable text rules. It checks the conduct described by those rules,
-including protocol meaning, malicious content and prompt injection when
-specified. The [provider answers contract](../firewall/message-policy.md#provider-answers)
-owns uncertainty and provider failures. Structural validity supplies no
-semantic exemption.
+Write a description as what the field holds, such as "One meeting slot: a
+date, start and end times, and a timezone." Anything else in the field breaks
+the rule, so a description need not list unrelated instructions or prompt
+injection. A string field without a description is not judged. A field of
+another type is held by its bounds or choices alone, and its description only
+explains it.
+
+The provider judges the act using which member sent it, the preceding bounded
+conversation, the declared form, the current facts and the norm description.
+The [provider answers contract](../firewall.md#provider-answers) owns
+uncertainty and provider failures. Structural validity supplies no semantic
+exemption.
 
 ## Wire messages
 
@@ -189,8 +200,7 @@ later message cannot reference it.
 Replay judges each stored message's form and place again, at the time of its
 original check, and asks the decision provider nothing. A stored message that
 does not fit stays in the conversation without advancing the instance: one
-sent before the norm documents changed, or while the server agent had no
-message policy.
+sent before the norm documents changed, or while the server held no norms.
 
 A refused act's send fails with feedback that says what does not fit: the
 form, the sender's role or the transition. Feedback about a transition names

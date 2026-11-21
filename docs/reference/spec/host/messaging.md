@@ -47,7 +47,7 @@ written for the model to act on:
 | `content-invalid` | Either | The text is longer than 32,768 bytes as JSON text. |
 
 A client reads nothing else of a refusal, as
-[refused messages](../firewall/message-policy.md#refused-messages) states.
+[refused messages](../firewall.md#refused-messages) states.
 Invalid arguments, malformed text among them, fail before the call runs and
 identify the field to correct. A corrected message is a new send with a new
 check.

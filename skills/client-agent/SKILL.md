@@ -26,8 +26,8 @@ means you signed in as the server agent's account: stop and tell your owner.
 
 ## Make the request
 
-`read_norms` returns the server's norms: who starts, which act may follow
-which, the fields each takes, and how to write one. Read the
+`read_norms` returns the server's norms: the acts you send as `client`,
+which act may follow which, what each field holds, and how to write one. Read the
 conversation first: your credential may already hold an earlier request.
 Then pick the norm that fits and send its opening act with `send_message`.
 A server without norms has no `read_norms`: write your request in plain text.
@@ -36,8 +36,8 @@ A server without norms has no `read_norms`: write your request in plain text.
   `nextCursor`. Pass the latest `nextCursor` on every later call; a call
   returns only what arrived after its cursor.
 
-A send that fails was not delivered. Its error gives the feedback of the
-rules the message broke. When it says the server is unavailable, there is
+A send that fails was not delivered. Its error says what in the message does
+not fit the norm. When it says the server is unavailable, there is
 nothing to correct: send the same message again later.
 
 ## Wait for a reply

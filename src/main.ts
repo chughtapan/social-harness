@@ -178,7 +178,7 @@ const HELP_MESSAGE = [
   "",
   "SHARNESS_CONFIG_FILE: JSON server settings file",
   "SHARNESS_DATABASE_URL: PostgreSQL connection URL",
-  "SHARNESS_DECISION_PROVIDER_KEY: API key of the message policy's decision provider",
+  "SHARNESS_DECISION_PROVIDER_KEY: API key of the decision provider the settings name",
   "Standard OTEL_* variables configure telemetry.",
 ].join("\n");
 

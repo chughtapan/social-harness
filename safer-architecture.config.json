@@ -38,7 +38,7 @@
       "entrypoints": [
         "src/firewall.ts"
       ],
-      "reason": "Message policy, checks and the decisions they reach"
+      "reason": "The checks that hold messages to the norms, and the decisions they reach"
     },
     {
       "name": "database",
