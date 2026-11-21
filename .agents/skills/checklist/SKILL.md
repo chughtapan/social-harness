@@ -15,9 +15,7 @@ words behind each rule are in docs-internal's
 Societies Need a Social Harness* describes them: identities (L1), reliable
 ordered communication (L2), each agent's personal firewall (L3), norms that
 agents agree to (L4), and institutions and applications built on them (L5).
-An agent runs inside a *host*, which
-reaches the stack through a local *daemon*. The *firewall* checks every message
-an agent sends or receives against its policies. An agent's *owner* is the
+An agent's *owner* is the
 person it acts for.
 
 ## Where the system is heading
@@ -30,9 +28,6 @@ for the Internet", is the goal plans and docs serve (audit rule 11.5):
   removed.
 - A user's agent joins an application from one advertised prompt, after the
   owner signs in to prove who they are.
-- Every agent's daemon checks each message, inbound and outbound. It approves
-  the message, approves it with guidance for the agent, holds it for the
-  owner, or blocks it.
 
 ## Before you design
 
@@ -46,12 +41,6 @@ for the Internet", is the goal plans and docs serve (audit rule 11.5):
   CUPID best and delete the other. Never add a third to reconcile them.
 - [ ] Check each property once, at the boundary that owns it. A check that
   repeats another layer's is deleted, not kept as defense in depth.
-- [ ] Every plan has an Architecture section: the constraints and the one that
-  decides the design, the full target file tree, exact placement and names,
-  the direction of dependencies, the contracts and entry points, and one line
-  per module checking it against
-  [CUPID](https://dannorth.net/cupid-for-joyful-coding/). Review it with
-  gstack's `/plan-eng-review` before building.
 - [ ] Design the interfaces application builders use from several real
   applications: office hours, GPU sharing, a social deduction game and a
   buy-nothing marketplace. Build each application's own logic as another agent
@@ -75,9 +64,6 @@ for the Internet", is the goal plans and docs serve (audit rule 11.5):
 - [ ] Depend only on what a lower layer's public specification states. If you
   need more, change that specification first. A new layer on top adds its own
   small interface and leaves the ones below it unchanged.
-- [ ] A network service's API and client live with the layer whose job the
-  service does, and its server is a separate package. Shared code gives the
-  server whole operations, such as "verify this request", rather than steps.
 - [ ] One daemon hosts every owner's agent and is the only process. It holds
   each agent's messages, policy and secrets, and is trusted for the sender,
   order, delivery and custody of every message. Agents on different daemons
@@ -138,31 +124,14 @@ directly; these items do not restate them.
   before it leaves. It does not inspect tool calls or change the host.
 - [ ] Who is asking comes from the author the daemon recorded when it
   admitted the sender, never from what the message text claims.
-- [ ] When the owner must approve something, the firewall holds it and the
-  agent asks through the host's own ask-the-user feature. There is no second
-  approval mechanism.
 - [ ] Stop a leak with a policy on the messages that leave. Keep the
   capability legitimate use needs.
-- [ ] Agreements between agents and services are ordinary messages plus
-  firewall policies. A norm is a plain-English rule the parties agree to.
-- [ ] A service agent, such as the membership concierge, is defined by its
-  instructions, files and tools. Specify what the system provides, and leave
-  how builders structure their agents to them. A workflow that changes often,
-  such as sign-up, is agent instructions plus tools.
 
 ## Hosts and other systems
 
 - [ ] Use only a host's documented configuration and extension points, never
   its internal behaviour or a patch; existing patches are debt to remove. Use
   the host's own features and default names first.
-- [ ] Agent skills, the instruction files an agent reads, ship with the
-  library (`@social-harness/social-harness`). Each channel plugin, the package that
-  connects one host to the stack, takes them from there.
-- [ ] Let the container orchestrator provide isolation, start order and
-  helper processes, and the runtime library retries and in-flight work. Read a
-  host's usage from its standard telemetry export. Use a standard tool (a
-  dependency bot, a documentation generator, a host's own installer) instead
-  of keeping our own copy of one.
 
 ## One source per fact
 
@@ -184,17 +153,10 @@ directly; these items do not restate them.
 - [ ] Each package and image is versioned and published only when its own
   contents change. Publish to a package registry only what users run next to
   their own agent, and ship services as signed container images.
-- [ ] Our agents and outside users upgrade the same way, through the same
-  public updater. Evaluation runs pin exact versions.
 - [ ] Collect incompatible changes to the wire format, stored data and names
   into one planned breaking release, and never loosen the compatibility rules
   to ship one early. Until the first public release, keep no
   backward-compatibility code, and delete the old path when the new one lands.
-- [ ] A rollout applies the change and waits only for that change to become
-  ready, with no preflight checks, no restore to a previous version, and no
-  waits or retries for other systems. Automate every rollout that can be.
-  Deploy the images built from the same commit as the configuration; record
-  versions in git only for artifacts built elsewhere, and let a bot move them.
 - [ ] Public end-to-end tests run on the CI provider's standard runners
   without secrets, on merges to main, on a schedule or by hand; private
   end-to-end suites run by hand. No nightly suites and no runner fleets of our
@@ -214,18 +176,12 @@ directly; these items do not restate them.
   edit, the test is wrong.
 - [ ] Integration tests use real systems, and fakes pass the same contract
   tests as the real thing.
-- [ ] Evaluations state what should happen and keep safety cases in their own
-  group. Every setup in a comparison gets the same model and tools, and attacks
-  target the property claimed to be better, including availability and cost.
 - [ ] Every build, type-check, lint and test run goes through the build
   system's targets (Nx), in your own commands and in the steps you hand to
   another agent; a test set with no target gets one.
 
 ## Docs and records
 
-- [ ] A decision record (ADR) states a few stable rules and why. Layouts,
-  lists, versions and mechanisms live in plans, code and public
-  specifications; product flows get plans. Replace a record by superseding it.
 - [ ] Specify interfaces before implementation plans. Vision documents state
   goals, required properties and the pass/fail checks that show them; the
   plan names the mechanisms.
