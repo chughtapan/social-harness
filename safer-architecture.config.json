@@ -88,7 +88,7 @@
       "entrypoints": [
         "src/norms/index.ts"
       ],
-      "reason": "Norm documents and the contracts they compile to for the firewall"
+      "reason": "The norm language: its Lisp frontend, the norm it reads documents into, and the structure check that runs a norm"
     }
   ],
   "layers": [
@@ -97,7 +97,7 @@
       "folders": [
         "norms"
       ],
-      "reason": "Norms compile documents into contracts the firewall checks"
+      "reason": "Norm documents compile to norms, which the structure check runs for the firewall"
     }
   ],
   "publicTypePackages": [],

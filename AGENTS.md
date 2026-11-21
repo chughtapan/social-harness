@@ -67,8 +67,15 @@ and the contract for the area you change:
 - [Daemon lifecycle and MCP interface](docs/reference/spec/daemon.md).
 - [Identity](docs/reference/spec/identity/identity-and-attribution.md) and
   [modes](docs/reference/spec/modes.md).
-- [Norms](docs/reference/spec/norms/norms.md) and the
-  [firewall](docs/reference/spec/firewall.md) that enforces them.
+- [Norm language](docs/reference/spec/norms/norms.md) and the
+  [firewall](docs/reference/spec/firewall.md) that enforces norms.
+
+`src/norms/` is laid out as a compiler. `lisp.ts` is the frontend and the
+only module that knows the syntax. `norm.ts` is the norm it reads documents
+into, as plain data. `compiler.ts` checks that norm to be well formed, and
+`structure-check.ts` runs it over a conversation. Neither reads syntax: a
+change to how norms are written touches `lisp.ts` and the specification's
+grammar, and nothing else.
 
 Onboarding is agent-led and lives only in `skills/`: an agent reads a skill
 and does the setup. `host-a-server` sets up an owner's server (sign-in,
