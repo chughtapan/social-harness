@@ -71,16 +71,6 @@
       "reason": "The MCP tools and inbox event through which a host reaches the server"
     },
     {
-      "name": "authentication",
-      "roots": [
-        "src/authentication.ts"
-      ],
-      "entrypoints": [
-        "src/authentication.ts"
-      ],
-      "reason": "How a request is admitted as an owner"
-    },
-    {
       "name": "norms",
       "roots": [
         "src/norms"

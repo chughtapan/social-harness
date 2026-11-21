@@ -20,7 +20,6 @@ credential on the request, under the daemon's
 | Credential | Owner |
 | --- | --- |
 | OAuth access token | The token's issuer and subject |
-| Bearer token under [development authentication](../daemon.md#development-authentication) | The issuer `development` and the token itself as the subject |
 
 Email addresses, display names and anything else a caller supplies do not
 select an owner.
