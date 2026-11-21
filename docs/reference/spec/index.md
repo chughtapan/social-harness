@@ -16,7 +16,7 @@ The [constitution](../constitution.md#the-constitution) governs them. The
 | Host communication | [Messaging](./host/messaging.md), [receiving](./host/receiving.md) |
 | Agent daemon | [Daemon](./daemon.md) |
 | Enforcing norms | [Firewall](./firewall.md) |
-| Agreed norms | [Norms](./norms/norms.md) |
+| The norm language | [Norms](./norms/norms.md) |
 | Agents, names and attribution | [Identity](./identity/identity-and-attribution.md) |
 | Server agent, clients, ordering and trust | [Modes](./modes.md) |
 | Package ownership and imports | [Boundaries](./package-boundaries.md) |

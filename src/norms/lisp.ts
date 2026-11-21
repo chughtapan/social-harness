@@ -48,6 +48,9 @@ interface Declaration {
   readonly children: readonly SExpression[];
 }
 
+/** The form of a symbol that is a number: a JSON number. */
+const NUMBER = /^-?(?:0|[1-9]\d*)(?:\.\d+)?(?:[eE][+-]?\d+)?$/u;
+
 /** The attributes that bound a field of each type. */
 const bounds = {
   string: [":min-length", ":max-length"],
@@ -171,7 +174,7 @@ function readValue(node: SExpression): Read<Value> {
       ? Either.right(items)
       : Either.left("A list holds strings, not lists.");
   }
-  if (!/^-?(?:0|[1-9]\d*)(?:\.\d+)?(?:[eE][+-]?\d+)?$/u.test(node.value)) {
+  if (!NUMBER.test(node.value)) {
     return Either.right(node.value);
   }
   return Number.isFinite(Number(node.value))
@@ -450,7 +453,7 @@ function numberAttribute(
   }
   const text = symbol(node);
   const value =
-    text === undefined || text.trim() === "" ? Number.NaN : Number(text);
+    text !== undefined && NUMBER.test(text) ? Number(text) : Number.NaN;
   return Number.isFinite(value)
     ? Either.right(value)
     : Either.left(`${key} takes a finite number.`);

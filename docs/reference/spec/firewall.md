@@ -96,7 +96,7 @@ depends on who sent it:
 
 | Sender | Reads |
 | --- | --- |
-| Server agent | The reason (`rule-violation`, `unresolved-evidence` or `check-unavailable`), the check id and the feedback. A message read as an act of a norm adds the [structure check's diagnostics](./norms/norms.md#state-refusal-and-recovery). |
+| Server agent | The reason (`rule-violation`, `unresolved-evidence` or `check-unavailable`), the check id and the feedback. A message read as an act of a norm adds the [structure check's diagnostics](./norms/norms.md#refusals). |
 | Client | The feedback. When the check was unavailable, only that the server is unavailable and to try again later. |
 
 A client's failure holds nothing else: no check id, no rule id, no word of

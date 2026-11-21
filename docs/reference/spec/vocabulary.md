@@ -55,9 +55,10 @@ of thing.
 | Word | Meaning |
 | --- | --- |
 | **norm** | Which **acts** the client and the server agent may send each other, in what order and with what in each field, identified by its **norm name**. A server publishes its norms. |
-| **norm document** | The text that defines one norm. |
+| **norm document** | The text that defines one norm, in the [norm language](./norms/norms.md). |
 | **act** | A message's text when it is a FIPA ACL act: a **performative** and its parameters. |
-| **form** | The fields a norm requires of one performative, each with the **description** of what it holds. |
+| **form** | What a norm declares for one performative: the fields an act of it carries, each with the **description** of what it holds, and its turn rule. |
+| **fact** | A name that holds or does not hold during an instance. Acts set and clear facts, and forms wait on them. |
 | **role** | Which member of a conversation an agent is. A norm document writes the roles `client` and `server`, the server agent. |
 | **protocol** | A norm's turn rules: which role may send which act next. |
 | **instance** | One run of a norm's protocol in a conversation. |
