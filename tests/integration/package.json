@@ -8,6 +8,9 @@
     "lint": "eslint . --cache --max-warnings=0"
   },
   "nx": {
+    "implicitDependencies": [
+      "@social-harness/social-harness"
+    ],
     "targets": {
       "test:integration": {
         "inputs": [
