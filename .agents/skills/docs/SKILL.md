@@ -102,8 +102,7 @@ Document implementation only when the explanation adds something a reader
 cannot obtain from clear code. Implementation comments explain what the code
 leaves unclear, such as a non-obvious invariant, in present tense.
 Bugfix rationale, investigation outcomes, failed approaches, and change
-history belong in issues, PR descriptions, and commit messages. Durable
-architecture decisions belong in ADRs. Remove file tours,
+history belong in issues, PR descriptions, and commit messages. Remove file tours,
 dependency inventories, and narration of control flow during simplification.
 
 Useful examples have different scopes:
@@ -307,10 +306,6 @@ Load the installed Google guides that address the area under review:
   pagination, asynchronous work, errors, retries, or compatibility. Apply it
   to the actual interface. A resource-oriented HTTP convention does not by
   itself justify changing an Effect service or messaging protocol.
-- `google-adr` and `google-design-docs` for decision records and design
-  proposals. Use the [ADR guidance](https://docs.cloud.google.com/architecture/architecture-decision-records)
-  to assess context, alternatives, consequences, and rationale. The records
-  skill governs location, evidence, status, and approval.
 
 An audit should make decisions easier. Trace a concrete reader or caller
 problem through the owning contract, implementation, and consumers. Challenge
@@ -339,18 +334,6 @@ to find where the draft makes them guess. Have them follow the changed paths,
 including their commands and links. Fix blockers or record them as issues
 linked from the PR. State who reviewed the draft, what they actually tried,
 and what remains unverified. Use context the owner already supplied.
-
-## Examples from our reviews
-
-- The identity spec opened with a source location, a milestone label, and
-  version notation. Delete the metadata. Explain notation beside its example
-  and compatibility in its owning section.
-- “Standards substrate” listed libraries and rejected formats before
-  explaining identity. Remove it. Keep each standard with the encoding rule
-  it determines.
-- A source README described `http.ts` as HTTP handling and `store.ts` as
-  persistence. Delete the inventory. The reason a failed send changes no
-  member's history belongs with that guarantee.
 
 ## Write a README
 

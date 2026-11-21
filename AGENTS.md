@@ -1,29 +1,8 @@
 # Social Harness — agent instructions
 
-## Start every task
-
-Load the applicable skills before planning, lookup or editing. This is the
-agent's responsibility; an ordinary user request is sufficient and need not
-name a skill. Invoke the host's Skill tool when available; otherwise read the
-entire `SKILL.md` at the path below. Listing a skill, remembering a previous
-session or checking its hash does not load its instructions.
-
-| Task | Load |
-| --- | --- |
-| Plan, design, write, review or land any change | `.agents/skills/checklist/SKILL.md` |
-| Plan a change or prepare a handoff | `.agents/skills/shared-sdlc/SKILL.md` |
-| Design, implement or review software | `.agents/skills/software-architecture/SKILL.md` |
-| Verify, merge or release a change, or brief another agent to | `.agents/skills/delivery/SKILL.md` |
-| Find, file or review an internal record | `.agents/skills/records/SKILL.md` |
-| Write or edit public documentation | `.agents/skills/docs/SKILL.md` |
-
-Load only applicable skills, then follow their targeted references.
-Do not ask the user to invoke skills for you.
-
-Every `CLAUDE.md` is a symlink to the `AGENTS.md` beside it. Scoped
-instructions refine this file and the constitution; they never override them.
-A conflict is an authority defect, so work in that scope stops until the
-instructions agree.
+Repository skills live in `.agents/skills/`: `checklist` holds the project's
+design rules, `software-architecture` its engineering practices, and `docs`
+its writing guide.
 
 State only what a check cannot. If `pnpm lint` fails on it, name the check
 rather than repeating the rule — prose that duplicates a linter costs context
@@ -96,30 +75,6 @@ text determines what the structure check and the decision provider enforce.
 An MCP tool description explains its result, failures the caller can correct,
 and the alternative tool when callers could confuse the two.
 
-## Workflow
-
-Understand the task → make a design decision if needed → implement and test →
-independent review → ship. An existing request or issue authorizes bounded work;
-do not ask for a separate plan approval unless the scope changes.
-
-- A routine fix needs an issue/PR description and appropriate checks.
-- A coordinated feature needs one plan.
-- A durable architecture, public interface, security, persistence, or package
-  ownership choice needs one complete source-backed ADR and independent review.
-  An agent cannot invent the owner's approval or treat a reviewer PASS as
-  decision authority.
-- Update the existing PR/plan for a handoff. Add a separate handoff only when
-  those records cannot carry what the next agent needs.
-
-Public specifications remain the implementation baseline until a change is
-admitted. Agree on a complete decision candidate before starting its admission
-review; do not automatically review intermediate drafts.
-
-Use an isolated worktree for concurrent changes, preserve other people's work,
-and confirm branch, commit, uncommitted changes, existing checks, and next action
-before resuming a handoff. Keep useful current evidence; do not commit failed-run
-exports, old attempt logs, or duplicate summaries.
-
 ## Toolchain and skills
 
 Use Node from `.node-version` and the pnpm version in `package.json`. Run build,
@@ -137,23 +92,9 @@ build, dependency, and CI policy, `google-swe-engineering-standards` for the
 lint and architecture gates themselves, and the applicable Google code-review
 author or reviewer guide. New code meets its guide in the commit that
 introduces it; existing code is brought along by the change that touches it.
-Repository law, Effect conventions, Nx, ESLint, oxfmt, and scoped package
-instructions take precedence. Link to the guide rather than copying it into the
-repository, and keep tests and documentation in the change they explain.
-
-gstack reviews compose with the Google guides where they apply.
-
-| Guide | Loaded by |
-|---|---|
-| `google-code-review-reviewer` | `/ship`'s structured review |
-| `google-swe-testing` | `/ship`'s testing specialist; `/plan-eng-review`'s test review |
-| the same language guides | `/ship`'s maintainability specialist; `/plan-eng-review`'s code-quality review |
-| `google-swe-engineering-standards` | the same two, for changes to the lint or architecture gates |
-| `google-swe-builds-dependencies-and-ci` | `/plan-eng-review`'s architecture review; `/ship` for workflow, Nx, manifest, or release-script changes |
-| `google-swe-compute-platforms` | either, for cluster execution: profiles, admission, run namespaces, images, Temporal |
-| `google-swe-change-management` | `/ship`'s data-migration and api-contract specialists; `/plan-eng-review`'s scope challenge |
-| `google-swe-code-review-systems` | either, for changes to a gate, a review regime, or this file |
-| `google-documentation-guide` | either, for documentation claims |
+Repository law, Effect conventions, Nx, ESLint and oxfmt take precedence. Link
+to the guide rather than copying it into the repository, and keep tests and
+documentation in the change they explain.
 
 State which checks and reviews actually ran.
 
@@ -198,8 +139,7 @@ Dockerfile `FROM`, or the manifest of something built outside the workspace.
   into the description prose. Lint requires a block on every export, so
   rewrite an export block to say what the name cannot rather than
   deleting it.
-  JavaScript carries the JavaScript guide's typed annotations, which no
-  signature gives. Never issue/spec/phase numbers, change narration
+  Never issue/spec/phase numbers, change narration
   (formerly, no longer, renamed from), or design alternatives. Rewrite
   touched comments in the same PR; history lives in git, not code.
 - A user-facing error with a known fix says what to do. Error messages and
@@ -220,7 +160,7 @@ runs safer-architecture-lsp against it.
 ## Docs
 
 Read this file and `docs/reference/constitution.md`, then the applicable public specification
-under `docs/reference/spec/` and package instructions. Reconcile a boundary change with its public
+under `docs/reference/spec/`. Reconcile a boundary change with its public
 specification; do not leave a binding interface specification only in chat,
 agent state, or records outside this repository.
 
@@ -228,8 +168,6 @@ Writing or regenerating public docs uses the `docs` skill at
 `.agents/skills/docs/SKILL.md`; `.claude/skills/docs` links to the same source.
 Keep repository-owned skills under `.agents/skills/` with a matching Claude
 link.
-Generated files come from their source and must not be edited by hand.
-Shared site content uses Mintlify snippets and `docs.json` variables.
 
 <!-- nx configuration start-->
 <!-- Leave the start & end comments to automatically receive updates. -->
