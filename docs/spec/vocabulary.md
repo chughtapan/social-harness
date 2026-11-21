@@ -94,9 +94,6 @@ These verbs each have one meaning:
 | **feedback** | What the sender of a refused message reads: what in it does not fit the norm. The firewall derives it. |
 | **record** | What the server saves of one check's decision, without message content. A message refused because its check was unavailable has none. |
 
-The structure check passes a message or refuses it. The decision provider
-judges and answers. The firewall checks, and decides to allow or refuse.
-
 ## Daemon
 
 | Word | Meaning |

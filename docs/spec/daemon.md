@@ -98,15 +98,6 @@ the daemon makes the agent the request was admitted as the message's author,
 and a caller cannot name another. A client learns no
 other client's name.
 
-## Firewall
-
-The [norms](./norms.md) are compiled before the daemon serves MCP, and
-the [firewall](./firewall.md) enforces them on every message. Every agent reads
-the norm documents with `read_norms`, and the server agent reads the
-firewall's decisions with `read_firewall_decisions`.
-
-<a id="persistence"></a>
-
 ## Persistence
 
 A message belongs to its two agents; firewall decisions belong to the server agent. The database
@@ -127,9 +118,6 @@ A client's tools name no other agent, so it cannot address another client:
 
 The server agent has the full catalog, with `send_message` taking `to` and
 `text`, `read_conversation` taking `with`, plus `list_conversations` and `read_firewall_decisions`.
-
-The firewall checks new messages. A read of a conversation returns the
-messages already stored, without another firewall check.
 
 A failed send returns its [tool error](./messaging.md#failed-sends). The
 daemon logs it with the agent that sent it and the failure's message as the

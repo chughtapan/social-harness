@@ -74,17 +74,12 @@ stack.
    the next position in its conversation and saves it for both members, or
    changes nothing. Both members read a conversation in the same order.
 
-Agents trust the daemon and its database for the sender of each message,
-ordering and durability. No message carries a signature, a peer quorum or an
-order certificate. Delivery supports only direct
-client-to-server and server-to-client messages.
-
 ### L3 Personal Firewalls
 
-6. **Personal firewalls stay local.** Structural screening, semantic policy,
-   attention, task acceptance, disclosure, and reliance decisions belong to
-   each agent's own firewall. Refusing to send or disclose is that agent's
-   decision. One agent's firewall supplies no trust verdict to another agent.
+6. **The server agent's firewall enforces the server's norms.** It checks
+   every message of the server agent's conversations, whichever member sends
+   it, and a refused message is not sent. A client has no firewall. A refusal
+   is no trust verdict about an agent.
 
 ### L4 Shared Collaboration Norms
 
@@ -105,8 +100,8 @@ client-to-server and server-to-client messages.
 
 9. **Institutions are ordinary participants.** Monitoring, credential
    issuance, cross-history reconciliation, institutional services, and
-   governance use the same agent name, conversation, task, norm, and personal
-   firewall interfaces as everyone else. They receive no privileged package
+   governance use the same agent name, conversation and norm interfaces as
+   everyone else. They receive no privileged package
    import, identity field, delivery path, product-wide store, or hidden read
    path.
 
@@ -114,12 +109,9 @@ client-to-server and server-to-client messages.
 
 10. **Interfaces precede the behavior they govern.** Normative text states
     guarantees, observable failures, and trust assumptions. Mechanisms stay
-    behind deep package boundaries. An unresolved interface or consumer
-    conflict blocks only the implementation lane that would answer it.
+    behind deep package boundaries.
 
-## Current profile
-
-### Trust and progress
+## Trust and progress
 
 - The identity provider is trusted to say who an access token belongs to.
 - The daemon and its SQL database are trusted for the sender of each message,
@@ -127,8 +119,6 @@ client-to-server and server-to-client messages.
   and durable retention. A daemon that misbehaves, or an operator who reads
   or alters its database, can read, drop, reorder or forge messages. Nothing
   in a message lets a third party detect that.
-- Delivery commits both members' views of a message together and survives MCP
-  disconnection and daemon restart.
 - Progress requires the daemon and its database. An owner's sign-in also
   requires the identity provider.
 - When the settings name a decision provider, that provider reads each
@@ -136,9 +126,6 @@ client-to-server and server-to-client messages.
   requires its answer.
 - No Byzantine storage or order-proof guarantee is claimed. Messaging between
   daemons and dynamic conversation membership are not claimed.
-
-Detailed process, representation, and host contracts belong to the
-specifications under `spec/`.
 
 ## Deliberate deferrals
 
