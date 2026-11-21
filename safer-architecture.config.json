@@ -6,7 +6,7 @@
     },
     {
       "path": "src/main.ts",
-      "reason": "Where the sharnessd process starts: its settings, OAuth admission and listener around the server"
+      "reason": "Where the sharnessd process starts: its settings, telemetry and listener around the server"
     }
   ],
   "domains": [
@@ -21,6 +21,16 @@
       "reason": "Agents and the messages they send each other"
     },
     {
+      "name": "decision-provider",
+      "roots": [
+        "src/decision-provider.ts"
+      ],
+      "entrypoints": [
+        "src/decision-provider.ts"
+      ],
+      "reason": "The provider that judges text rules: what it is asked and how its answers are read"
+    },
+    {
       "name": "firewall",
       "roots": [
         "src/firewall.ts"
@@ -28,7 +38,17 @@
       "entrypoints": [
         "src/firewall.ts"
       ],
-      "reason": "Policy, assessment and permitted content"
+      "reason": "The checks that hold messages to the norms, and the decisions they reach"
+    },
+    {
+      "name": "database",
+      "roots": [
+        "src/database.ts"
+      ],
+      "entrypoints": [
+        "src/database.ts"
+      ],
+      "reason": "The tables: each message with the firewall's check of it, and the record of each check"
     },
     {
       "name": "server",
@@ -38,7 +58,27 @@
       "entrypoints": [
         "src/server.ts"
       ],
-      "reason": "Agents, their messages, inboxes and history, the rows they live in, and the MCP tools that expose them"
+      "reason": "What agents do: send messages, read their inbox and their conversation"
+    },
+    {
+      "name": "mcp",
+      "roots": [
+        "src/mcp.ts"
+      ],
+      "entrypoints": [
+        "src/mcp.ts"
+      ],
+      "reason": "The MCP tools and inbox event through which a host reaches the server"
+    },
+    {
+      "name": "authentication",
+      "roots": [
+        "src/authentication.ts"
+      ],
+      "entrypoints": [
+        "src/authentication.ts"
+      ],
+      "reason": "How a request is admitted as an owner"
     },
     {
       "name": "norms",
@@ -48,7 +88,7 @@
       "entrypoints": [
         "src/norms/index.ts"
       ],
-      "reason": "Norm documents and the contracts they compile to for the firewall"
+      "reason": "The norm language, self-contained: its Lisp frontend, the norm it reads documents into, and the structure check that runs a norm"
     }
   ],
   "layers": [
@@ -57,7 +97,7 @@
       "folders": [
         "norms"
       ],
-      "reason": "Norms compile documents into contracts the firewall checks"
+      "reason": "The norm language imports nothing from the daemon; the firewall and the MCP tools import it"
     }
   ],
   "publicTypePackages": [],
@@ -71,11 +111,7 @@
     },
     {
       "rule": "shared-kernel-cohesion",
-      "reason": "encoding.ts and identity.ts are each one module by choice, and a schema module's exports have different users by nature"
-    },
-    {
-      "rule": "no-package-mesh",
-      "reason": "Six folders in declared layers; the layer and domain rules enforce their direction"
+      "reason": "firewall.ts is one module by choice: its policy, check and record contracts each have a different user"
     },
     {
       "rule": "folder-readme-required",

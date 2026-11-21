@@ -1,7 +1,7 @@
 {
   "name": "@social-harness/social-harness",
   "version": "0.0.0",
-  "description": "Social Harness daemon: hosts agents, delivers their messages and checks them against each agent's firewall",
+  "description": "Social Harness daemon: hosts agents, publishes a server's norms and delivers only the messages that follow them",
   "license": "Apache-2.0",
   "repository": {
     "type": "git",
@@ -48,6 +48,7 @@
     "namedInputs": {
       "default": [
         "{projectRoot}/src/**/*",
+        "{projectRoot}/tests/support/**/*",
         "{projectRoot}/config/**/*",
         "{projectRoot}/skills/**/*",
         "{projectRoot}/tsconfig.json",
@@ -65,7 +66,7 @@
         ]
       },
       "lint": {
-        "command": "eslint src '*.ts' 'scripts/**/*.ts' --cache --max-warnings=0",
+        "command": "eslint src tests/support '*.ts' 'scripts/**/*.ts' --cache --max-warnings=0",
         "inputs": [
           "default",
           "^production",

@@ -12,8 +12,8 @@ import { Effect, identity, Redacted, Schedule, Stream } from "effect";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { expect, it } from "vitest";
-import { callTool, send, type SignedIn } from "../../src/__tests__/server.js";
-import { issuerFixture } from "../../src/__tests__/test.js";
+import { callTool, send, type SignedIn } from "../support/host.js";
+import { issuerFixture } from "../support/issuer.js";
 import {
   inboxStream,
   processTrace,
@@ -109,17 +109,14 @@ it.for(runs)(
     )(context),
 );
 
-/** A norm document with no English rule. */
-const unruledNorm = `(norm ping :initiator Asker :participant Answerer)
-(content ask :by Asker :starts true :ends true)
-`;
-
-/** The same norm with an English rule, which needs a decision provider. */
-const ruledNorm = `${unruledNorm}(rule :act ask "The question is polite.")
+/** A norm document with a described string field, which needs a decision provider. */
+const describedNorm = `(norm ping)
+(act ask :by client :starts true :ends true
+  (field question :type string :description "One polite question."))
 `;
 
 it(
-  "refuses each settings file it cannot serve and an occupied port, saying which, and starts with a policy and norms named relative to the settings file",
+  "refuses each settings file it cannot serve and an occupied port, saying which, and starts with a decision provider and norms named relative to the settings file",
   processTrace(
     Effect.gen(function* () {
       const sharnessd = yield* sharedServer();
@@ -135,13 +132,10 @@ it(
             ),
             Effect.as(path),
           );
-      const unjudged = yield* write("unjudged.json", "{}");
-      const judged = yield* write(
-        "nested/policy.json",
-        JSON.stringify({ decisionProvider: { model: "configured-model" } }),
-      );
-      yield* write("nested/norms/ping.lisp", ruledNorm);
-      yield* write("broken/ping.lisp", "(norm ping :initiator Asker)");
+      yield* write("nested/norms/ping.lisp", describedNorm);
+      yield* write("nested/norms/notes.json", "not a norm document");
+      yield* write("broken/ping.lisp", "(norm ping :unheard x)");
+      yield* write("empty/notes.json", "not a norm document");
       const refusals: ReadonlyArray<
         readonly [Readonly<Record<string, unknown>>, string]
       > = [
@@ -152,18 +146,12 @@ it(
           { serverAgent: { name: "Front Desk", subject: SERVER_AGENT_OWNER } },
           "settings file",
         ],
-        [{ maximumHistoryRecords: 0 }, "settings file"],
-        [{ maximumHistoryRecords: 1025 }, "settings file"],
-        [{ messagePolicyFile: "absent.json" }, ""],
-        [{ normsDirectory: "nested/norms" }, "configured norms"],
-        [
-          { normsDirectory: "nested/norms", messagePolicyFile: unjudged },
-          "configured norms",
-        ],
-        [
-          { normsDirectory: "broken", messagePolicyFile: unjudged },
-          "norms directory",
-        ],
+        [{ historyLimit: 0 }, "settings file"],
+        [{ historyLimit: 1025 }, "settings file"],
+        [{ decisionProvider: {} }, "settings file"],
+        [{ normsDirectory: "nested/norms" }, "norms describe"],
+        [{ normsDirectory: "broken" }, "norms directory"],
+        [{ normsDirectory: "empty" }, "no norm document"],
       ];
       const settings = yield* fs.readFileString(
         join(sharnessd.directory, "settings.json"),
@@ -183,8 +171,8 @@ it(
         settings,
       );
       yield* sharnessd.configure({
-        maximumHistoryRecords: 1024,
-        messagePolicyFile: judged,
+        historyLimit: 1024,
+        decisionProvider: { model: "configured-model" },
         normsDirectory: "nested/norms",
       });
       yield* sharnessd.start();
@@ -193,7 +181,7 @@ it(
         server.mcp.callTool({ name: "read_norms", arguments: {} }),
       );
       expect(shown.structuredContent).toMatchObject({
-        norms: [{ name: "ping", document: ruledNorm }],
+        norms: [{ name: "ping", document: describedNorm }],
       });
 
       const occupied = yield* sharnessd.startupFailure();
@@ -253,6 +241,39 @@ it(
   PROCESS_TEST_TIMEOUT_MS,
 );
 
+it(
+  "under development authentication, admits each request as the owner its bearer token names, warns that it verifies no caller, and refuses a web page that is not on this machine",
+  processTrace(
+    Effect.gen(function* () {
+      const sharnessd = yield* sharedServer();
+      yield* sharnessd.configure({ authentication: "development" });
+      const running = yield* sharnessd.start();
+      const client = yield* HttpClient.HttpClient;
+      const statusOf = (headers: Readonly<Record<string, string>>) =>
+        HttpClientRequest.post(sharnessd.endpoint).pipe(
+          HttpClientRequest.setHeaders(headers),
+          client.execute,
+          Effect.map((response) => response.status),
+        );
+
+      expect(yield* statusOf({})).toBe(401);
+      expect(
+        yield* statusOf({
+          authorization: "Bearer bob",
+          origin: "https://elsewhere.example",
+        }),
+      ).toBe(403);
+      const server = yield* sharnessd.signInNamed(SERVER_AGENT_OWNER);
+      expect(server.name).toBe(SERVER_AGENT_NAME);
+      const bob = yield* sharnessd.signInNamed("bob");
+      expect(bob.name).toMatch(/^agent-[0-9a-f]{24}$/u);
+      expect((yield* sharnessd.signInNamed("bob")).name).toBe(bob.name);
+      expect(running.logs()).toContain("verifies no caller");
+    }).pipe(Effect.provide(FetchHttpClient.layer)),
+  ),
+  PROCESS_TEST_TIMEOUT_MS,
+);
+
 /** The agent's inbox entries after `cursor`, read again until there is one. Without a cursor the read starts from now. */
 const readInbox = (agent: SignedIn, cursor?: string) =>
   callTool(agent, "receive_messages", { cursor }).pipe(
@@ -283,7 +304,7 @@ it(
           });
           const read = yield* readInbox(client, start.nextCursor);
           expect(read.entries).toMatchObject([
-            { message: { msgId: first.id } },
+            { message: { msgId: first.msgId } },
           ]);
           const unread = yield* send(server, {
             to: client.name,
@@ -291,8 +312,8 @@ it(
           });
           return {
             client: client.name,
-            opening: opening.id,
-            ids: [first.id, unread.id],
+            opening: opening.msgId,
+            ids: [first.msgId, unread.msgId],
             cursors: [start.nextCursor, read.nextCursor],
           };
         }),
@@ -314,7 +335,7 @@ it(
         ),
       ).toEqual(sent.ids);
       const history = yield* callTool(client, "read_conversation");
-      expect(history.records.map((record) => record.message.msgId)).toEqual([
+      expect(history.entries.map((entry) => entry.message.msgId)).toEqual([
         sent.opening,
         ...sent.ids,
       ]);

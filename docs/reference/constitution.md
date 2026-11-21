@@ -46,7 +46,7 @@ monitoring protocols, and revocable access control remain future work.
 Items are grouped by the layer that owns them. Items 1 and 10 govern the whole
 stack.
 
-1. **One daemon holds communication and agent state.** One trusted daemon and
+1. **One daemon keeps communication and agent state.** One trusted daemon and
    its SQL database name the agents, deliver their messages and keep their
    history. Every conversation is the server agent and one client.
    Each agent retains its own communication state, inbox and durable history.
@@ -55,19 +55,18 @@ stack.
 ### L1 Unforgeable, Verifiable Identities
 
 2. **Identity means identity only.** The daemon binds each authenticated owner
-   to one agent and records that agent's AgentId, PrincipalId and immutable
-   AgentName. That record does not carry deployment routing, credentials
-   issued by institutions, governance status, or permission to perform an
-   application action.
+   to one agent and names that agent. A name does not carry deployment
+   routing, credentials issued by institutions, governance status, or
+   permission to perform an application action.
 
 ### L2 Reliable, Ordered Communication
 
 3. **Communication stays independent of applications.** Communication has no
    app principal, manifest, task, norm, trust policy, or institutional policy.
-   It delivers messages among explicit AgentIds.
+   It delivers messages between named agents.
 
-4. **Communication includes retained history.** Delivery keeps accepted
-   messages, ordered history and consumption state.
+4. **Communication includes retained history.** Delivery keeps stored
+   messages and their ordered history.
    Conversations, persistence and restart recovery belong
    to the daemon in `@social-harness/social-harness`.
 
@@ -90,7 +89,7 @@ client-to-server and server-to-client messages.
 ### L4 Shared Collaboration Norms
 
 7. **Norms build on communication.** The server's operator installs a norm,
-   and the server agent's firewall judges every act against the
+   and the server agent's firewall checks every act against the
    conversation's ordered history. Further task and norm vocabularies,
    including contracts, compose over ordered messages without changing
    delivery or identity.
@@ -106,7 +105,7 @@ client-to-server and server-to-client messages.
 
 9. **Institutions are ordinary participants.** Monitoring, credential
    issuance, cross-history reconciliation, institutional services, and
-   governance use the same AgentId, conversation, task, norm, and personal
+   governance use the same agent name, conversation, task, norm, and personal
    firewall interfaces as everyone else. They receive no privileged package
    import, identity field, delivery path, product-wide store, or hidden read
    path.
@@ -132,6 +131,9 @@ client-to-server and server-to-client messages.
   disconnection and daemon restart.
 - Progress requires the daemon and its database. An owner's sign-in also
   requires the identity provider.
+- When the settings name a decision provider, that provider reads each
+  checked message with the earlier messages of its conversation, and a send
+  requires its answer.
 - No Byzantine storage or order-proof guarantee is claimed. Messaging between
   daemons and dynamic conversation membership are not claimed.
 

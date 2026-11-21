@@ -2,7 +2,7 @@
 
 import { Effect, Fiber, Stream } from "effect";
 import { expect, it } from "vitest";
-import { callTool, send } from "../../src/__tests__/server.js";
+import { callTool, send } from "../support/host.js";
 import {
   INBOX_EVENT,
   inboxStream,
@@ -37,7 +37,7 @@ it(
       const opened = yield* send(client, { text: opening });
       expect(yield* received(server, 1)).toEqual([
         {
-          msgId: opened.id,
+          msgId: opened.msgId,
           author: client.name,
           recipient: server.name,
           text: opening,
@@ -46,12 +46,12 @@ it(
       const replied = yield* send(server, {
         to: client.name,
         text: greeting,
-        replyToMsgId: opened.id,
+        replyToMsgId: opened.msgId,
       });
       expect(yield* received(client, 1)).toEqual([
         {
-          msgId: replied.id,
-          replyToMsgId: opened.id,
+          msgId: replied.msgId,
+          replyToMsgId: opened.msgId,
           author: server.name,
           recipient: client.name,
           text: greeting,
@@ -61,8 +61,8 @@ it(
       const serverHistory = yield* callTool(server, "read_conversation", {
         with: client.name,
       });
-      expect(serverHistory.records.map(({ message }) => message.msgId)).toEqual(
-        [opened.id, replied.id],
+      expect(serverHistory.entries.map(({ message }) => message.msgId)).toEqual(
+        [opened.msgId, replied.msgId],
       );
       expect(yield* callTool(client, "read_conversation")).toEqual(
         serverHistory,
@@ -95,8 +95,8 @@ it(
         Stream.runCollect,
       );
       expect([...polled].map((entry) => entry.message.msgId)).toEqual([
-        first.id,
-        second.id,
+        first.msgId,
+        second.msgId,
       ]);
     }),
   ),
@@ -116,7 +116,7 @@ it(
       const sent = yield* send(server, { to: client.name, text: greeting });
       const woken = yield* Fiber.join(waiting);
       expect(woken.entries.map((entry) => entry.message.msgId)).toEqual([
-        sent.id,
+        sent.msgId,
       ]);
       expect(yield* receive(woken.nextCursor, 0.2)).toEqual({
         entries: [],
@@ -154,9 +154,9 @@ it(
         with: client.name,
       });
       const clientSaved = yield* callTool(client, "read_conversation");
-      const order = serverSaved.records.map((record) => record.message.msgId);
+      const order = serverSaved.entries.map((entry) => entry.message.msgId);
       expect(order).toHaveLength(4 * CROSSING_ROUNDS + 1);
-      expect(clientSaved.records.map((record) => record.message.msgId)).toEqual(
+      expect(clientSaved.entries.map((entry) => entry.message.msgId)).toEqual(
         order,
       );
     }),

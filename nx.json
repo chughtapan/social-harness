@@ -8,7 +8,7 @@
     "production": [
       "default",
       "!{projectRoot}/**/*.spec.ts",
-      "!{projectRoot}/src/**/__tests__/**",
+      "!{projectRoot}/tests/**",
       "!{projectRoot}/vitest.integration.config.ts",
       "!{projectRoot}/safer-architecture.config.json"
     ],

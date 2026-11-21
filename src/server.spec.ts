@@ -14,23 +14,41 @@ import {
   FastCheck as fc,
   Fiber,
   Order,
-  Struct,
+  Schema,
 } from "effect";
 import { expect } from "vitest";
-import type { DecisionProvider, Firewall } from "./firewall.js";
-import { answersTo, type TestPolicy } from "./__tests__/firewall-fixtures.js";
+import type { DecisionRequest } from "./decision-provider.js";
+import type { Firewall } from "./firewall.js";
+import { openTestDatabase } from "../tests/support/database.js";
+import {
+  type Answering,
+  answersTo,
+} from "../tests/support/decision-provider.js";
 import {
   callTool,
-  decisionState,
   inboxOf,
-  inProcessServer,
   send,
   type SignedIn,
-} from "./__tests__/server.js";
-import { openTestDatabase } from "./__tests__/test.js";
-import { AgentName } from "./messages.js";
-import { compileNorm } from "./norms/compiler.js";
-import { serverFactory } from "./server.js";
+} from "../tests/support/host.js";
+import { inProcessServer } from "../tests/support/in-process-server.js";
+import { prepareTables } from "./database.js";
+import { compileNorms } from "./norms/index.js";
+
+/** The text of the message a provider is asked to judge. */
+const candidateText = (request: DecisionRequest) =>
+  Schema.decodeUnknownSync(
+    Schema.parseJson(
+      Schema.Struct({ candidate: Schema.Struct({ text: Schema.String }) }),
+    ),
+  )(request.state).candidate.text;
+
+/** A firewall that allows every message a client sends and decides each of the server agent's with `decide`. */
+const decidingServerMessages = (
+  decide: () => ReturnType<Firewall["check"]>,
+): Firewall => ({
+  check: (sender) =>
+    sender === "server" ? decide() : Effect.succeed({ kind: "allowed" }),
+});
 
 it("gives the server agent its tools, and a status result that names the agent", () =>
   Effect.gen(function* () {
@@ -75,13 +93,13 @@ it("gives a client tools that name no recipient and no conversation", () =>
           .properties ?? {},
       ),
     ).toEqual(["text", "replyToMsgId"]);
-    const { id } = yield* send(bob, { text: "hello" });
-    expect((yield* callTool(bob, "read_conversation")).records).toEqual([
+    const { msgId } = yield* send(bob, { text: "hello" });
+    expect((yield* callTool(bob, "read_conversation")).entries).toEqual([
       {
         message: {
           author: bob.name,
           recipient: "alice",
-          msgId: id,
+          msgId,
           text: "hello",
         },
       },
@@ -106,38 +124,32 @@ it("answers a failed call with the failure's message and its fields", () =>
   Effect.gen(function* () {
     const refusals = [
       {
-        reason: "firewall-refused" as const,
+        reason: "violation" as const,
         checkId: "chk_1",
-        refusal: "rule-violation" as const,
-        rule: "shape",
         feedback: ["Send a greeting first."],
       },
       {
-        reason: "firewall-refused" as const,
+        reason: "unsure" as const,
         checkId: "chk_2",
-        refusal: "unresolved-evidence" as const,
         feedback: [],
       },
     ];
     const pending = [...refusals];
     const server = yield* inProcessServer({
-      firewall: {
-        checkOutgoing: () =>
-          Effect.map(Effect.fromNullable(pending.shift()), (next) => ({
-            kind: "refused" as const,
-            ...Struct.omit(next, "reason", "refusal"),
-            reason: next.refusal,
-          })).pipe(Effect.orDie),
-      },
+      firewall: decidingServerMessages(() =>
+        Effect.map(Effect.fromNullable(pending.shift()), (next) => ({
+          kind: "refused" as const,
+          ...next,
+        })).pipe(Effect.orDie),
+      ),
     });
     const alice = yield* server.signInAs("alice");
     const bob = yield* server.signInAs("bob");
     yield* send(bob, { text: "hi" });
     const said: Readonly<Record<string, string>> = {
-      chk_1:
-        "Error: Send a greeting first. Check: chk_1, rule shape; rule-violation.",
+      chk_1: "Error: Send a greeting first. Check: chk_1; violation.",
       chk_2:
-        "Error: The policy check could not settle whether the message is allowed. Check: chk_2; unresolved-evidence.",
+        "Error: The decision provider is unsure whether the message follows the server's norms. Check: chk_2; unsure.",
     };
     for (const fields of refusals) {
       expect(
@@ -146,7 +158,7 @@ it("answers a failed call with the failure's message and its fields", () =>
     }
     for (const name of ["nobody", "alice"]) {
       const refusal = {
-        reason: "unknown-agent",
+        reason: "unknown-client",
         name,
         message: `No client named ${name} has written to this agent. Use list_conversations to see the clients that have.`,
       };
@@ -164,10 +176,9 @@ it("answers a failed call with the failure's message and its fields", () =>
 it("answers a call that dies without the defect's text", () =>
   Effect.gen(function* () {
     const server = yield* inProcessServer({
-      firewall: {
-        checkOutgoing: () =>
-          Effect.dieMessage("PRIVATE relation does not exist"),
-      },
+      firewall: decidingServerMessages(() =>
+        Effect.dieMessage("PRIVATE relation does not exist"),
+      ),
     });
     const alice = yield* server.signInAs("alice");
     const bob = yield* server.signInAs("bob");
@@ -191,21 +202,18 @@ it("interrupts only the aborted call, whose conversation the next send then uses
     const interrupted = yield* Deferred.make<undefined>();
     let first = true;
     const server = yield* inProcessServer({
-      firewall: {
-        checkOutgoing: () =>
-          Effect.suspend(() => {
-            if (!first) {
-              return Effect.succeed({ kind: "allowed" as const });
-            }
-            first = false;
-            return Deferred.succeed(entered, undefined).pipe(
-              Effect.zipRight(Effect.never),
-              Effect.onInterrupt(() =>
-                Deferred.succeed(interrupted, undefined),
-              ),
-            );
-          }),
-      },
+      firewall: decidingServerMessages(() =>
+        Effect.suspend(() => {
+          if (!first) {
+            return Effect.succeed({ kind: "allowed" as const });
+          }
+          first = false;
+          return Deferred.succeed(entered, undefined).pipe(
+            Effect.zipRight(Effect.never),
+            Effect.onInterrupt(() => Deferred.succeed(interrupted, undefined)),
+          );
+        }),
+      ),
     });
     const alice = yield* server.signInAs("alice");
     const bob = yield* server.signInAs("bob");
@@ -217,60 +225,35 @@ it("interrupts only the aborted call, whose conversation the next send then uses
     yield* Fiber.interrupt(waiting);
     yield* Deferred.await(interrupted);
 
-    expect(yield* send(alice, hello)).toHaveProperty("id");
+    expect(yield* send(alice, hello)).toHaveProperty("msgId");
   }));
 
-/** A server opened on `database`, with Alice as its server agent behind a firewall that allows everything. */
-const openOn = (
-  database: Effect.Effect.Success<ReturnType<typeof openTestDatabase>>,
-) =>
-  serverFactory(database.url, {
-    issuer: "urn:social-harness:test",
-    subject: "alice",
-    name: AgentName.make("alice"),
-    firewall: {
-      checkIncoming: () => Effect.succeed({ kind: "allowed" }),
-      checkOutgoing: () => Effect.succeed({ kind: "allowed" }),
-    },
-  });
+/** A norm of one act that either member sends, whose described field gives it the one text rule here. */
+const chat = Either.getOrThrow(
+  compileNorms([
+    `(norm chat)
+(act say :by (client server) :starts true :ends true
+  (field words :type string :description "Nothing private."))
+`,
+  ]),
+);
 
-/** The one rule of every policy here. */
-const privacy = {
-  id: "privacy",
-  applies: "both" as const,
-  text: "Protect the owner's private information.",
-  feedback: "Keep private information private.",
-};
+/** The act `say` with `words`. */
+const say = (words: string) =>
+  `(say :norm chat :words ${JSON.stringify(words)})`;
 
-/** A message policy of the rule `privacy`, judged by `provider`. With `action`, the rule replies to or silently withholds what breaks it. */
-const policy = (
-  provider: DecisionProvider,
-  action?: "deny" | "reply",
-): TestPolicy => ({
-  provider,
-  source: {
-    policy: {
-      rules: [{ ...privacy, ...(action === undefined ? {} : { action }) }],
-      settings: { minimumProbability: 0.8, timeoutMilliseconds: 5_000 },
-    },
-  },
-});
+/** What the sender of a `say` that breaks the field's description reads. */
+const nothingPrivate =
+  "words must contain only what its description says: Nothing private.";
 
-/** A provider that finds every message compliant. */
-const compliant: DecisionProvider = {
-  decide: (request) => Effect.succeed(answersTo(request)),
-};
-
-/** A provider that finds every message a client sends in violation, and no message of the server agent. */
-const incomingViolation: DecisionProvider = {
-  decide: (request) =>
+/** A provider that finds a message in violation exactly when it says `private`, whichever member sent it. */
+const privateViolation: Answering = {
+  answer: (request) =>
     Effect.succeed(
       answersTo(
         request,
         {},
-        decisionState(request.state).direction === "incoming"
-          ? "violation"
-          : "compliant",
+        candidateText(request) === say("private") ? "violation" : "compliant",
       ),
     ),
 };
@@ -287,10 +270,10 @@ const aliceAndBob = (options?: Parameters<typeof inProcessServer>[0]) =>
 /** Whether `agent` sent or received each message on the first page of its history with `client`, or with the server agent. */
 const historyOf = (agent: SignedIn, client?: string) =>
   Effect.map(
-    callTool(agent, "read_conversation", client ? { with: client } : {}),
-    ({ records }) =>
-      records.map((record) =>
-        record.message.author === agent.name ? "sent" : "received",
+    callTool(agent, "read_conversation", { with: client }),
+    ({ entries }) =>
+      entries.map((entry) =>
+        entry.message.author === agent.name ? "sent" : "received",
       ),
   );
 
@@ -303,13 +286,16 @@ it("stores each send as a new message to the agent it names, with the reply refe
     const second = yield* send(alice, {
       to: bob.name,
       text: "Hello",
-      replyToMsgId: first.id,
+      replyToMsgId: first.msgId,
     });
 
     const [stored, reply] = yield* inboxOf(bob);
-    expect(stored).toMatchObject({ msgId: first.id, recipient: bob.name });
+    expect(stored).toMatchObject({ msgId: first.msgId, recipient: bob.name });
     expect(stored).not.toHaveProperty("replyToMsgId");
-    expect(reply).toMatchObject({ msgId: second.id, replyToMsgId: first.id });
+    expect(reply).toMatchObject({
+      msgId: second.msgId,
+      replyToMsgId: first.msgId,
+    });
   }));
 
 it("checks the messages of one conversation in order while another conversation progresses", () =>
@@ -318,47 +304,48 @@ it("checks the messages of one conversation in order while another conversation 
     const release = yield* Deferred.make<undefined>();
     const assessed: string[] = [];
     const { server, alice, bob } = yield* aliceAndBob({
-      policy: policy({
-        decide: (request) =>
+      norms: chat,
+      provider: {
+        answer: (request) =>
           Effect.gen(function* () {
-            const { text } = decisionState(request.state).candidate;
+            const text = candidateText(request);
             assessed.push(text);
-            if (text === "First") {
+            if (text === say("First")) {
               yield* Deferred.succeed(entered, undefined);
               yield* Deferred.await(release);
             }
             return answersTo(request);
           }),
-      }),
+      },
     });
     const carol = yield* server.signInAs("carol");
     const authors = Effect.map(inboxOf(alice), (messages) =>
       messages.map((message) => message.author),
     );
 
-    const first = yield* Effect.forkScoped(send(bob, { text: "First" }));
+    const first = yield* Effect.forkScoped(send(bob, { text: say("First") }));
     yield* Deferred.await(entered);
-    const second = yield* Effect.forkScoped(send(bob, { text: "Second" }));
-    yield* send(carol, { text: "Independent" });
+    const second = yield* Effect.forkScoped(send(bob, { text: say("Second") }));
+    yield* send(carol, { text: say("Independent") });
 
     expect(yield* authors).toEqual([carol.name]);
-    expect(assessed).toEqual(["First", "Independent"]);
+    expect(assessed).toEqual([say("First"), say("Independent")]);
     yield* Deferred.succeed(release, undefined);
     yield* Fiber.joinAll([first, second]);
     expect(yield* authors).toEqual([carol.name, bob.name, bob.name]);
-    expect(assessed).toEqual(["First", "Independent", "Second"]);
+    expect(assessed).toEqual([say("First"), say("Independent"), say("Second")]);
   }));
 
 it("reads the inbox a page of fifty at a time after a cursor, the same page again for the same cursor, and nothing earlier without one", () =>
   Effect.gen(function* () {
     const { alice, bob } = yield* aliceAndBob();
     const receive = (cursor?: string) =>
-      callTool(alice, "receive_messages", cursor ? { cursor } : {});
+      callTool(alice, "receive_messages", { cursor });
     const start = yield* receive();
     expect(start.entries).toEqual([]);
     const sent = yield* Effect.forEach(
       Array.from({ length: 57 }),
-      () => Effect.map(send(bob, { text: "Hello" }), ({ id }) => id),
+      () => Effect.map(send(bob, { text: "Hello" }), ({ msgId }) => msgId),
       { concurrency: 1 },
     );
 
@@ -378,32 +365,54 @@ it("reads the inbox a page of fifty at a time after a cursor, the same page agai
     });
   }));
 
-it("stores a withheld message for its sender, whose send succeeds, and keeps it from the recipient's inbox and history", () =>
+it("fails a send whose described field breaks its description, telling the server agent the whole refusal and a client only the feedback, and keeps the decision but not the message", () =>
   Effect.gen(function* () {
     const { alice, bob } = yield* aliceAndBob({
-      policy: policy(incomingViolation),
+      norms: chat,
+      provider: privateViolation,
+    });
+    yield* send(bob, { text: say("hello") });
+
+    expect(yield* Effect.flip(send(bob, { text: say("private") }))).toEqual({
+      reason: "refused",
+      feedback: [nothingPrivate],
+      message: `Error: ${nothingPrivate}`,
+    });
+    expect(
+      yield* Effect.flip(send(alice, { to: bob.name, text: say("private") })),
+    ).toMatchObject({
+      reason: "violation",
+      feedback: [nothingPrivate],
     });
 
-    yield* send(bob, { text: "Private peer content" });
-
+    const refusedBy = {
+      client: bob.name,
+      decision: "refused",
+      reason: "violation",
+      refusedBy: [{ ruleId: "chat.say.words", feedback: nothingPrivate }],
+    };
     expect(
       (yield* callTool(alice, "read_firewall_decisions")).decisions,
-    ).toMatchObject([{ reason: "rule-violation", decision: "withheld" }]);
-    expect(yield* inboxOf(alice)).toEqual([]);
-    expect(yield* historyOf(alice, bob.name)).toEqual([]);
+    ).toMatchObject([
+      { sender: "server", ...refusedBy },
+      { sender: "client", ...refusedBy },
+      { sender: "client", client: bob.name, decision: "allowed" },
+    ]);
     expect(yield* historyOf(bob)).toEqual(["sent"]);
     expect(yield* inboxOf(bob)).toEqual([]);
   }));
 
-it("fails a client's send and stores nothing when the check of its message could not run", () =>
+it("tells a client only that the server is unavailable, and stores nothing, when the check of its message could not run", () =>
   Effect.gen(function* () {
     const { alice, bob } = yield* aliceAndBob({
-      policy: policy({ decide: () => Effect.succeed({ answers: {} }) }),
+      norms: chat,
+      provider: { answer: () => Effect.succeed({ answers: {} }) },
     });
 
-    expect(yield* send(bob, { text: "Hello" }).pipe(Effect.flip)).toMatchObject(
-      { reason: "firewall-refused", refusal: "check-unavailable" },
-    );
+    expect(yield* send(bob, { text: say("Hello") }).pipe(Effect.flip)).toEqual({
+      reason: "unavailable",
+      message: "The server is unavailable. Try again later.",
+    });
 
     expect(
       (yield* callTool(alice, "read_firewall_decisions")).decisions,
@@ -411,77 +420,44 @@ it("fails a client's send and stores nothing when the check of its message could
     expect(yield* historyOf(bob)).toEqual([]);
   }));
 
-it.each([
-  { from: "the notice", action: undefined, text: "Not accepted." },
-  { from: "a reply rule", action: "reply" as const, text: privacy.feedback },
-])(
-  "sends the firewall's reply to a withheld message, from $from, as an ordinary message that answers it",
-  ({ action, text }) =>
-    Effect.gen(function* () {
-      const { alice, bob } = yield* aliceAndBob({
-        notice: "Not accepted.",
-        policy: policy(incomingViolation, action),
-      });
-
-      const withheld = yield* send(bob, { text: "Private peer content" });
-
-      expect(yield* inboxOf(bob)).toMatchObject([
-        {
-          author: alice.name,
-          recipient: bob.name,
-          replyToMsgId: withheld.id,
-          text,
-        },
-      ]);
-      expect(yield* inboxOf(alice)).toEqual([]);
-      expect(yield* historyOf(bob)).toEqual(["sent", "received"]);
-    }),
-);
-
-/** `open` starts an instance and `close`, from the other agent, ends it. */
+/** The client's `open` starts an instance and the server's `close` ends it. */
 const exchange = Either.getOrThrow(
-  compileNorm(`(norm exchange :initiator Sender :participant Receiver)
-(content open :by Sender :starts true :initiates opened)
-(content close :by Receiver :when opened :ends true)
-`),
+  compileNorms([
+    `(norm exchange)
+(act open :by client :starts true :sets opened)
+(act close :by server :when opened :ends true)
+`,
+  ]),
 );
 
-it("answers what an agent that holds norms withholds, plain text and an act out of turn alike, and the conversation goes on", () =>
+it("refuses what the norms a server publishes do not accept, plain text and an act out of turn alike, telling the client only what to correct, and the conversation goes on", () =>
   Effect.gen(function* () {
-    const { alice, bob } = yield* aliceAndBob({
-      notice: "Not accepted.",
-      norms: [exchange],
-      policy: policy(compliant),
-    });
+    const { alice, bob } = yield* aliceAndBob({ norms: exchange });
 
-    const plain = yield* send(bob, { text: "Hello, can you help?" });
-    const outOfTurn = yield* send(bob, { text: "(close :ontology exchange)" });
-
-    const replies = yield* inboxOf(bob);
-    expect(replies).toMatchObject(
-      [plain, outOfTurn].map((withheld) => ({ replyToMsgId: withheld.id })),
-    );
-    expect(
-      replies.map(({ text }) => text.startsWith("Not accepted. ")),
-    ).toEqual([true, true]);
-    yield* send(bob, { text: "(open :ontology exchange)" });
+    for (const text of ["Hello, can you help?", "(close :norm exchange)"]) {
+      const refusal = yield* send(bob, { text }).pipe(Effect.flip);
+      expect(refusal.reason).toBe("refused");
+      expect(new Set(Object.keys(refusal))).toEqual(
+        new Set(["reason", "feedback", "message"]),
+      );
+    }
+    yield* send(bob, { text: "(open :norm exchange)" });
     expect(yield* inboxOf(alice)).toHaveLength(1);
   }));
 
-it("checks each act of a norm against the whole conversation, though the provider's history window holds one message", () =>
+it("checks each act of a norm against the whole conversation, though the provider's history window has one message", () =>
   Effect.gen(function* () {
     const { alice, bob } = yield* aliceAndBob({
       historyLimit: 1,
-      norms: [exchange],
-      policy: policy(compliant),
+      norms: exchange,
     });
 
     for (let instance = 0; instance < 3; instance += 1) {
-      const opened = yield* send(bob, { text: "(open :ontology exchange)" });
+      const opened = yield* send(bob, { text: "(open :norm exchange)" });
       yield* send(alice, {
         to: bob.name,
-        text: "(close :ontology exchange)",
-        replyToMsgId: opened.id,
+        text: "(close :norm exchange)",
+        replyToMsgId: opened.msgId,
       });
     }
 
@@ -505,8 +481,8 @@ it("continues a conversation's history from the cursor a page returned, with wha
       cursor: first.nextCursor,
     });
 
-    expect(first.records).toHaveLength(50);
-    expect(rest.records.map((record) => record.message.text)).toEqual([
+    expect(first.entries).toHaveLength(50);
+    expect(rest.entries.map((entry) => entry.message.text)).toEqual([
       "Message 50",
       "Later message",
     ]);
@@ -532,21 +508,32 @@ it("lists every conversation once, in name order", () =>
 it("prepares an empty database and leaves a prepared one as it is", () =>
   Effect.gen(function* () {
     const database = yield* openTestDatabase();
-    yield* openOn(database);
-    yield* database.sql`INSERT INTO firewall_checks (decided_at, record) VALUES (1, 'kept')`;
-    yield* openOn(database);
+    yield* prepareTables(database.sql);
+    yield* database.sql`INSERT INTO firewall_checks (checked_at, record) VALUES (1, 'kept')`;
+    yield* prepareTables(database.sql);
     expect(yield* database.sql`SELECT record FROM firewall_checks`).toEqual([
       { record: "kept" },
     ]);
     expect(yield* database.sql`SELECT * FROM messages`).toEqual([]);
   }));
 
-it("rejects a database that holds other tables without changing their records", () =>
+it("rejects a database whose tables another version of the server created", () =>
+  Effect.gen(function* () {
+    const database = yield* openTestDatabase();
+    yield* prepareTables(database.sql);
+    yield* database.sql`ALTER TABLE firewall_checks RENAME COLUMN checked_at TO decided_at`;
+
+    expect(yield* prepareTables(database.sql).pipe(Effect.flip)).toMatchObject({
+      reason: "schema",
+    });
+  }));
+
+it("rejects a database that has other tables without changing their records", () =>
   Effect.gen(function* () {
     const database = yield* openTestDatabase();
     yield* database.sql`CREATE TABLE retained (value TEXT NOT NULL)`;
     yield* database.sql`INSERT INTO retained VALUES ('prior installation')`;
-    expect(yield* openOn(database).pipe(Effect.flip)).toMatchObject({
+    expect(yield* prepareTables(database.sql).pipe(Effect.flip)).toMatchObject({
       reason: "schema",
     });
     expect(yield* database.sql`SELECT * FROM retained`).toEqual([
@@ -591,21 +578,21 @@ it.prop(
   { fastCheck: { numRuns: 10 } },
 );
 
-/** A server whose firewall withholds exactly the messages whose text is `withheld`, with Alice and two clients signed in. */
-const withholdingByText = Effect.gen(function* () {
-  const decide: Firewall["checkIncoming"] = (message) =>
+/** A server whose firewall refuses exactly the messages whose text is `refused`, with Alice and two clients signed in. */
+const refusingByText = Effect.gen(function* () {
+  const check: Firewall["check"] = (...[, message]) =>
     Effect.succeed(
-      message.text === "withheld"
+      message.text === "refused"
         ? {
             kind: "refused",
-            checkId: "chk_withheld",
-            reason: "rule-violation",
+            checkId: "chk_refused",
+            reason: "violation",
             feedback: [],
           }
         : { kind: "allowed" },
     );
   const server = yield* inProcessServer({
-    firewall: { checkIncoming: decide },
+    firewall: { check },
   });
   const alice = yield* server.signInAs("alice");
   const clients = {
@@ -615,7 +602,7 @@ const withholdingByText = Effect.gen(function* () {
   /** The ids of the messages Alice may read after `cursor`, in read order, with the cursor to read on from. */
   const inbox = (cursor?: string) =>
     Effect.map(
-      callTool(alice, "receive_messages", cursor ? { cursor } : {}),
+      callTool(alice, "receive_messages", { cursor }),
       ({ entries, nextCursor }) => ({
         ids: entries.map(({ message }) => message.msgId),
         nextCursor,
@@ -642,7 +629,7 @@ const steps = fc.array(
 
 it("returns, for any cursor a read gave, every message that became readable since that read in the order it did, and none for a read without a cursor", () =>
   Effect.gen(function* () {
-    const { clients, inbox } = yield* withholdingByText;
+    const { clients, inbox } = yield* refusingByText;
     /** The ids of the messages alice may read, in the order they were stored. */
     const expected: string[] = [];
     /** Each cursor a read returned, with the count of messages readable when it did. */
@@ -651,11 +638,11 @@ it("returns, for any cursor a read gave, every message that became readable sinc
       Effect.gen(function* () {
         for (const step of sequence) {
           if (step.step === "send") {
-            const { id } = yield* send(clients[step.author], {
-              text: step.readable ? "hello" : "withheld",
-            });
+            const sender = clients[step.author];
             if (step.readable) {
-              expected.push(id);
+              expected.push((yield* send(sender, { text: "hello" })).msgId);
+            } else {
+              yield* Effect.flip(send(sender, { text: "refused" }));
             }
           } else {
             const presented =
@@ -676,11 +663,14 @@ it("returns, for any cursor a read gave, every message that became readable sinc
 
 it("gives messages stored at the same time distinct places in their recipient's read order", () =>
   Effect.gen(function* () {
-    const { clients, inbox } = yield* withholdingByText;
+    const { clients, inbox } = yield* refusingByText;
     const sent = yield* Effect.forEach(
       Arr.makeBy(12, (index) => (index % 2 === 0 ? "bob" : "carol")),
       (author) =>
-        Effect.map(send(clients[author], { text: "hello" }), ({ id }) => id),
+        Effect.map(
+          send(clients[author], { text: "hello" }),
+          ({ msgId }) => msgId,
+        ),
       { concurrency: 12 },
     );
     const read = yield* inbox("0");

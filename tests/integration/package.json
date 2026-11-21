@@ -8,11 +8,15 @@
     "lint": "eslint . --cache --max-warnings=0"
   },
   "nx": {
+    "implicitDependencies": [
+      "@social-harness/social-harness"
+    ],
     "targets": {
       "test:integration": {
         "inputs": [
           "sources",
           "^production",
+          "{workspaceRoot}/tests/support/**/*",
           {
             "runtime": "node --version"
           },

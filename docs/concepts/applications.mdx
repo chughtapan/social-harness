@@ -1,20 +1,21 @@
 ---
 title: Applications
-description: What an application supplies and how Social Harness connects its participants.
+description: What an application supplies, and how Social Harness connects its participants under a server's norms.
 read_when:
   - You are building an application used by agents from different owners
   - You want to understand admission, shared rules and application access
 ---
 
 Social Harness helps applications connect agents that act for different people
-or organizations. The application defines the work they do together. The
-daemon its participants share identifies each agent, carries its messages,
-and applies that agent's message rules before sending or delivering them.
+or organizations. The application defines the work they do together and
+publishes it as norms. The daemon its participants share identifies each
+agent, enforces those norms on each message, and carries the messages that
+follow them.
 
-A scheduling application, for example, supplies the booking logic. Its agents
-exchange requests with students' and professors' agents through Social Harness.
-The application may ask participants to follow shared booking rules, while each
-owner keeps control of the rules protecting their own agent.
+A scheduling application, for example, supplies the booking logic. A
+professor's agent is the server agent, and students' agents send it requests
+as clients. The server's owner publishes the booking rules as norms, and the
+daemon enforces them on both sides.
 
 ## What the application supplies
 
@@ -25,21 +26,20 @@ Shared rules explain how its agents should cooperate. The application also
 needs a policy for changing or ending access.
 
 Those choices are application responsibilities. Social Harness provides
-messaging and each agent's message policy. It provides no protocol for
-application admission, roles or revocation, no way for an application to
-change a participant's firewall rules, and no disclosure, investigation or
-sanction protocol. The constitution lists the
+messaging and the enforcement of a server's norms. It provides no protocol for
+application admission, roles or revocation, no firewall for a client, and no
+disclosure, investigation or sanction protocol. The constitution lists the
 [deferred work](/reference/constitution#deliberate-deferrals).
 
 ## From an application request to another agent
 
-The application supplies a destination and a message, and the daemon carries
-it as the [message flow](/concepts/overview#message-flow) describes.
+A host supplies a message, and the server agent's host also names the client
+it writes to. The daemon carries the message as the
+[message flow](/concepts/overview#message-flow) describes.
 Hosts connect as MCP clients, with
 receiving behavior defined by the [delivery contract](/reference/spec/host/receiving).
 
-A successful ordinary send means the daemon has ordered and stored the
-message. Delivery to the host is a later handoff. The host controls when its agent
+A successful send means the daemon has ordered and stored the message. Delivery to the host is a later handoff. The host controls when its agent
 processes that message and whether it informs a human. A reply is another
 message with its own checks and outcome.
 
@@ -53,13 +53,13 @@ establish the account-to-agent relationship it relies on. The
 [identity contract](/reference/spec/identity/identity-and-attribution#agents)
 defines the name precisely.
 
-An application states how its members work together as
+An application states how its participants work together as
 [norms](/reference/spec/norms/norms): each has a protocol that orders its acts
-and a form for each performative.
-The members of a conversation hold the same norm before
-a task, and each member's firewall checks every act of that task against the
-conversation's history, refusing acts out of turn or with invalid fields. A
-firewall reads only the norms its agent holds.
+and a form that says what each field of an act contains. The server publishes
+the norms, and a client reads them before a task. The server agent's firewall
+checks every act of that task, whichever member sends it, against the
+conversation's earlier messages. It refuses an act out of turn, from the wrong member,
+or with a field that does not contain what the norm says.
 
 An instance of a norm covers one task in one conversation and ends when an
 act of the norm ends it. The daemon does not track application
@@ -67,11 +67,10 @@ membership.
 
 ## Ending access and investigating harm
 
-An application can deny access to its own service. An agent keeps its
-identifier and name.
+An application can deny access to its own service. An agent keeps its name.
 
-An institution is another agent with a particular role, such as investigating a
-disputed booking. It can receive evidence a participant chooses to disclose and
-return an attributed finding. Each application or participant decides how to
+An institution is an agent with a particular role, such as investigating a
+disputed booking. As the server agent of its own server, it can receive
+evidence a participant chooses to disclose and return an attributed finding. Each application or participant decides how to
 use that finding. Social Harness supplies each member's conversation
 history, whose accuracy rests on the daemon.

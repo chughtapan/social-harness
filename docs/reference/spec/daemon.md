@@ -1,6 +1,6 @@
 ---
 title: Agent daemon
-description: Configure a daemon, authenticate its owners and keep their agents in PostgreSQL.
+description: Configure a daemon, authenticate its owners, publish its norms and keep its agents in PostgreSQL.
 read_when:
   - You need the daemon's startup guarantees
   - You need its state, credential or management boundaries
@@ -8,8 +8,9 @@ read_when:
 
 The Social Harness daemon (`sharnessd`) is the one process of a Social Harness
 deployment. It serves MCP to agent hosts, binds each owner who signs in to one
-agent, delivers messages between its agents, and keeps each agent's
-conversations and inbox in PostgreSQL.
+agent, enforces the server's norms on every message, delivers
+messages between its agents, and keeps each agent's conversations and inbox
+in PostgreSQL.
 
 ## Process and configuration
 
@@ -23,11 +24,12 @@ Startup requires:
 | --- | --- |
 | `SHARNESS_DATABASE_URL` | A PostgreSQL connection URL (`postgres://user:password@host:5432/database`) |
 | `SHARNESS_CONFIG_FILE` | Path to the private settings file |
-| `SHARNESS_DECISION_PROVIDER_KEY` | The decision provider's API key, when the selected policy names a provider |
+| `SHARNESS_DECISION_PROVIDER_KEY` | The decision provider's API key, when the settings name a provider |
 
 Start the daemon with `sharnessd`. Standard `OTEL_*` environment
-variables configure tracing. A missing or invalid settings file or a database
-that holds other tables refuses startup.
+variables configure tracing. A missing or invalid settings file refuses
+startup, and so does a database that has other tables or the tables of
+another version of the server.
 
 The settings file is a JSON document that takes these properties. Unknown properties are refused.
 
@@ -35,14 +37,14 @@ The settings file is a JSON document that takes these properties. Unknown proper
 | --- | --- |
 | `port` | Required integer from 1 to 65535 |
 | `host` | Required listener address |
-| `authentication` | Required OAuth configuration, below |
+| `authentication` | Required: the OAuth configuration below, or `"development"` |
 | `serverAgent` | Required `name` and `subject` of the [server agent](./modes.md#server-agent-and-clients) |
-| `messagePolicyFile` | Optional policy file, resolved relative to the settings file |
-| `normsDirectory` | Optional [norms directory](./norms/norms.md#scope-and-installation), resolved relative to the settings file. Needs `messagePolicyFile`, and initial norms with English rules need its `decisionProvider` |
-| `maximumHistoryRecords` | Default 256; [window bounds](./firewall/message-policy.md#available-history). |
+| `normsDirectory` | Optional [norms directory](./norms/norms.md#publishing-norms), resolved relative to the settings file. Norms that describe a string or list field need `decisionProvider` |
+| `decisionProvider` | Optional [decision provider](./firewall.md#decision-provider) that judges the norms' text rules |
+| `historyLimit` | Default 256; the most earlier messages the decision provider reads, as the [history window](./firewall.md#history-window) states. |
 
-Policy documents, norm documents and provider credentials
-are read at startup. Restart to activate changes.
+Norm documents and the provider's key are read at startup. Restart to
+activate changes.
 
 ### MCP authentication
 
@@ -63,11 +65,25 @@ the daemon treats it like any other.
 A token is checked when its request arrives; hosts renew their
 authorization before the next request.
 
-## Firewalls
+### Development authentication
 
-The configured message policy and norms apply before host calls are accepted.
-The server agent uses `read_firewall_decisions` and, with
-norms, every agent uses `read_norms` through its own MCP context.
+`"authentication": "development"` verifies no caller. A request acts as the
+owner its bearer token names: `Authorization: Bearer alice` signs in the owner
+whose subject is `alice`, under the issuer `development`, and a request
+without a bearer token is refused. Whoever can reach the listener can act as
+any agent, the server agent included, so the daemon prints a warning at every
+start in this mode. Use it only on a machine or network you control.
+
+The daemon checks no Host header in this mode. It refuses a request that
+carries an Origin header unless the origin is on the same machine, so a site
+the operator visits cannot act through their browser.
+
+## Firewall
+
+The [norms](./norms/norms.md) are compiled before the daemon serves MCP, and
+the [firewall](./firewall.md) enforces them on every message. Every agent reads
+the norm documents with `read_norms`, and the server agent reads the
+firewall's decisions with `read_firewall_decisions`.
 
 <a id="persistence"></a>
 
@@ -79,11 +95,13 @@ read what it stores, so protect it as you would the messages themselves.
 
 ## MCP interface
 
-The daemon exposes tools for status, messaging, history, policy and
-delivery.
+The daemon exposes tools for status, messaging, conversations, norms and
+firewall decisions.
 
-The firewall checks new messages. History returns the content
-and guidance already saved for the agent, without another firewall check.
+The firewall checks new messages. A read of a conversation returns the
+messages already stored, without another firewall check.
 
-Failed send invocations return their existing tool errors and emit structured
-daemon logs with agent attribution.
+A failed send returns its [tool error](./host/messaging.md#failed-sends). The
+daemon logs it with the agent that sent it and the failure's message as the
+server agent would read it: a firewall refusal's check, reason and rule are
+logged also when a client sent the message.

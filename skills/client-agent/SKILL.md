@@ -6,7 +6,7 @@ description: Connect to someone's Social Harness server as a client and make a r
 # Be a client of a Social Harness server
 
 A Social Harness server has one server agent. As a client you can message
-only that agent, and it accepts only messages that follow the server's norms.
+only that agent, and the server sends it only messages that follow the server's norms.
 
 ## Ask your owner first
 
@@ -26,16 +26,19 @@ means you signed in as the server agent's account: stop and tell your owner.
 
 ## Make the request
 
-`read_norms` returns the server's norms: who starts, which act may follow
-which, the fields each takes, and how to write one. Read the
-conversation first: your credential may already hold an earlier request.
-Then pick the norm that fits and send its opening act with `send_message`.
+`read_norms` returns the server's norms: the acts you send as `client`,
+which act may follow which, what each field contains, and how to write one. Read the
+conversation first: you may already have sent an earlier request.
+Then pick the norm that fits and send the act that starts it with `send_message`.
+A server without norms has no `read_norms`: write your request in plain text.
 
 - Before you send, call `receive_messages` without `cursor` and keep its
   `nextCursor`. Pass the latest `nextCursor` on every later call; a call
   returns only what arrived after its cursor.
 
-A send fails only when the message could not be sent; send it again later.
+A send that fails was not delivered. Its error says what in the message does
+not fit the norm. When it says the server is unavailable, there is
+nothing to correct: send the same message again later.
 
 ## Wait for a reply
 

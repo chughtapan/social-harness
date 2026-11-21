@@ -1,10 +1,12 @@
 # Social Harness
 
-Social Harness provides communication and message policy for applications
-where AI agents work for different people or organizations. It supplies a
-name for each agent, ordered messaging, and a firewall each
-owner can configure. Your application supplies the domain logic. Agents keep
-their existing hosts, tools, and private context.
+Social Harness lets AI agents that work for different people or
+organizations communicate under structured norms. A server publishes its
+norms: which acts its agents exchange, in what order, and what each field
+contains. Social Harness enforces that both the client and the server agent
+follow them, so a message that does not is never sent. It also names each agent and
+keeps every conversation in order. Your application supplies the domain
+logic. Agents keep their existing hosts, tools, and private context.
 
 One `sharnessd` server serves every participant. Each owner signs in to it,
 and it gives that owner one agent, delivers messages between agents and keeps
@@ -15,15 +17,17 @@ operator with their messages.
 ## Send a message
 
 With Alice signed in to Bob's server, Alice's host calls the `send_message`
-tool through the Model Context Protocol (MCP):
+tool through the Model Context Protocol (MCP). Bob's server publishes an
+office-hours norm, so her message is one of its acts:
 
 ```json
 {
-  "text": "Can we meet at 15:00?"
+  "text": "(request :norm office-hours :topic \"Thesis outline\")"
 }
 ```
 
-The
+The [norms contract](https://docs.socialharness.org/reference/spec/norms/norms)
+defines norm documents and acts, and the
 [messaging contract](https://docs.socialharness.org/reference/spec/host/messaging)
 defines send outcomes and receiving guarantees.
 
@@ -40,7 +44,9 @@ what you want it to do:
 
 A server admits each request by its
 [OAuth access token](https://docs.socialharness.org/reference/spec/daemon#mcp-authentication),
-and each signed-in owner gets one agent. The [MCP interface](https://docs.socialharness.org/reference/spec/daemon#mcp-interface)
+and each signed-in owner gets one agent. For development, a server can run
+with [development authentication](https://docs.socialharness.org/reference/spec/daemon#development-authentication),
+which verifies no caller. The [MCP interface](https://docs.socialharness.org/reference/spec/daemon#mcp-interface)
 defines the available operations.
 
 The npm packages use the `@social-harness` scope.

@@ -1,8 +1,9 @@
 #!/usr/bin/env node
 /**
- * @file The `sharnessd` executable: it reads the settings file, builds the
- * server agent's firewall, and serves the MCP server of `server.ts` over
- * HTTP behind the MCP SDK's bearer authentication. `--help` prints the
+ * @file The `sharnessd` executable: it reads the settings file, compiles the
+ * server's norms from their documents, opens the server behind the firewall
+ * that enforces them on every message, and serves its MCP tools over HTTP to the
+ * owners the authentication admits. `--help` prints the
  * usage, no argument serves until the process is stopped, and any other
  * arguments print the usage to standard error. A startup failure prints one
  * line and exits unsuccessfully.
@@ -10,19 +11,7 @@
 import * as NodeSdk from "@effect/opentelemetry/NodeSdk";
 import { FileSystem } from "@effect/platform";
 import { NodeFileSystem, NodeRuntime } from "@effect/platform-node";
-import { discoverAuthorizationServerMetadata } from "@modelcontextprotocol/client";
 import { toNodeHandler } from "@modelcontextprotocol/node";
-import {
-  createMcpHandler,
-  getOAuthProtectedResourceMetadataUrl,
-  hostHeaderValidationResponse,
-  type McpServerFactory,
-  OAuthError,
-  OAuthErrorCode,
-  oauthMetadataResponse,
-  originValidationResponse,
-  requireBearerAuth,
-} from "@modelcontextprotocol/server";
 import { diag, DiagConsoleLogger, DiagLogLevel } from "@opentelemetry/api";
 import { OTLPTraceExporter } from "@opentelemetry/exporter-trace-otlp-proto";
 import { BatchSpanProcessor } from "@opentelemetry/sdk-trace-base";
@@ -33,27 +22,23 @@ import {
   Effect,
   Layer,
   Option,
+  Order,
   Schema,
   Struct,
 } from "effect";
-import { createRemoteJWKSet, jwtVerify } from "jose";
 // eslint-disable-next-line agent-code-guard/prefer-effect-platform -- The MCP SDK's Node handler serves on a node:http server.
 import { createServer } from "node:http";
-import { dirname, resolve } from "node:path";
+import { dirname, join, resolve } from "node:path";
+import { type Admission, admission, authentication } from "./authentication.js";
 import {
-  type LoadedMessagePolicy,
-  loadMessagePolicy,
-  makeFirewall,
-} from "./firewall.js";
+  decisionProviderSetting,
+  jevDecisionProvider,
+} from "./decision-provider.js";
+import { makeFirewall } from "./firewall.js";
+import { type McpHandler, mcpHandler, packageVersion } from "./mcp.js";
 import { AgentName } from "./messages.js";
-import {
-  initialNormsHaveRules,
-  type InstalledNorms,
-  loadNorms,
-  type NormsConfigurationError,
-  structureCheck,
-} from "./norms/index.js";
-import { databaseUrl, packageVersion, serverFactory } from "./server.js";
+import { compileNorms } from "./norms/index.js";
+import { openServer } from "./server.js";
 
 /**
  * Messages identify the failed operation without disclosing documents or credentials.
@@ -62,54 +47,9 @@ class SettingsError extends Data.TaggedError("SettingsError")<{
   readonly message: string;
 }> {}
 
-/** A startup refusal whose message names the setting to change. */
-const refused = (message: string) => new SettingsError({ message });
+/** A startup failure whose message names the setting to change. */
+const settingsError = (message: string) => new SettingsError({ message });
 
-/**
- * The URL `value` names when it parses, uses one of `protocols` (each with its
- * colon) and carries no userinfo and no fragment; otherwise `undefined`.
- */
-const plainUrl = (
-  value: string | URL,
-  protocols: readonly string[],
-): URL | undefined => {
-  if (!URL.canParse(value)) {
-    return undefined;
-  }
-  const url = new URL(value);
-  return protocols.includes(url.protocol) &&
-    [url.username, url.password, url.hash].every((part) => part === "")
-    ? url
-    : undefined;
-};
-
-const httpsUrl = Schema.String.pipe(
-  Schema.filter((value) => plainUrl(value, ["https:"])?.search === ""),
-);
-
-/** Plaintext discovery is limited to local issuer fixtures; hosted providers require HTTPS. */
-const oauthIssuer = Schema.Union(
-  httpsUrl,
-  Schema.String.pipe(
-    Schema.filter((value) => {
-      const url = plainUrl(value, ["http:"]);
-      return url?.search === "" && url.hostname === "127.0.0.1";
-    }),
-  ),
-);
-
-/** The OAuth resource the server is, and the issuer whose tokens it admits. */
-const authentication = Schema.Struct({
-  resource: httpsUrl.pipe(
-    Schema.filter(
-      (value) =>
-        new URL(value).pathname === "/mcp" && new URL(value).href === value,
-    ),
-    Schema.compose(Schema.URL),
-  ),
-  issuer: oauthIssuer,
-  scope: Schema.String.pipe(Schema.pattern(/^[\x21\x23-\x5B\x5D-\x7E]+$/u)),
-});
 /** The settings file as an operator writes it. */
 const settingsFile = Schema.Struct({
   port: Schema.Int.pipe(Schema.between(1, 65535)),
@@ -119,34 +59,46 @@ const settingsFile = Schema.Struct({
     name: AgentName,
     subject: Schema.NonEmptyString,
   }),
-  messagePolicyFile: Schema.optional(Schema.NonEmptyString),
   normsDirectory: Schema.optional(Schema.NonEmptyString),
-  maximumHistoryRecords: Schema.optional(
-    Schema.Int.pipe(Schema.between(1, 1024)),
-  ),
+  decisionProvider: Schema.optional(decisionProviderSetting),
+  historyLimit: Schema.optional(Schema.Int.pipe(Schema.between(1, 1024))),
 });
 
 /**
- * What the process holds after reading the settings file and the files it
- * names: the message policy, the provider credential and the norms
- * themselves, in place of their paths.
+ * The norms of the `.lisp` documents directly in `directory`, compiled in
+ * name order, or the failure of a directory that cannot be read, has no
+ * such document or has one that does not compile.
  */
-type Settings = Omit<
-  typeof settingsFile.Type,
-  "messagePolicyFile" | "normsDirectory"
-> & {
-  readonly messagePolicy?: LoadedMessagePolicy;
-  readonly norms?: InstalledNorms;
-};
+const normsIn = Effect.fn("normsIn")(function* (directory: string) {
+  const filesystem = yield* FileSystem.FileSystem;
+  return yield* filesystem.readDirectory(directory).pipe(
+    Effect.flatMap((files) =>
+      Effect.forEach(
+        files.filter((file) => file.endsWith(".lisp")).sort(Order.string),
+        (file) => filesystem.readFileString(join(directory, file)),
+        { concurrency: 1 },
+      ),
+    ),
+    Effect.mapError(({ message }) => message),
+    Effect.flatMap(compileNorms),
+    Effect.mapError((reason) =>
+      settingsError(`The norms directory is invalid: ${reason}`),
+    ),
+  );
+});
 
 /**
- * The paths the settings file names resolve against its own directory,
- * whatever the working directory.
+ * The settings as the process uses them: the settings file, with the norms
+ * in place of their directory and the decision provider in place of its
+ * setting. The norms directory resolves against the settings
+ * file's own directory, whatever the working directory. The provider is Jev
+ * under the named model and limits, with the key in the environment
+ * variable `SHARNESS_DECISION_PROVIDER_KEY`.
  */
 const loadSettings = Effect.fn("loadSettings")(function* () {
   const settingsPath = yield* Config.string("SHARNESS_CONFIG_FILE").pipe(
     Effect.mapError(() =>
-      refused("Set SHARNESS_CONFIG_FILE to the server settings file"),
+      settingsError("Set SHARNESS_CONFIG_FILE to the server settings file"),
     ),
   );
   const filesystem = yield* FileSystem.FileSystem;
@@ -157,117 +109,63 @@ const loadSettings = Effect.fn("loadSettings")(function* () {
       }),
     ),
     Effect.mapError(() =>
-      refused("The server settings file is unreadable or invalid"),
+      settingsError("The server settings file is unreadable or invalid"),
     ),
   );
   const settingsDirectory = dirname(resolve(settingsPath));
   const norms =
     file.normsDirectory === undefined
       ? undefined
-      : yield* loadNorms(resolve(settingsDirectory, file.normsDirectory)).pipe(
-          Effect.mapError((error: NormsConfigurationError) =>
-            refused(
-              `The configured norms directory is invalid: ${error.reason}`,
+      : yield* normsIn(resolve(settingsDirectory, file.normsDirectory));
+  if (norms?.hasTextRules === true && file.decisionProvider === undefined) {
+    return yield* settingsError(
+      "The norms describe string or list fields, which need a decisionProvider to judge them",
+    );
+  }
+  const setting = file.decisionProvider;
+  const provider =
+    setting === undefined
+      ? undefined
+      : jevDecisionProvider(
+          yield* Config.redacted(
+            Config.nonEmptyString("SHARNESS_DECISION_PROVIDER_KEY"),
+          ).pipe(
+            Effect.mapError(() =>
+              settingsError(
+                "The settings name a decisionProvider: set SHARNESS_DECISION_PROVIDER_KEY to its key",
+              ),
             ),
           ),
+          setting,
         );
-  if (norms !== undefined && file.messagePolicyFile === undefined) {
-    return yield* refused(
-      "The configured norms need a messagePolicyFile: the message policy checks them",
-    );
-  }
-  const messagePolicy = yield* loadMessagePolicy(
-    file.messagePolicyFile === undefined
-      ? undefined
-      : resolve(settingsDirectory, file.messagePolicyFile),
-  ).pipe(Effect.mapError((error) => refused(error.message)));
-  if (
-    norms !== undefined &&
-    initialNormsHaveRules(norms) &&
-    Option.getOrUndefined(messagePolicy)?.provider === undefined
-  ) {
-    return yield* refused(
-      "The configured norms have English rules, which need a messagePolicyFile with a decisionProvider to check them",
-    );
-  }
-  const settings: Settings = {
-    ...Struct.omit(file, "messagePolicyFile", "normsDirectory"),
-    messagePolicy: Option.getOrUndefined(messagePolicy),
-    ...(norms === undefined ? {} : { norms }),
+  return {
+    ...Struct.omit(file, "normsDirectory", "decisionProvider"),
+    norms,
+    provider,
   };
-  return settings;
 });
 
 /**
- * Listens on the settings' host and port and answers each request as the MCP
- * SDK's example of a bearer-authenticated server does. The SDK validates the
- * Host and Origin headers against the resource's hostname, serves the OAuth
- * discovery documents, and checks the bearer token's scope and expiry; a
- * refusal is the SDK's response. Any path but `/mcp` answers 404. A token is
- * a JWT the issuer signed for the resource with a subject, verified against
- * the key set the issuer's metadata names. Returns once the listener accepts
- * connections.
+ * Listens on the settings' host and port. A request the admission answers
+ * gets that answer, any path but `/mcp` answers 404, and every other request
+ * reaches the MCP handler as the owner it is admitted as. Returns once the
+ * listener accepts connections.
  */
 const listen = Effect.fn("listen")(function* (
-  { host, port, authentication }: Settings,
-  factory: McpServerFactory,
+  { host, port }: typeof settingsFile.Type,
+  admitted: Admission,
+  handler: McpHandler,
 ) {
-  const { issuer, resource, scope } = authentication;
-  const metadata = yield* Effect.tryPromise({
-    try: () => discoverAuthorizationServerMetadata(issuer),
-    catch: () => undefined,
-  }).pipe(Effect.orElseSucceed(() => undefined));
-  if (typeof metadata?.jwks_uri !== "string") {
-    return yield* refused(
-      `The OAuth issuer ${issuer} did not answer with its configuration. Check authentication.issuer and that the server can reach it.`,
-    );
-  }
-  const keys = createRemoteJWKSet(new URL(metadata.jwks_uri));
-  const hostnames = [resource.hostname];
-  const discovery = {
-    oauthMetadata: metadata,
-    resourceServerUrl: resource,
-    scopesSupported: [scope],
-  };
-  const gate = requireBearerAuth({
-    requiredScopes: [scope],
-    resourceMetadataUrl: getOAuthProtectedResourceMetadataUrl(resource),
-    verifier: {
-      // eslint-disable-next-line agent-code-guard/async-keyword -- The MCP SDK's authorization API is promise-based.
-      verifyAccessToken: async (token) => {
-        const verified = await jwtVerify(token, keys, {
-          issuer,
-          audience: resource.href,
-          algorithms: ["RS256"],
-        }).catch(() => undefined);
-        if (!verified?.payload.sub) {
-          throw new OAuthError(OAuthErrorCode.InvalidToken, "Invalid token");
-        }
-        const { sub, scope: granted, exp } = verified.payload;
-        return {
-          token,
-          clientId: "",
-          scopes: typeof granted === "string" ? granted.split(" ") : [],
-          expiresAt: exp,
-          extra: { issuer, subject: sub },
-        };
-      },
-    },
-  });
-  const handler = createMcpHandler(factory);
   // eslint-disable-next-line agent-code-guard/async-keyword -- The MCP SDK's Node handler takes a promise-based fetch function.
   const fetch = async (request: Request) => {
-    const answered =
-      hostHeaderValidationResponse(request, hostnames) ??
-      originValidationResponse(request, hostnames) ??
-      oauthMetadataResponse(request, discovery);
+    const answered = admitted.answer(request);
     if (answered !== undefined) {
       return answered;
     }
     if (new URL(request.url).pathname !== "/mcp") {
       return new Response(null, { status: 404 });
     }
-    const authInfo = await gate(request);
+    const authInfo = await admitted.owner(request);
     return authInfo instanceof Response
       ? authInfo
       : await handler.fetch(request, { authInfo });
@@ -277,7 +175,7 @@ const listen = Effect.fn("listen")(function* (
   yield* Effect.async<undefined, SettingsError>((resume) => {
     listener.once("error", () => {
       resume(
-        refused(
+        settingsError(
           `The server could not listen on ${host}:${port}. Stop the process that uses the port, or set another port.`,
         ),
       );
@@ -294,13 +192,17 @@ const HELP_MESSAGE = [
   "",
   "SHARNESS_CONFIG_FILE: JSON server settings file",
   "SHARNESS_DATABASE_URL: PostgreSQL connection URL",
-  "SHARNESS_DECISION_PROVIDER_KEY: API key of the message policy's decision provider",
+  "SHARNESS_DECISION_PROVIDER_KEY: API key of the decision provider the settings name",
   "Standard OTEL_* variables configure telemetry.",
 ].join("\n");
 
+/** Printed at every start that verifies no caller. */
+const DEVELOPMENT_WARNING =
+  'sharnessd verifies no caller: authentication is "development", so whoever reaches this port acts as the owner its bearer token names. Do not expose it.';
+
 /** Printed for a startup failure that names no setting of its own. */
 const UNEXPLAINED_FAILURE =
-  "The server could not start. Check SHARNESS_CONFIG_FILE and SHARNESS_DATABASE_URL; run sharnessd --help for what each must hold.";
+  "The server could not start. Check SHARNESS_CONFIG_FILE and SHARNESS_DATABASE_URL; run sharnessd --help for what each names.";
 
 /** Prints one line to standard error and makes the process exit unsuccessfully. */
 const exitUnsuccessfully = (line: string) =>
@@ -351,33 +253,34 @@ const spanExport = Layer.unwrapEffect(
 
 /** Serves until the process is stopped. Fails if it cannot start. */
 const serve = Effect.gen(function* () {
-  const url = yield* databaseUrl;
+  const url = yield* Config.redacted("SHARNESS_DATABASE_URL").pipe(
+    Effect.mapError(() =>
+      settingsError(
+        "Set SHARNESS_DATABASE_URL to the database the server uses",
+      ),
+    ),
+  );
   const settings = yield* loadSettings();
-  const { authentication, norms } = settings;
-  const factory = yield* serverFactory(url, {
-    issuer: authentication.issuer,
-    subject: settings.serverAgent.subject,
-    name: settings.serverAgent.name,
-    firewall: makeFirewall({
-      ...(settings.messagePolicy === undefined
-        ? {}
-        : { source: settings.messagePolicy }),
-      me: settings.serverAgent.name,
-      historyLimit: settings.maximumHistoryRecords ?? 256,
-      notice: `Your message was not accepted: it breaks a rule this agent applies to incoming messages.${norms === undefined ? "" : " Call read_norms to see which messages it accepts."}`,
-      ...(norms === undefined ? {} : { structureCheck: structureCheck(norms) }),
+  const { serverAgent, norms } = settings;
+  const admitted = yield* admission(settings.authentication);
+  if (settings.authentication === "development") {
+    yield* Console.error(DEVELOPMENT_WARNING);
+  }
+  const server = yield* openServer(
+    url,
+    serverAgent.name,
+    makeFirewall({
+      norms,
+      provider: settings.provider,
+      historyLimit: settings.historyLimit,
     }),
-    ...(norms === undefined
-      ? {}
-      : {
-          norms: norms.map((norm) => ({
-            name: norm.name,
-            description: norm.description,
-            document: norm.source,
-          })),
-        }),
-  });
-  yield* listen(settings, factory);
+  );
+  const handler = yield* mcpHandler(
+    server,
+    { issuer: admitted.issuer, subject: serverAgent.subject },
+    norms,
+  );
+  yield* listen(settings, admitted, handler);
   yield* Console.log(
     `sharnessd listening on http://${settings.host}:${settings.port}/mcp (package ${packageVersion})`,
   );
@@ -399,11 +302,12 @@ NodeRuntime.runMain(
     }
     return exitUnsuccessfully(HELP_MESSAGE);
   }).pipe(
-    Effect.catchTags({
-      SettingsError: ({ message }) => exitUnsuccessfully(message),
-      DatabaseUrlMissingError: ({ message }) => exitUnsuccessfully(message),
-      DatabasePreparationError: ({ message }) => exitUnsuccessfully(message),
-    }),
+    Effect.catchTag(
+      "SettingsError",
+      "IssuerError",
+      "DatabasePreparationError",
+      ({ message }) => exitUnsuccessfully(message),
+    ),
     Effect.catchAll(() => exitUnsuccessfully(UNEXPLAINED_FAILURE)),
   ),
 );

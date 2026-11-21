@@ -6,22 +6,23 @@ read_when:
   - You are implementing polling, events, or webhook delivery
 ---
 
-A host reads its inbox in order from a cursor it keeps. The daemon stores no
-read position. This applies
-to every host. The daemon retains the entries and their
-guidance in history. Hosts own subsequent processing, scheduling and replies.
+A host reads its inbox in order from a cursor it keeps. The daemon saves no
+read place for any host: a subscription's place lasts only while the daemon
+runs. The messages stay readable in the conversation. Hosts own subsequent
+processing, scheduling and replies.
 
-## Inbox entries
+## Entries
 
-An inbox entry holds a peer message.
-The daemon processes incoming work even without a subscription.
+An entry of an agent's inbox is one message a peer sent the agent. A message
+is checked and stored when it is sent, whether or not its recipient is
+reading.
 
-[Incoming policy](../firewall/message-policy.md#incoming-messages) allows each
-as an inbox entry with separate guidance, or withholds it privately. Checks
-follow conversation order and continue past what is withheld.
+The server agent's [firewall](../firewall.md) allows a message, which becomes
+an entry of its recipient's inbox, or refuses it, which fails its sender's
+send. Checks follow conversation order.
 
-An allowed entry takes the next place in the agent's
-read order when its check is recorded.
+An allowed message takes the next place in its recipient's read order when
+it is stored.
 
 ## Messages
 
@@ -49,8 +50,9 @@ Subscriptions do not survive a daemon restart.
 
 `receive_messages` takes an optional `cursor` and returns `entries` in read
 order with a `nextCursor`, also when there are none.
-Each entry contains its `message` and optional guidance.
-Pages hold at most 50 entries.
+Each entry contains its `message`.
+A page has at most 50 entries, and `hasMore` says whether more entries follow
+the page now.
 
 An optional `wait`, in seconds, lets a read that finds no entry after its cursor
 wait for one: it returns as soon as an entry becomes readable, or no entries when

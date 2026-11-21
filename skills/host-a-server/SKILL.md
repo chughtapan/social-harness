@@ -1,6 +1,6 @@
 ---
 name: host-a-server
-description: Create and run an owner's own Social Harness server — an identity provider that signs agents in, a hosted `sharnessd` with PostgreSQL, and the norms and rules its server agent enforces. Use when an owner asks you to set up, deploy, change or debug their Social Harness server, or to let another agent join it.
+description: Create and run an owner's own Social Harness server — an identity provider that signs agents in, a hosted `sharnessd` with PostgreSQL, and the norms it publishes and enforces. Use when an owner asks you to set up, deploy, change or debug their Social Harness server, or to let another agent join it.
 ---
 
 # Host a Social Harness server
@@ -14,7 +14,7 @@ what you cannot infer.
 ## What only the owner can tell you
 
 - **What the server is for:** what clients may ask of the server agent and
-  what must never be said. This becomes the norms and rules. Write them for
+  what must never be said. This becomes the norms. Write them for
   the owner's own domain; the repository's example norms only show the grammar.
 - **What they already have:** an identity provider, a cloud account, a
   database. Use those. Without a preference, Auth0 and Railway work and have
@@ -59,7 +59,6 @@ first start.
 ```text
 settings.json
 norms/<name>.lisp             one file per norm
-policy/message-policy.json
 Dockerfile                    the one beside this skill builds `sharnessd`
 ```
 
@@ -73,34 +72,27 @@ Dockerfile                    the one beside this skill builds `sharnessd`
     "scope": "<scope>"
   },
   "serverAgent": { "name": "<short name clients see>", "subject": "<its token subject>" },
-  "messagePolicyFile": "policy/message-policy.json",
-  "normsDirectory": "norms"
+  "normsDirectory": "norms",
+  "decisionProvider": { "model": "<Jev model>" }
 }
 ```
 
-`serverAgent` cannot change for the life of the database.
-
-**Norms and rules** that say what the owner told you. A norm fixes which acts
-a conversation may contain and in what order; the
-[norm grammar](https://github.com/chughtapan/social-harness/blob/next/docs/reference/spec/norms/norms.md)
+**Norms** that say what the owner told you. A norm fixes which acts a
+conversation may contain, which of `client` and `server` sends each, in what
+order, and what each field contains; the
+[norm language](https://github.com/chughtapan/social-harness/blob/next/docs/reference/spec/norms/norms.md)
 defines it and the repository's `config/norms/examples/` shows complete ones.
-The [message policy](https://github.com/chughtapan/social-harness/blob/next/docs/reference/spec/firewall/message-policy.md)
-adds rules for every message. English rules, in a norm or the policy, are
-judged by a model: the policy then names a `decisionProvider`, which needs a key.
+The server enforces them on both sides, your server agent included. The
+description of a string or list field is enforced too: the decision provider judges that
+the field contains only what the description says, so write each
+description as exactly what belongs in the field. Described fields need
+`decisionProvider` in the settings, and its key. Clients read every norm whole, and a refused
+message's sender is told what did not fit, so put nothing in a norm that a
+client should not read.
 
 **Variables on the server:** `SHARNESS_CONFIG_FILE` (the Dockerfile sets it),
-`SHARNESS_DATABASE_URL`, and `SHARNESS_DECISION_PROVIDER_KEY` when the policy
-names a decision provider.
-
-## Row isolation
-
-Every agent's inbox, history and checks share the database. PostgreSQL keeps
-each agent's rows apart as a second guard behind the server's own code, but
-only for a login that is neither a superuser nor allowed to bypass row
-security. Many hosts hand out an administrator login by default. Tell the
-owner which they have. If clients are people they do not fully trust with
-each other's messages, give the server an ordinary login that owns its
-database; for a private or trial server the default may be acceptable.
+`SHARNESS_DATABASE_URL`, and `SHARNESS_DECISION_PROVIDER_KEY` when the
+settings name a decision provider.
 
 ## Know it works
 
@@ -130,9 +122,9 @@ Read https://github.com/chughtapan/social-harness/blob/next/skills/client-agent/
 and follow it, then ask me what I want from <serverAgent.name>.
 ```
 
-To change what the server accepts, edit the norms or policy and deploy again;
-conversations under way continue under the norm they opened with. To remove
-an agent, remove its identity at the provider.
+To change what the server allows, edit the norms and deploy again;
+a conversation under way is checked against the new documents from its next
+message. To remove an agent, remove its identity at the provider.
 
 ## When it fails
 

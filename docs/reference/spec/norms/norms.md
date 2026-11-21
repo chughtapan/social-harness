@@ -1,215 +1,513 @@
 ---
-title: Shared norms
-description: Configure message structure, conversation rules and text checks with pre-agreed norm documents.
+title: Norm language
+description: The language a server's norms are written in. Its syntax, the norm a document denotes, when a norm is well formed, and how each message is checked against it.
 read_when:
-  - You are supplying a communication norm to two agents
-  - You need the norm document grammar and failure behavior
-  - You are comparing ordinary chat with instructed or enforced communication
+  - You are writing a server's norms
+  - You are writing acts, or need to know why one was refused
+  - You are changing the norm compiler or the structure check
 ---
 
-A shared norm defines which messages participants may send, when they may
-send them, and what their fields may contain. Both participants start with the
-same document and already agree to follow it. The first exchange is a task
-act from that document. Discovery and agreement are outside this contract.
+A norm says which acts the client and the server agent may send each other,
+in what order, and what each field of an act contains. A server publishes
+its norms: every member reads the documents with `read_norms`, and the daemon
+enforces them on the client and the server agent alike. A message that does
+not follow them is not sent.
 
-A norm compiles to configuration for the existing
-[message firewall](../firewall/message-policy.md#structured-contracts).
-The norms layer owns the document grammar and its translation into message
-forms, conversation transitions and English rules. Structural checks validate
-each message, protocol checks validate its place in the conversation, and
-lightweight decision models judge its free text. Selecting an English rule
-by its declared act is not a violation finding.
+This page defines the language in four parts: how a norm document and an act
+are written, the norm a document denotes, when that norm is well formed, and
+how the [firewall](../firewall.md#one-check)'s structure check checks a
+message against it.
 
-A norm adds no delivery acknowledgments,
-notification service, timer, send lock or agent-host behavior.
-
-## Scope and installation
-
-This version governs text conversations with one active instance at
-a time. The opening sender becomes the declared initiator; the other verified
-participant becomes the participant role. These bindings last until an
-explicit ending act.
-
-The daemon's
-`normsDirectory` loads the `.lisp` files directly inside that directory and
-compiles them before startup. `read_norms` returns the
-current documents. No additional rule file or built-in agreement is installed.
-
-A source SHA-256 digest identifies
-the exact document bytes. After a restart every instance uses the installed
-documents.
-
-A peer message cannot install policy.
-
-## Document grammar
-
-A document contains one `norm` header followed by `content` and `rule`
-declarations. Semicolon comments are permitted in documents. Quoted strings
-use JSON escaping. The grammar is inert data, with no evaluated code.
-Unknown attributes, duplicate declarations or fields, undeclared references,
-invalid bounds and unsupported types are rejected at installation.
-
-A small complete example:
-
-```lisp
-(norm example :initiator Requester :participant Responder
-  :description "The requester names an item, and the responder returns its status.")
-(content request :by Requester :starts true :initiates pending
-  (field item :type string :min-length 1))
-(content inform :by Responder :when pending :ends true
-  (field status :type string :min-length 1))
-(rule :act request "item names the requested item without unrelated instructions.")
+```mermaid
+flowchart LR
+    document[Norm document] -- compile --> norm[Norm]
+    text[Message text] -- read --> act[Act]
+    norm --> check[Structure check]
+    act --> check
+    conversation[Earlier messages] --> check
+    check --> passed[Passed, with text rules]
+    check --> refused[Refused, with feedback]
 ```
 
-The header requires a lowercase norm name and two distinct role names through
-`:initiator` and `:participant`. Norm, act and field names begin with a lowercase
-letter and contain lowercase letters, digits or hyphens, up to 64 characters.
-`:description` supplies the task meaning to participants and the decision provider.
-`:on-refusal` optionally names an explicitly declared correction act.
+A norm has these two forms and no others: the document its author writes and
+every member reads, and the norm the daemon compiles it to at startup.
+Compiling reads the document with the Lisp frontend and requires the result
+to be well formed. The frontend is the only part that knows Lisp. The
+well-formedness rules and the structure check read a norm and an act as
+data.
 
-### Message forms and transitions
+## Example
 
-Each `content` declaration defines exactly one act. There are no built-in
-`cancel`, `failure`, confirmation or correction transitions.
+A client books a meeting with the server agent:
 
-| Attribute | Meaning |
+```lisp
+; A client books a meeting with the server.
+(norm booking
+  :description "The client asks for a meeting, the server offers slots, and the client picks one.")
+
+(act request :by client :starts true :sets requested
+  (field topic :type string :min-length 1 :max-length 200
+    :description "The subject of the meeting."))
+
+(act offer :by server :when requested
+  :clears requested :sets offered
+  (field slots :type list :min-items 1 :max-items 3
+    :description "One meeting slot: a date, start and end times, and a timezone."))
+
+(act pick :by client :when offered :ends true
+  (field slot :type string)
+  (relation member slot (previous offer slots)))
+
+(act decline :by (client server) :ends true)
+```
+
+Under this norm a conversation goes as follows. Each act after the first
+names the message it replies to as `replyToMsgId` in the send input.
+
+| # | Sender | Message | Replies to | Result |
+| --- | --- | --- | --- | --- |
+| 1 | client | `Hello, can we meet?` | | Refused: the message is not one act. |
+| 2 | server | `(request :norm booking :topic "Thesis outline")` | | Refused: `request` is not the server's to send. |
+| 3 | client | `(request :norm booking :topic "Thesis outline")` | | Passed. It starts an instance, and `requested` is set. |
+| 4 | server | `(offer :norm booking :slots ("Mon 10:00-10:30 UTC" "Tue 14:00-14:30 UTC"))` | 3 | Passed. `offered` is set in place of `requested`. |
+| 5 | client | `(pick :norm booking :slot "Wed 09:00-09:30 UTC")` | 4 | Refused: the slot is not one of the offered slots. |
+| 6 | client | `(pick :norm booking :slot "Tue 14:00-14:30 UTC")` | 3 | Refused: the reply chain from message 3 does not contain the offer. |
+| 7 | client | `(pick :norm booking :slot "Tue 14:00-14:30 UTC")` | 4 | Passed. It ends the instance. |
+
+Refused messages are not stored, so message 7 is the third message of the
+conversation.
+
+## Notions
+
+| Notion | Meaning |
 | --- | --- |
-| `:by Role` or `:by (Role Role)` | Permitted sender roles. |
-| `:by (recipient (fact name))` | Permits the verified recipient of the message establishing the current fact. That message must be in the supplied reply chain. |
-| `:starts true` | Opens an idle instance and binds its roles. Defaults to false. |
-| `:ends true` | Ends the active instance once the act is allowed. Defaults to false. A one-message instance can both start and end. |
-| `:when fact` or `:when (facts)` | All named facts must hold. Defaults to empty. |
-| `:initiates` | Facts set when the act is allowed. The act and the time of its original local check become their anchors. |
-| `:terminates` | Facts removed when the act is allowed, before initiation. Defaults to empty. |
-| `:max integer` | Positive maximum count for this act in the instance. Omission means no count limit. |
-| `:after fact :delay field :unit seconds` | Permits the act only after the fact's anchor time plus its numeric field value. All three attributes are required together. |
+| Norm | A named set of forms. |
+| Performative | The name of a kind of act, such as `offer`. |
+| Form | What a norm declares for one performative: the fields an act of it carries, and its turn rule. |
+| Field | A named value of an act: a string, an integer or a list of strings. |
+| Act | What one message states: a performative, the norm it belongs to and a value for each field it carries. |
+| Role | Which member of the conversation sends an act: `client`, or `server` for the server agent. A document does not declare roles. |
+| Fact | A name that is set or not during an instance. Acts set and clear facts, and forms wait on them. |
+| Instance | One run of a norm in a conversation, from an act that starts it to an act that ends it. A conversation has at most one instance in progress. |
 
-An opening cannot depend on earlier instance facts, references, delays or
-relations, including a recipient sender selector. Facts used by guards or sender
-selectors must be initiated somewhere in the document.
-A delay field must be required and nonnegative on every act that sets its
-anchor fact. Timestamps are local Unix milliseconds. Checking a delay never
-creates a job or a later model turn.
+## Lexical structure
 
-A recipient sender selector follows the current fact's exact allowed message,
-including its verified recipient. It does not permit the offer's author to
-answer their own offer. Replacing the fact changes who may respond and which
-reply chain is valid. A corrected response may reference a withheld descendant
-of that current message. The selector never supplies or changes `replyToMsgId`.
+A norm document and a message's text are both sequences of these tokens:
 
-### Fields
-
-Fields are required unless `:optional true`. `:description` explains a field.
-Only the following primitive shapes and constraints are supported:
-
-| Type | Constraints |
+| Token | Form |
 | --- | --- |
-| `string` | Optional `:min-length` and `:max-length`. |
-| `integer` | Optional inclusive `:minimum` and `:maximum`. |
-| `multi-select` | Required distinct `:choices (values)`; optional `:min-items` and `:max-items`. |
+| Whitespace | Any run of whitespace. It separates tokens and means nothing else. |
+| Comment | `;` to the end of its line. A document may carry comments. A message that carries one is not an act. |
+| `(` and `)` | Open and close a list. |
+| String | A JSON string literal: text in double quotes with JSON escapes, on one line. It must decode to well-formed Unicode. |
+| Symbol | Any other run of characters without whitespace, a parenthesis, `;` or `"`. |
 
-Bounds must be ordered. Length and item bounds are nonnegative integers.
-Every message field must be declared. `ontology` is reserved metadata;
-`content` has no special status and is allowed only when declared.
+A symbol has one of these forms, or none of them:
 
-### Relations to preceding messages
+| Symbol | Form |
+| --- | --- |
+| Name | A lowercase letter followed by lowercase letters, digits or hyphens, 64 characters at most. Norms, performatives, fields and facts have names. |
+| Keyword | `:` followed by a name, such as `:max-items`. |
+| Number | A JSON number, such as `3`, `-2` or `1.5e3`. A number is whole when its value has no fractional part, so `10`, `1e1` and `2.0` are whole. |
+| Truth value | `true` or `false`, which are also names. |
 
-A form can constrain a field of the message under check through `(relation operator field source)`.
-`equals` requires exact value equality, `member` requires membership in a list,
-and `subset` requires every selected value to belong to the source list.
-Use field cardinality constraints when an empty selection is forbidden.
+`Tue` and `0x2` are symbols of no form. Two texts are equal when they are the
+same sequence of code points, and two numbers when they have the same value.
+Nothing in a document or a message is evaluated.
 
-Sources follow the supplied `replyToMsgId` and its preceding reply chain, using
-the nearest allowed occurrence of the named act in that exchange:
+## Norm documents
 
-```lisp
-(relation equals slot (previous propose slot))
-(relation subset available (present propose option1 option2 option3))
-(relation member slot (values propose (previous accept-proposal available)))
-(relation member slot (values (fact offered) option1 option2 option3))
+A document is one `norm` declaration followed by an `act` declaration for
+each form. In this grammar, quoted words are symbols, `name`, `string` and
+`number` are the tokens above, `[ x ]` is optional and `{ x }` repeats zero
+or more times.
+
+```ebnf
+document   = norm , { form } ;
+
+norm       = "(" , "norm" , name , [ ":description" , string ] , ")" ;
+
+form       = "(" , "act" , name , { turn | field | relation } , ")" ;
+
+turn       = ":by" , senders
+           | ":starts" , truth
+           | ":ends" , truth
+           | ":when" , facts
+           | ":clears" , facts
+           | ":sets" , facts
+           | ":max" , number
+           | ":after" , name
+           | ":delay" , name
+           | ":unit" , "seconds" ;
+
+senders    = role
+           | "(" , role , { role } , ")"
+           | "(" , "recipient" , "(" , "fact" , name , ")" , ")" ;
+role       = "client" | "server" ;
+facts      = name | "(" , { name } , ")" ;
+truth      = "true" | "false" ;
+
+field      = "(" , "field" , name , { field-attr } , ")" ;
+field-attr = ":type" , type
+           | ":optional" , truth
+           | ":description" , string
+           | bound , number ;
+type       = "string" | "integer" | "list" ;
+bound      = ":min-length" | ":max-length"
+           | ":minimum" | ":maximum"
+           | ":min-items" | ":max-items" ;
+
+relation   = "(" , "relation" , operator , name , source , ")" ;
+operator   = "equals" | "member" | "subset" ;
+source     = "(" , "previous" , ( name | "(" , "fact" , name , ")" ) , name , ")" ;
 ```
 
-`previous` reads a field. `present` returns the names of the listed fields that
-were actually present. `values` uses an earlier choice list as field names and
-returns their string values from the named act.
+The grammar leaves these rules to prose:
 
-With explicit field names, `values` returns the string values of the fields
-present in the selected message; omitted optional fields contribute no value.
-Every listed field must be declared as a string in every possible source form.
-`(fact offered)` names the message that
-established the current `offered` fact. That message must be in the supplied
-reply chain. Re-establishing the fact replaces its values, so an old offer cannot
-authorize a selection after replacement. Every form that establishes the fact
-must declare the source fields. This source constraint does not change general
-`:when` conditions, which remain instance-wide. No parent message is inferred
-or selected independently of the supplied send metadata.
+1. The name of a declaration follows its first word. After it, attributes
+   come in any order, and in an `act` declaration they may stand between
+   fields and relations.
+2. A declaration takes each attribute at most once, and no attribute but
+   those the grammar gives it. A misspelled attribute is therefore an error.
+3. `:by` and `:type` are required. `:after`, `:delay` and `:unit` come
+   together or not at all.
+4. A field takes only the bounds of its type: `:min-length` and `:max-length`
+   for a string, `:minimum` and `:maximum` for an integer, `:min-items` and
+   `:max-items` for a list.
+5. No field is named `norm`, because an act names its norm with `:norm`.
 
-### English rules
+A role may be repeated in a sender list without effect, and a list of facts
+may be empty, which is the same as leaving the attribute out. A text that
+does not match the grammar and these rules is not a norm document, and does
+not compile.
 
-A `rule` has one quoted English text. Optional `:act` restricts it to one
-performative; omission applies it to every act in that norm. Optional
-`:feedback` is registered text for uncertainty and refusal.
+## Acts
 
-The provider judges the current message using its verified author,
-preceding bounded conversation, declared form, current facts, norm description
-and applicable English rules. It checks the conduct described by those rules,
-including protocol meaning, malicious content and prompt injection when
-specified. The [text judgment contract](../firewall/message-policy.md#provider-answers)
-owns uncertainty and provider failures. Structural validity supplies no
-semantic exemption.
+A message's text is an act when the whole text is one list: a performative
+followed by keyword and value pairs.
 
-## Wire messages
-
-A governed message consists entirely of one parenthesized act:
-
-```lisp
-(request :ontology example :item "Research proposal")
+```ebnf
+act       = "(" , name , { keyword , value } , ")" ;
+value     = string | symbol | "(" , { string | symbol } , ")" ;
 ```
 
-A response, using the actual request message identifier:
-
 ```lisp
-(inform :ontology example :status ready)
+(offer :norm booking :slots ("Mon 10:00-10:30 UTC" "Tue 14:00-14:30 UTC"))
 ```
 
-Supply the referenced message ID separately as `replyToMsgId` in the send input.
-Opening acts may omit it; continuations require it. No reference is inferred.
+1. The performative is a name, and each keyword is `:` and a name.
+2. No keyword appears twice.
+3. `:norm` is present, and its value is text that names the act's norm.
+   Every other pair is a field of the act.
+4. A string is text. A symbol in the form of a number is that number, and any
+   other symbol is its own text, whatever its form: `Tue` and `"Tue"` are the
+   same value. A list contains the text of each of its items, so a number
+   inside a list is text.
 
-Parameter names must be distinct. Metadata values are strings or symbols.
-Field values retain their declared primitive types. Lists carry choice strings.
-Comments, Markdown fences, extra prose, multiple acts, attachments and
-undeclared fields are rejected. Multiple text parts are read as one text
-joined with newlines and must satisfy the same grammar.
+A message whose text does not match the grammar and these rules is no act.
+That includes a text with anything outside the one list, such as prose, a
+second list, a comment or a Markdown fence.
 
-## State, refusal and recovery
+The message a continuation replies to is not part of the act. The sender
+supplies it as `replyToMsgId` in the
+[send input](../host/messaging.md#sending-a-message), and none is inferred.
 
-Protocol context combines retained conversation messages with the local
-firewall's saved checks. Only allowed acts advance it. A saved outgoing
-check does not advance state before its message appears in transport
-history. Withheld messages remain known references, so a correction can identify
-them without treating them as successful transitions.
+## The norm a document denotes
 
-Each check uses a snapshot. Replay processes retained order, rechecks structural and
-protocol guards at the time of the original check, and keeps incompatible acts
-as allowed but non-advancing conflicts. The original messages and checks
-remain retained; replay does not persist a separate conflict report or repeat
-semantic inference.
+The frontend translates a document into a norm, which is plain data. The
+well-formedness rules and the structure check are defined on this data and
+not on the document's text.
 
-Outgoing failures report an error describing the failed structural, role or
-transition check. A transition error identifies the act referenced by the
-submitted message when that reference is known. Structured diagnostics retain
-the check identifier, stage, norm, digest and field when available. Refusals
-do not select a replacement act or reference, expose internal conditions, or
-instruct the agent to restart an instance.
+```text
+Norm     = { name, description, forms: Form* }
 
-During an active instance, `:on-refusal` can produce an ordinary correction
-message carrying `reason` and a `replyToMsgId` metadata reference. Its form may
-require no additional fields. It follows the firewall's ordinary
-[reply behavior](../firewall/message-policy.md#incoming-messages). Before an opening
-is allowed, or after the local instance ends, automatic norm feedback is
-unavailable. No implicit rewind, reopening or cancellation occurs.
+Form     = { performative,
+             by: Senders,
+             fields: Field*,
+             starts, ends: Boolean,
+             when, clears, sets: Fact*,
+             max?: Number,
+             delay?: { fact, secondsField },
+             relations: Relation* }
 
-An ending
-act closes the local instance. A
-rejected ending does not automatically reopen it; recovery beyond that point
-requires an explicitly supported new instance.
+Senders  = roles(Role+)            ; a member that has one of these roles
+         | recipient(Fact)         ; the recipient of the message that set the fact
+
+Field    = { name, optional: Boolean, description?: String }
+           and one of
+             string  { minLength?, maxLength? }
+             integer { minimum?, maximum? }
+             list    { minItems?, maxItems? }
+
+Relation = { operator: equals | member | subset,
+             field,
+             source: { act: EarlierAct, field } }
+
+EarlierAct = performative(name)    ; the latest act of this performative
+           | fact(Fact)            ; the act that set this fact
+
+Act        = { performative, norm, fields: name -> FieldValue }
+FieldValue = String | Number | String*
+```
+
+Each part of a document maps to one part of the norm:
+
+| Document | Norm | When absent |
+| --- | --- | --- |
+| `(norm name …)` | `name` | Required. |
+| `:description` of the norm | `description` | Empty. |
+| `(act name …)` | A form whose `performative` is the name | |
+| `:by` | `by` | Required. |
+| `:starts`, `:ends` | `starts`, `ends` | False. |
+| `:when`, `:clears`, `:sets` | `when`, `clears`, `sets` | No facts, as for an empty list. |
+| `:max` | `max` | No limit. |
+| `:after f :delay d :unit seconds` | `delay` with `fact` f and `secondsField` d | No delay. |
+| `(field name …)` | A field | |
+| `:optional` | `optional` | False: the field is required. |
+| `:description` of a field | `description` | None. |
+| `(relation op field (previous a f))` | A relation | |
+
+The example's `pick` form is this value, shown as JSON:
+
+```json
+{
+  "performative": "pick",
+  "by": { "kind": "roles", "roles": ["client"] },
+  "fields": [{ "name": "slot", "optional": false, "type": "string" }],
+  "starts": false,
+  "ends": true,
+  "when": ["offered"],
+  "clears": [],
+  "sets": [],
+  "relations": [
+    {
+      "operator": "member",
+      "field": "slot",
+      "source": { "act": { "kind": "performative", "performative": "offer" }, "field": "slots" }
+    }
+  ]
+}
+```
+
+A norm also keeps the document it came from and that document's SHA-256
+digest, which names the exact text both members read.
+
+## Well-formed norms
+
+A document compiles when it is a norm document and the norm it denotes is
+well formed. The daemon refuses to start with a document that does not
+compile. The rules read the norm, so they apply to a norm however it was
+written.
+
+1. The name of the norm, of every performative, of every field and of every
+   fact is a name, which the grammar already requires of a document.
+2. No two forms declare the same performative, and no two fields of a form
+   have the same name.
+3. At least one form starts an instance.
+4. A field's lower bound is not above its upper bound. The bounds of a string
+   and of a list are whole numbers of zero or more. The bounds of an integer
+   are any numbers.
+5. `max` is a whole number of one or more.
+6. Every fact in a `when`, a `clears`, a `recipient`, a delay or a
+   relation's source is in the `sets` of some form.
+7. A form that starts an instance names its senders by role, and has no fact
+   in `when`, no delay and no relation.
+8. For a delay, the form waits on the delay's fact in `when`, and every form
+   that sets that fact declares the delay's `secondsField` as a required
+   integer whose `minimum` is zero or more. A check that reaches the delay
+   therefore always finds the act that set the fact and its number of
+   seconds.
+9. For a relation, the form declares the relation's field, and every form
+   the source may name declares the source's field as a required field, so
+   an earlier act always states it. A source that names a performative names
+   one form, and one that names a fact names every form that sets the fact.
+   The types fit the operator:
+
+   | Operator | The form's field | The source's field |
+   | --- | --- | --- |
+   | `equals` | Any type | The same type |
+   | `member` | String | List |
+   | `subset` | List | List |
+
+A norms directory has at least one document, and gives each norm a
+different name.
+
+## Checking a message
+
+The structure check checks one message at a time. Its inputs are the
+server's norms, the message with its sender's role and optional
+`replyToMsgId`, the time of the check, and the conversation's stored
+messages, each with the time of its own check. Times are Unix milliseconds.
+It passes an act and names its [text rules](#text-rules), or refuses the
+message with [feedback](#refusals). A server without norms runs no
+structure check.
+
+### State of a conversation
+
+A check uses this state, which it rebuilds from the stored messages each time
+and never saves:
+
+| Part | Meaning |
+| --- | --- |
+| Stored messages | The id of every stored message. |
+| Instance | The instance in progress, if any: its norm and the parts below. |
+| Facts | The facts that are set, each with the act that set it. |
+| Times sent | How many acts of each performative passed in the instance. |
+| Acts | The acts that passed in the instance, in order. |
+| Thread | The messages that belong to the instance, each with the message it replies to. |
+
+The reply chain of a message id is that message, the message it replies to,
+and so on, for as long as each is in the thread.
+
+### Steps
+
+A message is checked by these steps in order. The first step that fails
+refuses the message at the stage shown. The form stage reads the message
+alone, and the protocol stage reads the conversation.
+
+| Step | The message is refused when | Stage |
+| --- | --- | --- |
+| 1 | Its text is not an [act](#acts). | Form |
+| 2 | No instance is in progress and `:norm` is not the name of one of the server's norms. | Form |
+| 3 | An instance is in progress and `:norm` is not the name of the instance's norm. | Protocol |
+| 4 | The norm declares no form for the performative. | Form |
+| 5 | A required field is missing, a stated field is not declared, or a value is not of its field's type or within its bounds. The feedback names every such field. | Form |
+| 6 | The form does not start an instance and the message has no `replyToMsgId`. | Protocol |
+| 7 | The message has a `replyToMsgId` that is not a stored message. | Protocol |
+| 8 | No instance is in progress and the form does not start one, or an instance is in progress and the form starts one. | Protocol |
+| 9 | An instance is in progress and the reply chain of `replyToMsgId` is empty: the act replies outside the instance. | Protocol |
+| 10 | The senders are a `recipient` and its fact is not set, or the act that set it is not in the reply chain. | Protocol |
+| 11 | The sender is not one `by` permits: it has none of the listed roles, or it is not the recipient of the message that set the fact. | Protocol |
+| 12 | A fact of `when` is not set, or `max` acts of this performative already passed in the instance. | Protocol |
+| 13 | The form has a delay and the time of the check is earlier than the time the act that set the delay's fact was checked, plus 1000 milliseconds for each second that act's `secondsField` says. The delay reads the fact whether or not the reply chain contains that act. | Protocol |
+| 14 | A relation is not satisfied. Relations are tried in the order the form declares them. | Protocol |
+
+From step 2 on, the message is checked under one norm: the instance's norm
+when an instance is in progress, and the norm `:norm` names otherwise. An
+act that starts an instance is checked by steps 1 to 8 and then step 11. It
+may carry a `replyToMsgId` that names a stored message, which changes
+nothing: the instance it starts begins with it.
+
+A field's value fits its type as follows:
+
+| Type | Value | Bounds |
+| --- | --- | --- |
+| `string` | Text. | `minLength` and `maxLength` count code points. |
+| `integer` | A whole number. | `minimum` and `maximum` are inclusive. |
+| `list` | A list of texts, none empty. | `minItems` and `maxItems` count items. |
+
+A relation compares a stated field with a field of an earlier act. The
+earlier act is found in the reply chain: for a source that names a
+performative, the latest act of it that passed in the chain, and for a source
+that names a fact, the act that set the fact, when the chain contains it.
+
+| Operator | Satisfied when |
+| --- | --- |
+| `equals` | The field has exactly the earlier value: the same text, the same number, or the same items in the same order. |
+| `member` | The field is equal to one of the earlier list's items. |
+| `subset` | Every item of the field is equal to one of the earlier list's items. |
+
+A relation fails when the earlier act is not in the chain, when the act does
+not state the relation's field, or when its operator is not satisfied.
+Setting a fact again replaces the act a source that names the fact finds, so
+an old offer cannot authorize a selection after a new one.
+
+Every refusal on this page has the reason `violation`.
+
+### Effects of an act that passed
+
+A stored act changes the state as follows:
+
+1. If its form ends an instance, the instance is over: no facts, times sent,
+   acts or thread remain.
+2. Otherwise, if no instance is in progress, one starts under the act's norm.
+3. The facts of `clears` are cleared. Then the facts of `sets` are set, each
+   by this act.
+4. The times sent of the act's performative rise by one, and the act joins
+   the instance's acts.
+
+A stored message joins the thread of the instance in progress when it is the
+act that started it, or when it replies to a message in the thread.
+
+### Replay
+
+The state before a message is the result of replaying the conversation's
+stored messages in order. Each stored message is checked again by the steps
+above, as its sender, at the time of its original check. A message that
+passes has its effects. A message that does not pass has none, though it may
+still join the thread. That is a message stored before the norm documents
+changed, or one stored while the server had no norms, which has no check
+time.
+
+A refused message is not stored, so it leaves no trace in the state and a
+later message cannot reply to it. Nothing rewinds, restarts or cancels an
+instance except an act of the norm.
+
+## Text rules
+
+The description of a string or list field is its text rule. When an act that
+passed states a described field, the decision provider judges whether the
+field contains only what its description says. A list's description says
+what each of its items contains.
+
+| Field | Rule text |
+| --- | --- |
+| String | `<field> must contain only what its description says: <description>` |
+| List | `each item of <field> must contain only what its description says: <description>` |
+
+A rule's id is `<norm>.<performative>.<field>`, such as
+`booking.request.topic`. A document declares no other rule and no feedback:
+the sender of an act that breaks a description reads the rule's text.
+
+Write a description as what the field contains, such as "One meeting slot: a
+date, start and end times, and a timezone." Anything else in the field breaks
+the rule, so a description need not list unrelated instructions or prompt
+injection. A field without a description is not judged. An integer is
+limited by its bounds alone, and its description only explains it.
+
+The provider judges the act using which member sent it, the
+[history window](../firewall.md#history-window) of earlier messages, the form's fields, the facts that are set and the
+norm's description. The
+[provider answers contract](../firewall.md#provider-answers) owns uncertainty
+and provider failures.
+
+## Refusals
+
+A refused message's send fails with feedback that says what does not fit:
+the form, the sender or the turn. Feedback about an act that may not follow
+names the performative of the message it replies to, when that message is an
+act that passed.
+
+| Refused at | Rule id | Feedback, for example |
+| --- | --- | --- |
+| Form stage | `<norm>-form` | `note is not a valid field of pick in booking.` |
+| Protocol stage | `<norm>-protocol` | `pick is not valid after offer for booking.` |
+| A text rule | `<norm>.<performative>.<field>` | The rule's text. |
+
+In a structure check's rule id, the norm is the one the message was checked
+under. For a message refused at step 1, that is the norm of the instance in
+progress. A message refused at step 1 or 2 while no instance is in progress
+was checked under no norm, and its rule is `norm-form`.
+
+The feedback is all a refusal says of the norm. The server agent's failure
+adds the check and the reason, and a client reads the feedback alone, as
+[refused messages](../firewall.md#refused-messages) states. A refusal does
+not select a replacement act or reply reference, or instruct the agent to
+restart an instance.
+
+## Publishing norms
+
+The daemon's `normsDirectory` setting names a directory. The daemon compiles
+every `.lisp` file directly inside it before it serves, and refuses to start
+when there is none or one does not compile. The norms they compile to are
+the server's norms until the daemon stops: `read_norms` returns each norm's
+name, description and document, and the firewall enforces every one. No rule file or built-in agreement is installed beside them, and a
+message cannot install a norm.
+
+Documents are compiled at startup. After a restart every conversation is
+checked under the documents then in the directory, as [replay](#replay)
+describes.
+
+A norm adds no delivery acknowledgment, notification, timer, send lock or
+host behavior. A delay only refuses an act sent too early: it schedules
+nothing, and the host waits.

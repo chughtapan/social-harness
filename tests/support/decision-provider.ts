@@ -1,16 +1,13 @@
-/** @file Fixtures shared by the tests of the firewall and of what sits on it: a message policy with its provider, and a provider's answers. */
+/** @file A decision provider's answers, for the tests of the firewall and of what sits on it. */
 
 import type {
   DecisionProvider,
   DecisionRequest,
   DecisionResponse,
-  LoadedMessagePolicy,
-} from "../firewall.js";
-/** A message policy and the provider that judges its text rules in place of Jev. */
-export interface TestPolicy {
-  readonly source: LoadedMessagePolicy;
-  readonly provider: DecisionProvider;
-}
+} from "../../src/decision-provider.js";
+
+/** How a test's provider answers. The test's firewall gives it its limits. */
+export type Answering = Pick<DecisionProvider, "answer">;
 
 /** One answer exactly as a provider reports it. */
 export type Answer = DecisionResponse["answers"][string];

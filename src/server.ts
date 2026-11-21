@@ -1,299 +1,165 @@
 /**
- * @file The server `sharnessd` runs: the messages a server agent and each of
- * its clients send each other, every agent's inbox and history, and the
- * decisions of the server agent's firewall, with the tables they live in;
- * and the MCP tools and inbox event through which an agent's host reaches
- * them. A client has one conversation, with the server agent, so its name
- * identifies it. A query that fails ends its caller as a defect.
+ * @file What agents do on the server `sharnessd` runs: a server agent and each
+ * of its clients send each other messages and read their inbox and their
+ * conversation, and the server agent reads its firewall's decisions. A client
+ * has one conversation, with the server agent, so its name identifies it.
  */
 
-import { SqlClient, type Statement } from "@effect/sql";
-import * as PgClient from "@effect/sql-pg/PgClient";
 import {
-  type AuthInfo,
-  McpServer,
-  type McpServerFactory,
-  type StandardSchemaWithJSON,
-} from "@modelcontextprotocol/server";
-import { EventsExtension } from "@modelcontextprotocol/server/ext/events";
-import { nodeWebhookSender } from "@modelcontextprotocol/server/ext/events/node";
-import {
-  Config,
-  Context,
   Data,
   Duration,
   Effect,
-  JSONSchema,
-  Layer,
-  Option,
-  Order,
   PubSub,
   Queue,
   type Redacted,
-  Runtime,
   Schema,
 } from "effect";
-import { createHash } from "node:crypto";
-import packageJson from "../package.json" with { type: "json" };
-import {
-  type CheckRecord,
-  checkRecordSchema,
-  type Firewall,
-  type FirewallRefusalReason,
-  LocalGuidance,
-} from "./firewall.js";
-import {
-  AgentName,
-  type CommunicationError,
-  Message,
-  MsgId,
-  wellFormedString,
-} from "./messages.js";
+import type { CheckRecord, Firewall, RefusalReason } from "./firewall.js";
+import { openDatabase, type StoredMessage } from "./database.js";
+import { type AgentName, Message, MsgId } from "./messages.js";
 
-/** The version of this package, as MCP clients and telemetry read it. */
-export const packageVersion: string = packageJson.version;
+/** The most entries one read of an inbox or a conversation returns. */
+export const PAGE_SIZE = 50;
 
-/**
- * The environment names no database URL.
- * @public
- */
-export class DatabaseUrlMissingError extends Data.TaggedError(
-  "DatabaseUrlMissingError",
-) {
-  override get message(): string {
-    return "Set SHARNESS_DATABASE_URL to the database the server uses";
-  }
-}
+/** A place in an ordered read, as decimal text. A read returns what follows it. */
+export const Cursor = Schema.String.pipe(Schema.pattern(/^\d{1,15}$/u));
 
-/** Read from `SHARNESS_DATABASE_URL`. */
-export const databaseUrl = Config.redacted("SHARNESS_DATABASE_URL").pipe(
-  Effect.catchTag("ConfigError", () => new DatabaseUrlMissingError()),
-  Effect.withSpan("databaseUrl"),
-);
+/** One message as a host reads it, from an inbox or a conversation. */
+// eslint-disable-next-line agent-code-guard/no-exported-brand-constructor -- The inbox event carries an entry as it stands, and needs its schema to publish it.
+export const Entry: Schema.Schema<
+  { readonly message: Message },
+  { readonly message: Schema.Schema.Encoded<typeof Message> }
+> = Schema.Struct({ message: Message });
 
-/**
- * The tables could not be created. Messages name the operator's
- * action without disclosing SQL.
- * @public
- */
-export class DatabasePreparationError extends Data.TaggedError(
-  "DatabasePreparationError",
-)<{
-  readonly reason: "schema" | "preparation";
-}> {
-  override get message(): string {
-    return this.reason === "schema"
-      ? "The database holds tables that are not this server's; give the server an empty database"
-      : "The server could not create its tables; check that SHARNESS_DATABASE_URL names a reachable database its login may create tables in";
-  }
-}
+const pageOfEntries = Schema.Array(Entry).pipe(Schema.maxItems(PAGE_SIZE));
 
-/**
- * Creates the tables in an empty database, in one transaction, and leaves a
- * database that already holds them as it is, so a login that cannot create
- * tables serves a database another login prepared. A database that holds
- * other tables is refused. `messages` holds each message once, in the order
- * it was stored: `client` names its conversation, `from_server` says which of
- * the two agents wrote it, and `allowed` is false for one withheld from the
- * server agent. `guidance` is what the firewall gave the server agent with
- * it, and `checked_at` is when the firewall checked it. `firewall_checks`
- * holds the record of each check.
- */
-const prepareTables = Effect.fn("prepareDatabase")(
-  function* (sql: SqlClient.SqlClient) {
-    const tables = yield* sql<{
-      name: string;
-    }>`SELECT tablename AS name FROM pg_tables WHERE schemaname=current_schema()`;
-    if (tables.some((table) => table.name === "messages")) {
-      return;
-    }
-    if (tables.length > 0) {
-      return yield* new DatabasePreparationError({ reason: "schema" });
-    }
-    yield* sql.withTransaction(
-      Effect.all(
-        [
-          sql`CREATE TABLE messages (
-            sequence INTEGER GENERATED BY DEFAULT AS IDENTITY PRIMARY KEY,
-            client TEXT NOT NULL,
-            from_server BOOLEAN NOT NULL,
-            msg_id TEXT NOT NULL,
-            text TEXT NOT NULL,
-            reply_to TEXT,
-            allowed BOOLEAN NOT NULL,
-            guidance TEXT,
-            checked_at BIGINT,
-            UNIQUE(client, from_server, msg_id)
-          )`,
-          sql`CREATE INDEX messages_conversation ON messages(client, sequence)`,
-          sql`CREATE TABLE firewall_checks (
-            sequence INTEGER GENERATED BY DEFAULT AS IDENTITY PRIMARY KEY,
-            decided_at BIGINT NOT NULL,
-            record TEXT NOT NULL
-          )`,
-          sql`CREATE INDEX firewall_checks_time ON firewall_checks(decided_at, sequence)`,
-        ],
-        { concurrency: 1, discard: true },
-      ),
-    );
-  },
-  Effect.catchTag(
-    "SqlError",
-    () => new DatabasePreparationError({ reason: "preparation" }),
-  ),
-);
-
-const storedMessages = Schema.Array(
-  Schema.Struct({
-    sequence: Schema.Number,
-    client: AgentName,
-    fromServer: Schema.Boolean,
-    msgId: MsgId,
-    text: Schema.String,
-    replyTo: Schema.NullOr(MsgId),
-    allowed: Schema.Boolean,
-    guidance: Schema.NullOr(Schema.parseJson(LocalGuidance)),
-    checkedAt: Schema.NullOr(Schema.NumberFromString),
-  }),
-);
-type StoredMessage = (typeof storedMessages.Type)[number];
-
-const messagesWhere = (
-  sql: SqlClient.SqlClient,
-  where: Statement.Fragment,
-  limit: number | null,
-) =>
-  sql`SELECT sequence, client, from_server AS "fromServer", msg_id AS "msgId",
-      text, reply_to AS "replyTo", allowed, guidance,
-      checked_at AS "checkedAt"
-    FROM messages WHERE ${where} ORDER BY sequence LIMIT ${limit}`.pipe(
-    Effect.flatMap(Schema.decodeUnknown(storedMessages)),
-    Effect.orDie,
-  );
-
-const savedRecord = Schema.parseJson(checkRecordSchema);
-
-const storeDecision = (sql: SqlClient.SqlClient, record: CheckRecord) =>
-  Effect.flatMap(
-    Schema.encode(savedRecord)(record),
-    (saved) =>
-      sql`INSERT INTO firewall_checks ${sql.insert({
-        decided_at: record.time,
-        record: saved,
-      })}`,
-  ).pipe(Effect.orDie);
-
-const storeMessage = Effect.fn("saveMessage")(function* (
-  sql: SqlClient.SqlClient,
-  client: AgentName,
-  message: Message,
-  held: {
-    readonly allowed: boolean;
-    readonly guidance?: LocalGuidance;
-    readonly record?: CheckRecord;
-  },
-) {
-  const guidance =
-    held.guidance === undefined
-      ? null
-      : yield* Schema.encode(Schema.parseJson(LocalGuidance))(held.guidance);
-  yield* sql`INSERT INTO messages ${sql.insert({
-    client,
-    from_server: message.recipient === client,
-    msg_id: message.msgId,
-    text: message.text,
-    reply_to: message.replyToMsgId ?? null,
-    allowed: held.allowed,
-    guidance,
-    checked_at: held.record?.time ?? null,
-  })}`;
-  if (held.record !== undefined) {
-    yield* storeDecision(sql, held.record);
-  }
-}, Effect.orDie);
-
-const readDecisions = Effect.fn("readDecisions")(function* (
-  sql: SqlClient.SqlClient,
-  since: number,
-) {
-  const rows = yield* sql`SELECT record FROM firewall_checks
-    WHERE decided_at >= ${since}
-    ORDER BY decided_at DESC, sequence DESC LIMIT 100`;
-  const saved = yield* Schema.decodeUnknown(
-    Schema.Array(Schema.Struct({ record: savedRecord })),
-  )(rows);
-  return { decisions: saved.map(({ record }) => record) };
-}, Effect.orDie);
-
-const PAGE_SIZE = 50;
-
-/** One message as a host reads it, with the guidance the firewall gave the server agent with one it received. */
-const InboxEntry = Schema.Struct({
-  message: Message,
-  guidance: Schema.optionalWith(LocalGuidance, { exact: true }),
+/** A page of an inbox: its entries, the cursor a read that continues it presents, and whether more entries follow now. */
+// eslint-disable-next-line agent-code-guard/no-exported-brand-constructor -- The receive_messages tool returns a page as it stands, and needs its schema to publish it.
+export const InboxPage = Schema.Struct({
+  entries: pageOfEntries,
+  nextCursor: Cursor,
+  hasMore: Schema.Boolean,
 });
-type InboxEntry = typeof InboxEntry.Type;
+type InboxPage = typeof InboxPage.Type;
 
-class SendError extends Data.TaggedError("SendError")<{
-  readonly reason: "content-invalid";
-}> {
-  override get message(): string {
-    return "send failed: the message content is invalid";
-  }
+/** A page of a conversation: its entries, and the cursor of the next page when there is one. */
+// eslint-disable-next-line agent-code-guard/no-exported-brand-constructor -- The read_conversation tool returns a page as it stands, and needs its schema to publish it.
+export const ConversationPage = Schema.Struct({
+  entries: pageOfEntries,
+  nextCursor: Schema.optional(Cursor),
+});
+type ConversationPage = typeof ConversationPage.Type;
+
+/** What a send returns: the message id its message was stored under. */
+// eslint-disable-next-line agent-code-guard/no-exported-brand-constructor -- The send_message tool returns this as it stands, and needs its schema to publish it.
+export const SendReceipt = Schema.Struct({ msgId: MsgId });
+
+/** A failed operation: what a model reads of it in `message`, and its reason with the failure's other fields, which a host reads. */
+export interface Failure {
+  readonly message: string;
+  readonly reason: string;
 }
 
-const refusalText: Readonly<Record<FirewallRefusalReason, string>> = {
-  "rule-violation": "It breaks a rule of the agent's message policy.",
-  "unresolved-evidence":
-    "The policy check could not settle whether the message is allowed.",
-  "check-unavailable": "The policy check could not complete.",
+/** What agents do on an open server. A cursor is a place in an ordered read, as decimal text. */
+export interface Server {
+  /** The server agent's name. */
+  readonly name: AgentName;
+  /**
+   * Sends one message in `client`'s conversation, from the server agent when
+   * `author` is its name and from the client otherwise. A message the
+   * firewall refuses, and one the server agent addresses to a client that
+   * has not written to it, fails the send. A client's failure says only what
+   * a sender may know.
+   */
+  readonly send: (
+    author: AgentName,
+    client: AgentName,
+    sent: { readonly text: string; readonly replyToMsgId?: MsgId },
+  ) => Effect.Effect<typeof SendReceipt.Type, Failure>;
+  /** A page of `reader`'s inbox after `cursor`. Without a cursor the read starts after the newest message and returns none. */
+  readonly inbox: (
+    reader: AgentName,
+    page: { readonly limit: number; readonly cursor?: string },
+  ) => Effect.Effect<InboxPage>;
+  /** The page of `reader`'s inbox after `cursor`, after waiting up to `wait` seconds for an entry when none follows it. */
+  readonly receive: (
+    reader: AgentName,
+    request: { readonly cursor?: string; readonly wait?: number },
+  ) => Effect.Effect<InboxPage>;
+  /** A page of `client`'s conversation after `cursor`, oldest first. */
+  readonly conversation: (
+    client: AgentName,
+    cursor?: string,
+  ) => Effect.Effect<ConversationPage>;
+  /** The server agent's page of its conversation with `client`, which must have a message. */
+  readonly conversationWith: (
+    client: AgentName,
+    cursor?: string,
+  ) => Effect.Effect<ConversationPage, Failure>;
+  /** The client of every conversation, in name order. */
+  readonly clients: Effect.Effect<readonly AgentName[]>;
+  /** The records of the hundred latest checks since a time, newest first. */
+  readonly records: (since: number) => Effect.Effect<readonly CheckRecord[]>;
+}
+
+const refusalText: Readonly<Record<RefusalReason, string>> = {
+  violation: "The message breaks a rule of the server's norms.",
+  unsure:
+    "The decision provider is unsure whether the message follows the server's norms.",
+  unavailable: "The check was unavailable.",
 };
 
 /**
- * A send the server agent's firewall refused. `rule` and `detail` are those
- * of a structure check. The message states each deciding rule's feedback as
- * an error, or the reason when there is none, then the check.
+ * A send the server agent's firewall refused, as the server agent reads its
+ * own and as the daemon logs every one. The message states the feedback as
+ * errors, or the reason when there is none, then the check, whose record
+ * names the rules that refused it. Feedback is a plain sentence: this
+ * message alone marks it as an error.
  */
 class FirewallRefusal extends Data.TaggedError("FirewallRefusal")<{
-  readonly reason: "firewall-refused";
+  readonly reason: RefusalReason;
   readonly checkId: string;
-  readonly refusal: FirewallRefusalReason;
-  readonly rule?: string;
   readonly feedback: readonly string[];
-  readonly detail?: unknown;
 }> {
   override get message(): string {
-    const rule = this.rule === undefined ? "" : `, rule ${this.rule}`;
     return [
       ...(this.feedback.length === 0
-        ? [`Error: ${refusalText[this.refusal]}`]
-        : this.feedback.map((text) =>
-            text.startsWith("Error:") ? text : `Error: ${text}`,
-          )),
-      `Check: ${this.checkId}${rule}; ${this.refusal}.`,
+        ? [`Error: ${refusalText[this.reason]}`]
+        : this.feedback.map((text) => `Error: ${text}`)),
+      `Check: ${this.checkId}; ${this.reason}.`,
     ].join(" ");
   }
 }
 
-const refusalOf = (refused: {
-  readonly checkId: string;
-  readonly reason: FirewallRefusalReason;
-  readonly rule?: string;
+/**
+ * A refusal of a client's send, as the client reads it. A client is not
+ * trusted with the check behind a refusal: it reads the feedback, which says
+ * what in the message does not fit the norm, and neither the check id nor
+ * the firewall's reason.
+ */
+class RefusalToClient extends Data.TaggedError("RefusalToClient")<{
+  readonly reason: "refused";
   readonly feedback: readonly string[];
-  readonly detail?: unknown;
-}) =>
-  new FirewallRefusal({
-    reason: "firewall-refused",
-    checkId: refused.checkId,
-    refusal: refused.reason,
-    ...(refused.rule === undefined ? {} : { rule: refused.rule }),
-    feedback: refused.feedback,
-    ...(refused.detail === undefined ? {} : { detail: refused.detail }),
-  });
+}> {
+  override get message(): string {
+    const said =
+      this.feedback.length === 0 ? ["The message was refused."] : this.feedback;
+    return said.map((text) => `Error: ${text}`).join(" ");
+  }
+}
+
+/** What a client reads when the server could not check its message: nothing of why. */
+class UnavailableToClient extends Data.TaggedError("UnavailableToClient")<{
+  readonly reason: "unavailable";
+}> {
+  override get message(): string {
+    return "The server is unavailable. Try again later.";
+  }
+}
 
 /** The server agent named a client that has sent it no message, so the two have no conversation. */
 class AddressError extends Data.TaggedError("AddressError")<{
-  readonly reason: "unknown-agent";
+  readonly reason: "unknown-client";
   readonly name: string;
 }> {
   override get message(): string {
@@ -301,152 +167,27 @@ class AddressError extends Data.TaggedError("AddressError")<{
   }
 }
 
-interface ReceiveRequest {
-  readonly cursor?: string;
-  readonly wait?: number;
-}
-
-/** A place in an ordered read, as decimal text. A read returns what follows it. */
-const Cursor = Schema.String.pipe(Schema.pattern(/^\d{1,15}$/u)).annotations({
-  description: "the nextCursor of an earlier result",
-});
-
-const noArguments = Schema.Record({
-  key: Schema.String,
-  value: Schema.Never,
-}).annotations({
-  jsonSchema: { type: "object", properties: {}, additionalProperties: false },
-});
-
-const sentFields = {
-  text: Schema.propertySignature(wellFormedString).annotations({
-    description: "The message text.",
-  }),
-  replyToMsgId: Schema.optional(MsgId).annotations({
-    description:
-      "The ID of the message this replies to. Omit when starting a new norm interaction.",
-  }),
-};
-
-const SendResult = Schema.Struct({ id: MsgId });
-
-const historyPage = Schema.Struct({
-  records: Schema.Array(InboxEntry).pipe(Schema.maxItems(PAGE_SIZE)),
-  nextCursor: Schema.optional(Cursor),
-});
-
 /**
- * The longest a receive_messages call may wait. It stays under the time after
- * which hosts and proxies give up on a tool call.
+ * Opens the server on the database at `url` until the scope closes: `name`
+ * is its server agent, whose `firewall` checks every message sent.
  */
-const MAXIMUM_WAIT_SECONDS = 50;
-
-const ACT_SYNTAX =
-  "A message is one act and nothing else: (act :ontology <norm> :field value ...). Quote text as a JSON string, write a multi-select as a list such as (option1 option3), and send an act without fields as (act :ontology <norm>). The opening act omits replyToMsgId in send_message; every later act supplies the id of the message it answers.";
-
-/** How often the SDK reads the inbox of an agent whose host holds a push stream or a webhook subscription. */
-const INBOX_CHECK_MILLISECONDS = 1000;
-
-const WEBHOOK_TTL_MILLISECONDS = 30 * 60_000;
-
-const INBOX_EVENT = "org.social-harness/inbox.pending";
-
-/**
- * The key of the advisory lock a transaction holds while it stores messages,
- * so that messages commit in `sequence` order: a reader that has read to one
- * sequence has seen every message before it.
- */
-const STORE_LOCK = 1;
-
-/**
- * Connects to the database at `url` until the scope closes, prepares the
- * tables, and returns the factory the MCP SDK builds each request's server
- * with. A request's `authInfo` names its owner in `extra.issuer` and
- * `extra.subject`: the owner `server.issuer` and `server.subject` name has
- * the server agent, called `server.name`, and every other owner has a client,
- * named from its issuer and subject. A tool call runs on the runtime this
- * effect ran in and is interrupted when its request is aborted.
- */
-// eslint-disable-next-line max-lines-per-function -- This function is the scope the tools share: the database client, the firewall, the locks and the wake signal. Each function inside it is under the limit.
-export const serverFactory = Effect.fn("serverFactory")(function* (
+export const openServer = Effect.fn("openServer")(function* (
   url: Redacted.Redacted,
-  server: {
-    readonly issuer: string;
-    readonly subject: string;
-    readonly name: AgentName;
-    readonly firewall: Firewall;
-    /** The norm documents the server agent holds, which every agent reads with `read_norms`. */
-    readonly norms?: ReadonlyArray<{
-      readonly name: string;
-      readonly description: string;
-      readonly document: string;
-    }>;
-  },
+  name: AgentName,
+  firewall: Firewall,
 ) {
-  const { firewall, norms } = server;
-  const sql = Context.get(
-    yield* Layer.build(PgClient.layer({ url })),
-    SqlClient.SqlClient,
-  );
-  yield* prepareTables(sql);
+  const database = yield* openDatabase(url, name);
   /** The lock of each conversation a message was sent in, by its client. */
   const conversationLocks = new Map<AgentName, Effect.Semaphore>();
   /** Published with an agent's name each time a message becomes readable for it. */
   const readable = yield* PubSub.unbounded<AgentName>();
-  const run = Runtime.runPromise(yield* Effect.runtime());
-
-  /** The agent an admitted request's token names. */
-  const callerOf = (authInfo?: AuthInfo) => {
-    const issuer = String(authInfo?.extra?.issuer);
-    const subject = String(authInfo?.extra?.subject);
-    return issuer === server.issuer && subject === server.subject
-      ? server.name
-      : AgentName.make(
-          `agent-${createHash("sha256")
-            .update(`${issuer}\0${subject}`)
-            .digest("hex")
-            .slice(0, 24)}`,
-        );
-  };
-
-  const messageOf = (row: StoredMessage): Message => ({
-    author: row.fromServer ? server.name : row.client,
-    recipient: row.fromServer ? row.client : server.name,
-    msgId: row.msgId,
-    ...(row.replyTo === null ? {} : { replyToMsgId: row.replyTo }),
-    text: row.text,
-  });
-
-  const entryOf = (row: StoredMessage): InboxEntry => ({
-    message: messageOf(row),
-    ...(row.guidance === null ? {} : { guidance: row.guidance }),
-  });
-
-  /** Holds `client`'s conversation until the scope closes. */
-  const lockConversation = (client: AgentName) =>
-    Effect.sync(() => {
-      const lock =
-        conversationLocks.get(client) ?? Effect.unsafeMakeSemaphore(1);
-      conversationLocks.set(client, lock);
-      return lock;
-    }).pipe(
-      Effect.flatMap((lock) =>
-        Effect.acquireReleaseInterruptible(lock.take(1), () => lock.release(1)),
-      ),
-      Effect.asVoid,
-    );
 
   /**
-   * Sends one message in `client`'s conversation, from the server agent when
-   * `author` is its name and from the client otherwise. A check reads the
-   * conversation's earlier messages, so the conversation's lock is held from
-   * that read until the message is stored, while other conversations do not
-   * wait. No transaction is open while a check runs. A message the server
-   * agent may not send, or one whose check could not run, fails the send and
-   * is not stored. A message withheld from the server agent is stored with
-   * `allowed` false, in one transaction with the firewall's reply to its
-   * sender. The transaction takes the store lock first, so messages commit
-   * in `sequence` order.
+   * A check reads the conversation's earlier messages, so the conversation's
+   * lock is held from that read until the message is stored, while other
+   * conversations do not wait. No transaction is open while a check runs. A
+   * refused message is not stored. A failure is logged as the server agent
+   * would read it, before a client reads its part of it.
    */
   const send = Effect.fn("send")(
     function* (
@@ -454,522 +195,183 @@ export const serverFactory = Effect.fn("serverFactory")(function* (
       client: AgentName,
       sent: { readonly text: string; readonly replyToMsgId?: MsgId },
     ) {
-      const outgoing = author === server.name;
-      const recipient = outgoing ? client : server.name;
-      yield* lockConversation(client);
-      const stored = yield* messagesWhere(sql, sql`client = ${client}`, null);
-      if (outgoing && stored.length === 0) {
+      const fromServer = author === name;
+      yield* lockConversation(conversationLocks, client);
+      const earlier = yield* database.conversation(client);
+      if (fromServer && earlier.length === 0) {
         return yield* new AddressError({
-          reason: "unknown-agent",
+          reason: "unknown-client",
           name: client,
         });
       }
       const message = yield* Message.create({
         author,
-        recipient,
+        recipient: fromServer ? client : name,
         text: sent.text,
         replyToMsgId: sent.replyToMsgId,
-      }).pipe(
-        Effect.catchTag(
-          "CommunicationError",
-          ({ reason }: CommunicationError) => new SendError({ reason }),
-        ),
+      });
+      const decision = yield* firewall.check(
+        fromServer ? "server" : "client",
+        message,
+        earlier,
       );
-      const earlier = stored.map((row) => ({
-        message: messageOf(row),
-        allowed: row.allowed,
-        ...(row.checkedAt === null ? {} : { checkedAt: row.checkedAt }),
-      }));
-      const result = outgoing
-        ? yield* firewall.checkOutgoing(message, earlier)
-        : yield* firewall.checkIncoming(message, earlier);
-      if (
-        result.kind === "refused" &&
-        (outgoing || result.reason === "check-unavailable")
-      ) {
-        if (result.record !== undefined) {
-          yield* storeDecision(sql, result.record);
+      if (decision.kind === "refused") {
+        if (decision.record !== undefined) {
+          yield* database.record(decision.record);
         }
-        return yield* refusalOf(result);
+        return yield* refusalOf(decision);
       }
-      const reply =
-        result.kind === "refused" && result.reply !== undefined
-          ? yield* Message.create({
-              author: server.name,
-              recipient: client,
-              text: result.reply.text,
-              replyToMsgId: message.msgId,
-            }).pipe(Effect.option)
-          : Option.none();
-      const replyRecord =
-        result.kind === "refused" ? result.reply?.record : undefined;
-      yield* sql
-        .withTransaction(
-          Effect.gen(function* () {
-            yield* sql`SELECT pg_advisory_xact_lock(${STORE_LOCK})`;
-            yield* storeMessage(sql, client, message, {
-              allowed: result.kind === "allowed",
-              ...(result.kind === "allowed" && result.guidance !== undefined
-                ? { guidance: result.guidance }
-                : {}),
-              ...(result.record === undefined ? {} : { record: result.record }),
-            });
-            if (Option.isSome(reply)) {
-              yield* storeMessage(sql, client, reply.value, {
-                allowed: true,
-                ...(replyRecord === undefined ? {} : { record: replyRecord }),
-              });
-            }
-          }),
-        )
-        .pipe(Effect.orDie);
-      if (result.kind === "allowed") {
-        yield* PubSub.publish(readable, recipient);
-      } else if (Option.isSome(reply)) {
-        yield* PubSub.publish(readable, author);
-      }
-      return { id: message.msgId };
+      yield* database.store(message, decision.record);
+      yield* PubSub.publish(readable, message.recipient);
+      return { msgId: message.msgId };
     },
     Effect.scoped,
-    (effect, author) =>
-      Effect.tapError(effect, (error) =>
-        Effect.logWarning("Send failed").pipe(
-          Effect.annotateLogs({
-            agentName: author,
-            error: error._tag,
-            reason: error.message,
-          }),
-        ),
-      ),
+    logFailedSend,
+    (sending, author) =>
+      author === name
+        ? sending
+        : Effect.catchTag(sending, "FirewallRefusal", (refusal) =>
+            Effect.fail(asClientReads(refusal)),
+          ),
   );
 
-  /**
-   * The server agent's inbox holds the messages its firewall allowed from
-   * every client; a client's holds the server agent's messages to it. Without
-   * a cursor the read starts after the newest message and returns none.
-   */
-  const readInbox = Effect.fn("readInbox")(function* (
+  /** The server agent's inbox has every client's messages; a client's has the server agent's messages to it. */
+  const inbox = Effect.fn("readInbox")(function* (
     reader: AgentName,
     { limit, cursor }: { readonly limit: number; readonly cursor?: string },
   ) {
-    const [newest] = yield* sql<{
-      sequence: number;
-    }>`SELECT COALESCE(MAX(sequence), 0) AS sequence FROM messages`;
-    const from = Number(cursor ?? newest?.sequence ?? 0);
-    const rows = yield* messagesWhere(
-      sql,
-      reader === server.name
-        ? sql`NOT from_server AND allowed AND sequence > ${from}`
-        : sql`client = ${reader} AND from_server AND sequence > ${from}`,
-      limit + 1,
+    const from = Number(cursor ?? (yield* database.newest));
+    const { entries, last, more } = pageOf(
+      yield* database.inbox(reader, from, limit + 1),
+      limit,
     );
-    const page = rows.slice(0, limit);
-    return {
-      entries: page.map(entryOf),
-      nextCursor: String(page.at(-1)?.sequence ?? from),
-      hasMore: rows.length > limit,
-    };
-  }, Effect.orDie);
+    return { entries, nextCursor: String(last ?? from), hasMore: more };
+  });
 
-  /** A waiting read subscribes before it reads, so an entry that becomes readable after the read is not missed. */
+  /** The read subscribes before it reads, so a wait does not miss an entry that becomes readable after the read. */
   const receive = Effect.fn("receive")(function* (
     reader: AgentName,
-    { cursor, wait }: ReceiveRequest,
+    { cursor, wait }: Parameters<Server["receive"]>[1],
   ) {
-    const read = (from: typeof cursor) =>
-      readInbox(reader, { limit: PAGE_SIZE, cursor: from }).pipe(
-        Effect.map(({ entries, nextCursor }) => ({ entries, nextCursor })),
-      );
-    if (wait === undefined) {
-      return yield* read(cursor);
-    }
     const woken = yield* PubSub.subscribe(readable);
-    const page = yield* read(cursor);
-    if (page.entries.length > 0) {
+    const page = yield* inbox(reader, { limit: PAGE_SIZE, cursor });
+    if (wait === undefined || page.entries.length > 0) {
       return page;
     }
     yield* Queue.take(woken).pipe(
-      Effect.repeat({ until: (name) => name === reader }),
+      Effect.repeat({ until: (woke) => woke === reader }),
       Effect.timeoutOption(Duration.seconds(wait)),
     );
-    return yield* read(page.nextCursor);
+    return yield* inbox(reader, { limit: PAGE_SIZE, cursor: page.nextCursor });
   }, Effect.scoped);
 
-  /** One check of the inbox event for the agent `principal` names. */
-  const inboxOccurrences = (
-    principal: string | null,
-    after: { readonly cursor: string | null; readonly maxEvents?: number },
-  ) =>
-    Effect.gen(function* () {
-      const page = yield* readInbox(
-        yield* Schema.decodeUnknown(AgentName)(principal),
-        {
-          limit: Math.min(after.maxEvents ?? PAGE_SIZE, PAGE_SIZE),
-          ...(after.cursor === null
-            ? {}
-            : { cursor: yield* Schema.decode(Cursor)(after.cursor) }),
-        },
-      );
-      return {
-        events: (yield* Schema.encode(Schema.Array(InboxEntry))(
-          page.entries,
-        )).map((data) => ({
-          eventId: `${data.message.author}/${data.message.msgId}`,
-          data,
-        })),
-        cursor: page.nextCursor,
-        hasMore: page.hasMore,
-      };
-    });
-
-  /**
-   * The inbox event: an occurrence is an inbox entry, and a subscription's
-   * cursor is an inbox cursor. The SDK delivers by poll, push and webhook,
-   * and keeps every subscription in memory.
-   */
-  const events = new EventsExtension({
-    getPrincipal: ({ http }) => callerOf(http?.authInfo),
-    checkIntervalMs: INBOX_CHECK_MILLISECONDS,
-    webhookTtlMs: WEBHOOK_TTL_MILLISECONDS,
-    webhookSender: nodeWebhookSender(),
-  });
-  events.registerEvent(INBOX_EVENT, {
-    description: "An inbox entry: its message and any guidance.",
-    payloadSchema: standard(InboxEntry),
-    check: (...[{ principal, maxEvents, signal }, , cursor]) =>
-      run(inboxOccurrences(principal, { cursor, maxEvents }), { signal }),
-  });
-
-  /** Each message `reader` sent in `client`'s conversation, and each one it received unless it was withheld. */
-  const history = Effect.fn("historyRecords")(function* (
-    reader: AgentName,
+  const conversation = Effect.fn("readConversation")(function* (
     client: AgentName,
     cursor?: string,
   ) {
-    const stored = yield* messagesWhere(
-      sql,
-      sql`client = ${client} AND sequence > ${Number(cursor ?? 0)}`,
-      PAGE_SIZE + 1,
+    const { entries, last, more } = pageOf(
+      yield* database.conversation(client, Number(cursor ?? 0), PAGE_SIZE + 1),
+      PAGE_SIZE,
     );
-    const page = stored.slice(0, PAGE_SIZE);
-    const last = page.at(-1);
     return {
-      records: page.flatMap((row): InboxEntry[] => {
-        if ((row.fromServer ? server.name : row.client) === reader) {
-          return [{ message: messageOf(row) }];
-        }
-        return row.allowed ? [entryOf(row)] : [];
-      }),
-      ...(stored.length > PAGE_SIZE && last !== undefined
-        ? { nextCursor: String(last.sequence) }
-        : {}),
+      entries,
+      ...(more && last !== undefined ? { nextCursor: String(last) } : {}),
     };
   });
 
-  /** The server agent's page of its conversation with `client`, which must have a message. */
-  const historyWith = (client: AgentName, cursor?: string) =>
+  const conversationWith = (client: AgentName, cursor?: string) =>
     Effect.gen(function* () {
-      const [found] = yield* messagesWhere(sql, sql`client = ${client}`, 1);
-      if (found === undefined) {
+      const page = yield* conversation(client, cursor);
+      if (
+        page.entries.length === 0 &&
+        (yield* database.conversation(client, 0, 1)).length === 0
+      ) {
         return yield* new AddressError({
-          reason: "unknown-agent",
+          reason: "unknown-client",
           name: client,
         });
       }
-      return yield* history(server.name, client, cursor);
+      return page;
     });
 
-  const conversations = sql<{
-    client: string;
-  }>`SELECT DISTINCT client FROM messages`.pipe(
-    Effect.flatMap((rows) =>
-      Schema.decodeUnknown(Schema.Array(AgentName))(
-        rows.map((row) => row.client),
-      ),
-    ),
-    Effect.map((clients) => ({ clients: [...clients].sort(Order.string) })),
-    Effect.orDie,
-    Effect.withSpan("conversationsOf"),
-  );
-
-  /**
-   * Registers a tool whose calls `execute` answers. A call runs with `run` and
-   * is interrupted when its request is aborted. Its value is the result's structured content. A typed failure is a result
-   * marked as an error. A call that ends any other way is logged and answered
-   * with a fixed text that says nothing of what went wrong.
-   */
-  const register = <
-    A,
-    I,
-    B extends object,
-    J extends object,
-    E extends Failure,
-  >(
-    mcp: McpServer,
-    name: string,
-    tool: {
-      readonly description: string;
-      readonly input: Schema.Schema<A, I>;
-      readonly output: Schema.Schema<B, J>;
-      readonly readOnly?: true;
-    },
-    execute: (input: A) => Effect.Effect<B, E>,
-  ) => {
-    const outputSchema: StandardSchemaWithJSON<object, object> = standard(
-      tool.output,
-    );
-    mcp.registerTool(
-      name,
-      {
-        description: tool.description,
-        inputSchema: standard(tool.input),
-        outputSchema,
-        annotations: tool.readOnly && {
-          readOnlyHint: true,
-          openWorldHint: false,
-        },
-      },
-      (input, ctx) =>
-        run(
-          execute(input).pipe(
-            Effect.flatMap((value) =>
-              Effect.orDie(Schema.encode(tool.output)(value)),
-            ),
-            Effect.map((structuredContent) => ({ structuredContent })),
-            Effect.catchAll((failure) => Effect.succeed(failed(failure))),
-            Effect.catchAllDefect((defect) =>
-              Effect.logError("A tool call ended unexpectedly", defect).pipe(
-                Effect.as({
-                  isError: true as const,
-                  content: [
-                    {
-                      type: "text" as const,
-                      text: "The server could not complete this call. Try again; if it keeps failing, check the server's log.",
-                    },
-                  ],
-                }),
-              ),
-            ),
-          ),
-          { signal: ctx.mcpReq.signal },
-        ),
-    );
+  const server: Server = {
+    name,
+    send,
+    inbox,
+    receive,
+    conversation,
+    conversationWith,
+    clients: database.clients,
+    records: database.records,
   };
-
-  const registerSharedTools = (mcp: McpServer, caller: AgentName) => {
-    register(
-      mcp,
-      "status",
-      {
-        description:
-          "Read this agent's name, which is the author of the messages it sends.",
-        input: noArguments,
-        output: Schema.Struct({ agentName: AgentName }),
-        readOnly: true,
-      },
-      () => Effect.succeed({ agentName: caller }),
-    );
-    register(
-      mcp,
-      "receive_messages",
-      {
-        description:
-          "Receive inbox entries in order, each with its message and any guidance. Keep the nextCursor of every result and pass it as cursor on the next call to receive the entries after it. Without cursor the call starts from now: it returns no earlier entries. Pass wait to wait up to that many seconds when no entry follows the cursor; the call returns as soon as one becomes readable, or with no entries when the wait ends.",
-        input: Schema.Struct({
-          cursor: Schema.optional(Cursor),
-          wait: Schema.optional(
-            Schema.Number.pipe(
-              Schema.positive(),
-              Schema.lessThanOrEqualTo(MAXIMUM_WAIT_SECONDS),
-            ).annotations({
-              description: `a number of seconds, at most ${String(MAXIMUM_WAIT_SECONDS)}, to wait for an entry when none follows the cursor. Call receive_messages again with nextCursor to keep waiting. Without wait the call returns at once.`,
-            }),
-          ),
-        }),
-        output: Schema.Struct({
-          entries: Schema.Array(InboxEntry).pipe(Schema.maxItems(PAGE_SIZE)),
-          nextCursor: Cursor,
-        }),
-        readOnly: true,
-      },
-      (request) => receive(caller, request),
-    );
-    if (norms !== undefined) {
-      register(
-        mcp,
-        "read_norms",
-        {
-          description: `${
-            caller === server.name
-              ? "List the installed norms and their complete documents: the roles, when each act may be sent and the fields it takes."
-              : "List the norms the server agent holds, each with its complete document: the roles, when each act may be sent and the fields it takes. The server agent checks your messages against them."
-          } ${ACT_SYNTAX}`,
-          input: noArguments,
-          output: Schema.Struct({
-            norms: Schema.Array(
-              Schema.Struct({
-                name: Schema.String,
-                description: Schema.String,
-                document: Schema.String,
-              }),
-            ),
-          }),
-          readOnly: true,
-        },
-        () => Effect.succeed({ norms: [...norms] }),
-      );
-    }
-  };
-
-  /** The server agent names the client of each conversation and reads its firewall's decisions. */
-  const registerServerAgentTools = (mcp: McpServer) => {
-    register(
-      mcp,
-      "send_message",
-      {
-        description:
-          "Send a message to a client. You can write only to a client that has written to you: any other name fails with unknown-agent. Returns id, the message id. A refusal names the argument or rule to correct. Use receive_messages to read what clients send.",
-        input: Schema.Struct({
-          to: Schema.propertySignature(AgentName).annotations({
-            description:
-              "The client's name: the author of a message you received.",
-          }),
-          ...sentFields,
-        }),
-        output: SendResult,
-      },
-      ({ to, ...sent }) => send(server.name, to, sent),
-    );
-    register(
-      mcp,
-      "read_conversation",
-      {
-        description:
-          "Read your conversation with one client: the messages you sent and those you received, each with any guidance. A page holds the oldest messages after cursor; pass nextCursor as cursor, with the same client, until it is absent.",
-        input: Schema.Struct({
-          with: Schema.propertySignature(AgentName).annotations({
-            description: "The client's name.",
-          }),
-          cursor: Schema.optional(Cursor),
-        }),
-        output: historyPage,
-        readOnly: true,
-      },
-      (input) => historyWith(input.with, input.cursor),
-    );
-    register(
-      mcp,
-      "list_conversations",
-      {
-        description:
-          "List the name of every client that has written to you. Use read_conversation to read one client's conversation.",
-        input: noArguments,
-        output: Schema.Struct({ clients: Schema.Array(AgentName) }),
-        readOnly: true,
-      },
-      () => conversations,
-    );
-    register(
-      mcp,
-      "read_firewall_decisions",
-      {
-        description:
-          "Read completed firewall decision summaries since inclusive Unix milliseconds. Each gives the decision applied (allowed, refused or withheld), the reason and the deciding rules' registered advice, without message content or private model evidence.",
-        input: Schema.Struct({ since: Schema.optional(Schema.NonNegativeInt) }),
-        output: Schema.Struct({ decisions: Schema.Array(checkRecordSchema) }),
-        readOnly: true,
-      },
-      ({ since }) => readDecisions(sql, since ?? 0),
-    );
-  };
-
-  /** A client names no recipient and no conversation: both are the server agent. */
-  const registerClientTools = (mcp: McpServer, client: AgentName) => {
-    register(
-      mcp,
-      "send_message",
-      {
-        description:
-          "Send a message to the server agent. Returns the message id. Read its reply with receive_messages.",
-        input: Schema.Struct(sentFields),
-        output: SendResult,
-      },
-      (sent) => send(client, client, sent),
-    );
-    register(
-      mcp,
-      "read_conversation",
-      {
-        description:
-          "Read the messages you sent and received in your conversation with the server agent. Follow nextCursor until absent.",
-        input: Schema.Struct({ cursor: Schema.optional(Cursor) }),
-        output: historyPage,
-        readOnly: true,
-      },
-      ({ cursor }) => history(client, client, cursor),
-    );
-  };
-
-  const requestServer = (caller: AgentName) => {
-    const mcp = new McpServer(
-      { name: "sharnessd", version: packageVersion },
-      { extensions: [events] },
-    );
-    registerSharedTools(mcp, caller);
-    if (caller === server.name) {
-      registerServerAgentTools(mcp);
-    } else {
-      registerClientTools(mcp, caller);
-    }
-    return mcp;
-  };
-
-  const factory: McpServerFactory = ({ authInfo }) =>
-    requestServer(callerOf(authInfo));
-  return factory;
+  return server;
 });
 
-/** A typed failure of a tool: what a model reads of it, and its own fields, which a host reads. */
-interface Failure {
-  readonly message: string;
-  readonly reason: string;
-}
-
-function failed(failure: Failure) {
-  return {
-    isError: true as const,
-    content: [{ type: "text" as const, text: failure.message }],
-    structuredContent: Object.fromEntries(
-      Object.entries(failure).filter(([field]) => field !== "_tag"),
-    ),
-  };
+/** The firewall's refusal of a message as its send's failure. */
+function refusalOf(
+  decision: Extract<
+    Effect.Effect.Success<ReturnType<Firewall["check"]>>,
+    { readonly kind: "refused" }
+  >,
+) {
+  return new FirewallRefusal({
+    reason: decision.reason,
+    checkId: decision.checkId,
+    feedback: decision.feedback,
+  });
 }
 
 /**
- * `schema` as the Standard Schema the MCP SDK validates a value with and
- * lists as JSON Schema. Effect's own Standard Schema carries no JSON Schema,
- * which the SDK requires. A value with a field the schema does not name is
- * invalid.
+ * A refusal as the client whose message it refused reads it: only the
+ * feedback, or that the server is unavailable when the message could not be
+ * checked.
  */
-function standard<A, I>(
-  schema: Schema.Schema<A, I>,
-): StandardSchemaWithJSON<I, A> {
-  const definitions: Record<string, JSONSchema.JsonSchema7> = {};
-  const root = JSONSchema.fromAST(schema.ast, {
-    definitions,
-    target: "jsonSchema2020-12",
-    topLevelReferenceStrategy: "skip",
-  });
-  const json = () => ({
-    ...root,
-    ...(Object.keys(definitions).length === 0 ? {} : { $defs: definitions }),
-  });
+function asClientReads(refusal: FirewallRefusal) {
+  return refusal.reason === "unavailable"
+    ? new UnavailableToClient({ reason: "unavailable" })
+    : new RefusalToClient({ reason: "refused", feedback: refusal.feedback });
+}
+
+/** The first `limit` of `stored` as entries, the place of the last of them, and whether more were stored. */
+function pageOf(stored: readonly StoredMessage[], limit: number) {
+  const page = stored.slice(0, limit);
   return {
-    "~standard": {
-      ...Schema.standardSchemaV1(schema, { onExcessProperty: "error" })[
-        "~standard"
-      ],
-      jsonSchema: { input: json, output: json },
-    },
+    entries: page.map(({ message }) => ({ message })),
+    last: page.at(-1)?.sequence,
+    more: stored.length > limit,
   };
+}
+
+/** Locks `client`'s conversation, whose lock is one of `locks`, until the scope closes. */
+function lockConversation(
+  locks: Map<AgentName, Effect.Semaphore>,
+  client: AgentName,
+) {
+  return Effect.sync(() => {
+    const lock = locks.get(client) ?? Effect.unsafeMakeSemaphore(1);
+    locks.set(client, lock);
+    return lock;
+  }).pipe(
+    Effect.flatMap((lock) =>
+      Effect.acquireReleaseInterruptible(lock.take(1), () => lock.release(1)),
+    ),
+    Effect.asVoid,
+  );
+}
+
+/** Logs a send that failed, with the agent that sent it. */
+function logFailedSend<
+  A,
+  E extends { readonly _tag: string; readonly message: string },
+  R,
+>(send: Effect.Effect<A, E, R>, author: AgentName) {
+  return Effect.tapError(send, (error) =>
+    Effect.logWarning("Send failed").pipe(
+      Effect.annotateLogs({
+        agentName: author,
+        error: error._tag,
+        reason: error.message,
+      }),
+    ),
+  );
 }

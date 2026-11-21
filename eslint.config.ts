@@ -1,7 +1,7 @@
 /**
  * @file The repository's one ESLint flat configuration. Each section names
- * the paths it covers: the root package's `src/`, the root modules with
- * `scripts/`, and the integration tests.
+ * the paths it covers: the root package's `src/` and test fixtures, the root
+ * modules with `scripts/`, and the integration tests.
  */
 import comments from "@eslint-community/eslint-plugin-eslint-comments";
 import { plugin as guard } from "eslint-plugin-agent-code-guard";
@@ -23,7 +23,7 @@ const configModuleRules = {
 /** Per-file line ceiling, counting neither blanks nor comments. */
 const DEFAULT_MAX_LINES = 1050;
 
-const PACKAGE_SOURCE_FILES = ["src/**/*.ts", "*.ts"];
+const PACKAGE_SOURCE_FILES = ["src/**/*.ts", "tests/support/**/*.ts", "*.ts"];
 
 /** Signatures describe parameters and returns; prose adds caller obligations. */
 const documentationRules = {

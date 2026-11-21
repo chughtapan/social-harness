@@ -20,8 +20,7 @@ session or checking its hash does not load its instructions.
 Load only applicable skills, then follow their targeted references.
 Do not ask the user to invoke skills for you.
 
-Every `CLAUDE.md` is a symlink to the `AGENTS.md` beside it.
-`plugins/*/AGENTS.md` add package specifics. Scoped
+Every `CLAUDE.md` is a symlink to the `AGENTS.md` beside it. Scoped
 instructions refine this file and the constitution; they never override them.
 A conflict is an authority defect, so work in that scope stops until the
 instructions agree.
@@ -34,8 +33,11 @@ every turn and drifts from the behavior that is actually enforced.
 
 Social Harness is the layered infrastructure through which autonomous agents
 representing different principals message, coordinate, and collaborate despite
-faulty or malicious peers. One daemon, `sharnessd`, hosts every owner's agent
-and delivers their messages. npm packages use the `@social-harness` scope.
+faulty or malicious peers. Agents communicate under structured norms: a
+server publishes its norms, and the daemon enforces that both the client and
+the server agent follow them on every send. The norms engine under
+`src/norms/` is the core of the code. One daemon, `sharnessd`, hosts every
+owner's agent and delivers their messages. npm packages use the `@social-harness` scope.
 Executables use `sharness*`, environment variables use `SHARNESS_*`, and
 protocol namespaces use `org.social-harness/*`.
 
@@ -65,8 +67,17 @@ and the contract for the area you change:
 - [Daemon lifecycle and MCP interface](docs/reference/spec/daemon.md).
 - [Identity](docs/reference/spec/identity/identity-and-attribution.md) and
   [modes](docs/reference/spec/modes.md).
-- [Message policy](docs/reference/spec/firewall/message-policy.md) and
-  [norms](docs/reference/spec/norms/norms.md).
+- [Norm language](docs/reference/spec/norms/norms.md) and the
+  [firewall](docs/reference/spec/firewall.md) that enforces norms.
+
+`src/norms/` is laid out as a compiler. `lisp.ts` is the frontend and the
+only module that knows the syntax. `norm.ts` is the norm it reads documents
+into, as plain data. `compiler.ts` checks that norm to be well formed, and
+`structure-check.ts` runs it over a conversation. Neither reads syntax: a
+change to how norms are written touches `lisp.ts` and the specification's
+grammar, and nothing else. The folder imports nothing from the rest of
+`src/`: the firewall, the MCP tools and `main.ts` import it through
+`norms/index.ts`, which owns every shape of the norm language they use.
 
 Onboarding is agent-led and lives only in `skills/`: an agent reads a skill
 and does the setup. `host-a-server` sets up an owner's server (sign-in,
@@ -79,9 +90,8 @@ supply, and what to ask the owner; it does not script the steps or assume a
 provider. Keep the skills independent of any one agent host: each host
 decides how it signs in, schedules itself and reads its inbox. When code
 changes a tool, setting or variable a skill names, change the skill in the
-same pull request. Review changes to `config/firewall/` and
-`config/norms/` as policy changes: their text determines what the text
-evaluator and the norm checks enforce.
+same pull request. Review changes to `config/norms/` as policy changes: their
+text determines what the structure check and the decision provider enforce.
 
 An MCP tool description explains its result, failures the caller can correct,
 and the alternative tool when callers could confuse the two.
@@ -199,8 +209,8 @@ Effect idiom, typed errors, exhaustive switches, and cast bans are enforced by
 the `agent-code-guard` eslint rules. Read their output rather than a summary
 of it here.
 
-The root `safer-architecture.config.json` is hand-maintained; the plugins use the
-checker's defaults. `pnpm arch:check` runs safer-architecture-lsp against each.
+The root `safer-architecture.config.json` is hand-maintained. `pnpm arch:check`
+runs safer-architecture-lsp against it.
 
 ## Verify
 

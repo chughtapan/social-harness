@@ -9,6 +9,7 @@
       ],
       "project": [
         "src/**/*.ts",
+        "tests/support/**/*.ts",
         "*.ts",
         "scripts/**/*.ts"
       ]
