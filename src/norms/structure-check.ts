@@ -14,14 +14,13 @@ import {
 import {
   type Act,
   checkStructure,
-  formatAct,
   type MessageForm,
   type Norm,
   type NormProblem,
   readAct,
 } from "./norm.js";
 
-/** One act the firewall allowed that fits the protocol: its message, the time of that check and the act its text states. */
+/** One earlier act that fits the protocol: its message, the time of the firewall's check of it and the act its text states. */
 interface ReplayedAct {
   readonly message: Message;
   readonly at: number;
@@ -64,7 +63,7 @@ interface FittedAct extends HeldAct {
 
 /**
  * The structure check of a firewall whose agent holds `installed`. It replays
- * the earlier messages the firewall allowed to find the instance in progress,
+ * the earlier messages to find the instance in progress,
  * then reads the message as an act of that instance or, when none is, of the
  * norm it names. An act that fits passes with its norm's English rules for
  * it. Any other message is refused under a rule named for the norm of the
@@ -124,7 +123,6 @@ function refusal(
       explanation: problem.detail,
       field: problem.field,
     },
-    replyTo: refusalReply(view.instance?.norm),
   };
 }
 
@@ -150,26 +148,12 @@ function pass(view: ProtocolView, { act, norm, form }: FittedAct): Result {
       form: form.fields,
     },
     detail: { ...named, act: act.name, stage: "semantic" },
-    replyTo: refusalReply(norm),
   };
 }
 
 /**
- * Phrases the act that tells the sender of a withheld message why, when
- * `norm` declares one in `:on-refusal`. The compiler admits only a refusal
- * act with a `reason` field.
- */
-function refusalReply(norm?: Norm) {
-  const act = norm?.onRefusal;
-  return norm === undefined || act === undefined
-    ? undefined
-    : (reason: string) =>
-        formatAct({ name: act, norm: norm.name, fields: { reason } });
-}
-
-/**
  * Replays a conversation's earlier messages in order under the held norms.
- * Only a message the firewall allowed that reads as an act and fits the
+ * Only a message the firewall checked that reads as an act and fits the
  * protocol at the time of its check advances the instance.
  */
 function projectProtocol(
@@ -201,15 +185,15 @@ function projectProtocol(
 
 /**
  * The act of an earlier message, as the view permitted it at the time of the
- * firewall's check, or nothing when the firewall did not allow the message or
+ * firewall's check, or nothing when the firewall did not check the message or
  * the message is no such act.
  */
 function replayed(
   view: ProtocolView,
   installed: readonly Norm[],
-  { message, checkedAt, allowed }: CheckedMessage,
+  { message, checkedAt }: CheckedMessage,
 ) {
-  return !allowed || checkedAt === undefined
+  return checkedAt === undefined
     ? undefined
     : readHeldAct(view, installed, message).pipe(
         Either.flatMap((held) => fitAct(view, held, message, checkedAt)),
@@ -320,7 +304,7 @@ function senderPermitted(
     : form.by.includes(role);
 }
 
-/** A message that replies into the instance belongs to it, whether or not it was allowed, so a later reply may name it. */
+/** A message that replies into the instance belongs to it, whether or not it advanced the instance, so a later reply may name it. */
 function retainInteractionReference(view: ProtocolView, message: Message) {
   const instance = view.instance;
   if (instance === undefined) {

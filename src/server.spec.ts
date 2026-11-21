@@ -233,13 +233,10 @@ const privacy = {
   feedback: "Keep private information private.",
 };
 
-/** A message policy of the rule `privacy`, judged by `provider`. With `action`, the rule replies to or silently withholds what breaks it. */
-const policy = (
-  provider: DecisionProvider,
-  action?: "deny" | "reply",
-): MessagePolicy => ({
+/** A message policy of the rule `privacy`, judged by `provider`. */
+const policy = (provider: DecisionProvider): MessagePolicy => ({
   provider,
-  rules: [{ ...privacy, action }],
+  rules: [privacy],
   settings: { minimumProbability: 0.8, timeoutMilliseconds: 5_000 },
 });
 
@@ -365,21 +362,27 @@ it("reads the inbox a page of fifty at a time after a cursor, the same page agai
     });
   }));
 
-it("stores a withheld message for its sender, whose send succeeds, and keeps it from the recipient's inbox and history", () =>
+it("fails a client's send that breaks a rule with the rule's feedback, and stores the decision but not the message", () =>
   Effect.gen(function* () {
     const { alice, bob } = yield* aliceAndBob({
       policy: policy(incomingViolation),
     });
 
-    yield* send(bob, { text: "Private peer content" });
+    expect(
+      yield* send(bob, { text: "Private peer content" }).pipe(Effect.flip),
+    ).toMatchObject({
+      reason: "firewall-refused",
+      refusal: "rule-violation",
+      feedback: [privacy.feedback],
+    });
 
     expect(
       (yield* callTool(alice, "read_firewall_decisions")).decisions,
-    ).toMatchObject([{ reason: "rule-violation", decision: "withheld" }]);
+    ).toMatchObject([
+      { direction: "incoming", decision: "refused", reason: "rule-violation" },
+    ]);
     expect(yield* inboxOf(alice)).toEqual([]);
-    expect(yield* historyOf(alice, bob.name)).toEqual([]);
-    expect(yield* historyOf(bob)).toEqual(["sent"]);
-    expect(yield* inboxOf(bob)).toEqual([]);
+    expect(yield* historyOf(bob)).toEqual([]);
   }));
 
 it("fails a client's send and stores nothing when the check of its message could not run", () =>
@@ -398,33 +401,6 @@ it("fails a client's send and stores nothing when the check of its message could
     expect(yield* historyOf(bob)).toEqual([]);
   }));
 
-it.each([
-  { from: "the notice", action: undefined, text: "Not accepted." },
-  { from: "a reply rule", action: "reply" as const, text: privacy.feedback },
-])(
-  "sends the firewall's reply to a withheld message, from $from, as an ordinary message that answers it",
-  ({ action, text }) =>
-    Effect.gen(function* () {
-      const { alice, bob } = yield* aliceAndBob({
-        notice: "Not accepted.",
-        policy: policy(incomingViolation, action),
-      });
-
-      const withheld = yield* send(bob, { text: "Private peer content" });
-
-      expect(yield* inboxOf(bob)).toMatchObject([
-        {
-          author: alice.name,
-          recipient: bob.name,
-          replyToMsgId: withheld.id,
-          text,
-        },
-      ]);
-      expect(yield* inboxOf(alice)).toEqual([]);
-      expect(yield* historyOf(bob)).toEqual(["sent", "received"]);
-    }),
-);
-
 /** `open` starts an instance and `close`, from the other agent, ends it. */
 const exchange = Either.getOrThrow(
   holdNorms([
@@ -435,24 +411,19 @@ const exchange = Either.getOrThrow(
   ]),
 );
 
-it("answers what an agent that holds norms withholds, plain text and an act out of turn alike, and the conversation goes on", () =>
+it("refuses what an agent that holds norms does not accept, plain text and an act out of turn alike, and the conversation goes on", () =>
   Effect.gen(function* () {
     const { alice, bob } = yield* aliceAndBob({
-      notice: "Not accepted.",
       norms: exchange,
       policy: policy(compliant),
     });
 
-    const plain = yield* send(bob, { text: "Hello, can you help?" });
-    const outOfTurn = yield* send(bob, { text: "(close :ontology exchange)" });
-
-    const replies = yield* inboxOf(bob);
-    expect(replies).toMatchObject(
-      [plain, outOfTurn].map((withheld) => ({ replyToMsgId: withheld.id })),
-    );
-    expect(
-      replies.map(({ text }) => text.startsWith("Not accepted. ")),
-    ).toEqual([true, true]);
+    for (const text of ["Hello, can you help?", "(close :ontology exchange)"]) {
+      expect(yield* send(bob, { text }).pipe(Effect.flip)).toMatchObject({
+        reason: "firewall-refused",
+        refusal: "rule-violation",
+      });
+    }
     yield* send(bob, { text: "(open :ontology exchange)" });
     expect(yield* inboxOf(alice)).toHaveLength(1);
   }));
@@ -580,23 +551,16 @@ it.prop(
   { fastCheck: { numRuns: 10 } },
 );
 
-/** A server whose firewall withholds exactly the messages whose text is `withheld`, with Alice and two clients signed in. */
-const withholdingByText = Effect.gen(function* () {
+/** A server whose firewall refuses exactly the messages whose text is `refused`, with Alice and two clients signed in. */
+const refusingByText = Effect.gen(function* () {
   const check: Firewall["check"] = (...[, message]) =>
     Effect.succeed(
-      message.text === "withheld"
+      message.text === "refused"
         ? {
-            kind: "withheld",
-            record: {
-              checkId: "chk_withheld",
-              direction: "incoming",
-              decision: "withheld",
-              time: 0,
-              peer: message.author,
-              reason: "rule-violation",
-              decidedBy: [],
-              checkedRuleIds: [],
-            },
+            kind: "refused",
+            checkId: "chk_refused",
+            reason: "rule-violation",
+            feedback: [],
           }
         : { kind: "allowed" },
     );
@@ -638,7 +602,7 @@ const steps = fc.array(
 
 it("returns, for any cursor a read gave, every message that became readable since that read in the order it did, and none for a read without a cursor", () =>
   Effect.gen(function* () {
-    const { clients, inbox } = yield* withholdingByText;
+    const { clients, inbox } = yield* refusingByText;
     /** The ids of the messages alice may read, in the order they were stored. */
     const expected: string[] = [];
     /** Each cursor a read returned, with the count of messages readable when it did. */
@@ -647,11 +611,11 @@ it("returns, for any cursor a read gave, every message that became readable sinc
       Effect.gen(function* () {
         for (const step of sequence) {
           if (step.step === "send") {
-            const { id } = yield* send(clients[step.author], {
-              text: step.readable ? "hello" : "withheld",
-            });
+            const sender = clients[step.author];
             if (step.readable) {
-              expected.push(id);
+              expected.push((yield* send(sender, { text: "hello" })).id);
+            } else {
+              yield* Effect.flip(send(sender, { text: "refused" }));
             }
           } else {
             const presented =
@@ -672,7 +636,7 @@ it("returns, for any cursor a read gave, every message that became readable sinc
 
 it("gives messages stored at the same time distinct places in their recipient's read order", () =>
   Effect.gen(function* () {
-    const { clients, inbox } = yield* withholdingByText;
+    const { clients, inbox } = yield* refusingByText;
     const sent = yield* Effect.forEach(
       Arr.makeBy(12, (index) => (index % 2 === 0 ? "bob" : "carol")),
       (author) =>

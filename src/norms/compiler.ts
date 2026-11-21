@@ -41,7 +41,6 @@ export function compileNorm(source: string): Compiled<Norm> {
       ":initiator",
       ":participant",
       ":description",
-      ":on-refusal",
     ]);
     const initiator = atom(header.attributes.get(":initiator"));
     const participant = atom(header.attributes.get(":participant"));
@@ -60,7 +59,6 @@ export function compileNorm(source: string): Compiled<Norm> {
         "A norm names two distinct roles without child declarations.",
       );
     }
-    const onRefusal = atom(header.attributes.get(":on-refusal"));
     const norm = yield* decodeNorm({
       name: header.name,
       digest: createHash("sha256").update(source, "utf8").digest("hex"),
@@ -77,7 +75,6 @@ export function compileNorm(source: string): Compiled<Norm> {
             compileRule(form, `${header.name}-rule-${index + 1}`),
           ),
       ),
-      ...(onRefusal === undefined ? {} : { onRefusal }),
     }).pipe(
       Either.mapLeft(
         () => "A declaration has an invalid name, value, bound or rule scope.",
@@ -504,10 +501,9 @@ function validateReferences(norm: Norm): Either.Either<void, string> {
   ) {
     return Either.left("An English rule names an undeclared act.");
   }
-  return Either.all([
-    ...norm.forms.map((form) => validateForm(norm, form, forms)),
-    validateRefusal(norm, forms),
-  ]).pipe(Either.map(() => undefined));
+  return Either.all(
+    norm.forms.map((form) => validateForm(norm, form, forms)),
+  ).pipe(Either.map(() => undefined));
 }
 
 function validateForm(
@@ -547,26 +543,6 @@ function validateForm(
   return Either.all(
     form.relations.map((relation) => validateRelation(form, relation, forms)),
   ).pipe(Either.map(() => undefined));
-}
-
-function validateRefusal(
-  norm: Norm,
-  forms: ReadonlyMap<string, MessageForm>,
-): Either.Either<void, string> {
-  if (norm.onRefusal === undefined) {
-    return Either.void;
-  }
-  const form = forms.get(norm.onRefusal);
-  if (form === undefined) {
-    return Either.left("The refusal act must have a declared form.");
-  }
-  const others = form.fields.filter((field) => field.name !== "reason");
-  return fieldOf(form, "reason")?.type !== "string" ||
-    others.some((field) => !field.optional)
-    ? Either.left(
-        "Automatic refusal supplies a reason string and no other required fields.",
-      )
-    : Either.void;
 }
 
 /** Whether a form that starts an instance lets the initiator send it and needs nothing earlier. */

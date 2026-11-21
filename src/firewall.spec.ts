@@ -40,10 +40,6 @@ import { AgentName, Message } from "./messages.js";
 
 const directions = ["incoming", "outgoing"] as const;
 
-/** What a check that does not allow its message concludes: a draft is refused, a peer's message withheld. */
-const unallowed = (direction: Direction) =>
-  direction === "outgoing" ? "refused" : "withheld";
-
 const directories: string[] = [];
 afterEach(() => {
   for (const directory of directories.splice(0)) {
@@ -140,7 +136,6 @@ describe("message-policy file", () => {
 
 const alice = AgentName.make("alice");
 const bob = AgentName.make("bob");
-const notice = "Your message was not accepted.";
 const repair = "Ask for acceptance of the chosen proposal.";
 /** A rule with feedback of its own. */
 const proposal: TextRule = {
@@ -181,7 +176,6 @@ interface Setup {
   readonly minimumProbability?: number;
   readonly timeoutMilliseconds?: number;
   readonly earlier?: readonly CheckedMessage[];
-  readonly notice?: string;
   readonly structureCheck?: StructureCheck;
   readonly historyLimit?: number;
 }
@@ -221,7 +215,6 @@ function firewallOf(setup: Setup = {}) {
       provider: setup.provider ?? certain,
     },
     historyLimit: setup.historyLimit,
-    notice: setup.notice,
     structureCheck: setup.structureCheck,
   });
 }
@@ -240,7 +233,7 @@ function answer(choice: Choice, probability: number): Answer {
 const percent = fc.integer({ min: 50, max: 100 }).map((whole) => whole / 100);
 
 it.prop(
-  "follows an answer at or above the minimum probability, and takes one below it as unsure: an unsure message is held as unresolved evidence with the rule's feedback",
+  "follows an answer at or above the minimum probability, and takes one below it as unsure: an unsure message is refused as unresolved evidence with the rule's feedback, whichever agent sent it",
   [fc.constantFrom(...directions), choices, percent, percent],
   ([direction, choice, probability, minimumProbability]) =>
     Effect.gen(function* () {
@@ -249,25 +242,19 @@ it.prop(
         provider: answering({ [proposal.id]: answer(choice, probability) }),
         minimumProbability,
       });
-      const held = (reason: string) =>
-        ({
-          outgoing: { kind: "refused", reason, feedback: [repair] },
-          incoming: {
-            kind: "withheld",
-            record: {
-              reason,
-              decidedBy: [{ ruleId: proposal.id, advice: repair }],
-            },
-          },
-        })[direction];
+      const refused = (reason: string) => ({
+        kind: "refused",
+        reason,
+        feedback: [repair],
+      });
       const settled = {
         compliant: { kind: "allowed" },
-        violation: held("rule-violation"),
+        violation: refused("rule-violation"),
       }[choice];
 
       expect(result).toMatchObject(
         probability < minimumProbability
-          ? held("unresolved-evidence")
+          ? refused("unresolved-evidence")
           : settled,
       );
     }),
@@ -304,8 +291,8 @@ it.prop(
         minimumProbability: 0.8,
       });
       expect(result).toMatchObject({
-        kind: unallowed(direction),
-        record: { reason: "rule-violation" },
+        kind: "refused",
+        reason: "rule-violation",
       });
     }),
 );
@@ -315,10 +302,12 @@ it.each(directions)(
   (direction) =>
     Effect.gen(function* () {
       expect(yield* check(direction)).toMatchObject({
-        kind: unallowed(direction),
+        kind: "refused",
+        reason: "rule-violation",
+        feedback: [privacy.feedback],
         record: {
           direction,
-          decision: unallowed(direction),
+          decision: "refused",
           peer: bob,
           reason: "rule-violation",
           decidedBy: [{ ruleId: privacy.id, advice: privacy.feedback }],
@@ -349,7 +338,7 @@ it.each([
   ({ provider }) =>
     Effect.gen(function* () {
       for (const direction of directions) {
-        const result = yield* check(direction, { provider, notice });
+        const result = yield* check(direction, { provider });
         expect(result).toMatchObject({
           kind: "refused",
           reason: "check-unavailable",
@@ -405,7 +394,6 @@ it.each([true, false])(
           recipient: alice,
           text: "x".repeat(32_000),
         }),
-        allowed: true,
         checkedAt: 1,
       };
       const direction = isIncoming ? "incoming" : "outgoing";
@@ -419,8 +407,8 @@ it.each([true, false])(
       });
       expect(within.kind).toBe("allowed");
       expect(beyond).toMatchObject({
-        kind: unallowed(direction),
-        record: { reason: "unresolved-evidence" },
+        kind: "refused",
+        reason: "unresolved-evidence",
       });
     }),
 );
@@ -465,9 +453,9 @@ it("allows every message of an agent without a message policy, with nothing to s
   }));
 
 it.prop(
-  "shows the provider the latest earlier messages up to its history limit, each visible to the agent only if allowed or its own",
-  [fc.integer({ min: 1, max: 4 }), fc.array(fc.boolean(), { maxLength: 6 })],
-  ([historyLimit, allowed]) =>
+  "shows the provider the latest earlier messages up to its history limit, and says when it left earlier ones out",
+  [fc.integer({ min: 1, max: 4 }), fc.nat({ max: 6 })],
+  ([historyLimit, sent]) =>
     Effect.gen(function* () {
       const requests: DecisionRequest[] = [];
       const message = yield* fromBob;
@@ -475,34 +463,24 @@ it.prop(
       yield* check("incoming", {
         provider: answering({}, requests),
         historyLimit,
-        earlier: allowed.map((wasAllowed) => ({
+        earlier: Array.from({ length: sent }, () => ({
           message,
-          allowed: wasAllowed,
           checkedAt: 1,
         })),
       });
 
-      expect(
-        requests.map(({ state }) =>
-          Schema.decodeUnknownSync(
-            Schema.parseJson(
-              Schema.Struct({
-                history: Schema.Array(
-                  Schema.Struct({ visibleToAgent: Schema.Boolean }),
-                ),
-                earlierHistoryOmitted: Schema.Boolean,
-              }),
-            ),
-          )(state),
-        ),
-      ).toEqual([
-        {
-          history: allowed
-            .slice(-historyLimit)
-            .map((visibleToAgent) => ({ visibleToAgent })),
-          earlierHistoryOmitted: allowed.length > historyLimit,
-        },
-      ]);
+      const [shown] = requests.map(({ state }) =>
+        Schema.decodeUnknownSync(
+          Schema.parseJson(
+            Schema.Struct({
+              history: Schema.Array(Schema.Unknown),
+              earlierHistoryOmitted: Schema.Boolean,
+            }),
+          ),
+        )(state),
+      );
+      expect(shown?.history).toHaveLength(Math.min(sent, historyLimit));
+      expect(shown?.earlierHistoryOmitted).toBe(sent > historyLimit);
     }),
   { fastCheck: { numRuns: 20 } },
 );
@@ -553,45 +531,6 @@ describe("Firewall check activity", () => {
   );
 });
 
-describe("Firewall replies", () => {
-  it.each([
-    { action: "reply", given: notice, text: privacy.feedback },
-    { action: "deny", given: notice, text: notice },
-    { action: "deny", given: undefined, text: undefined },
-  ] as const)(
-    "answers a message that breaks a $action rule with $text, and records the reply as a message it allowed",
-    ({ action, given, text }) =>
-      Effect.gen(function* () {
-        const result = yield* check("incoming", {
-          rules: [{ ...privacy, action }],
-          notice: given,
-        });
-
-        const reply = "reply" in result ? result.reply : undefined;
-        expect(result).toMatchObject({ kind: "withheld" });
-        expect(
-          reply && [
-            reply.text,
-            reply.record.direction,
-            reply.record.decision,
-            reply.record.peer,
-          ],
-        ).toEqual(text && [text, "outgoing", "allowed", bob]);
-      }),
-  );
-
-  it("gives a refused outgoing message no reply", () =>
-    Effect.gen(function* () {
-      const result = yield* check("outgoing", {
-        rules: [{ ...privacy, action: "reply" }],
-        notice,
-      });
-
-      expect(result).toMatchObject({ kind: "refused" });
-      expect(result).not.toHaveProperty("reply");
-    }));
-});
-
 describe("Firewall structure check", () => {
   const refusal = {
     kind: "refused",
@@ -601,26 +540,17 @@ describe("Firewall structure check", () => {
     detail: { stage: "structural" },
   } as const;
 
-  it.each([
-    { reply: "Greet me first.", text: "Greet me first." },
-    { reply: undefined, text: `${notice} ${refusal.feedback}` },
-  ])(
-    "refuses what its structure check refuses under that check's rule without asking the provider, and answers with $text",
-    ({ reply, text }) =>
+  it.each(directions)(
+    "refuses an %s message its structure check refuses, under that check's rule and without asking the provider",
+    (direction) =>
       Effect.gen(function* () {
-        const setup = {
+        const result = yield* check(direction, {
           rules: [],
           provider: { decide: () => Effect.dieMessage("Provider asked") },
-          notice,
-          structureCheck: () =>
-            Effect.succeed(
-              reply === undefined
-                ? refusal
-                : { ...refusal, replyTo: () => reply },
-            ),
-        };
+          structureCheck: () => Effect.succeed(refusal),
+        });
 
-        expect(yield* check("outgoing", setup)).toMatchObject({
+        expect(result).toMatchObject({
           kind: "refused",
           reason: "rule-violation",
           rule: "shape",
@@ -631,27 +561,21 @@ describe("Firewall structure check", () => {
             checkedRuleIds: ["shape"],
           },
         });
-        expect(yield* check("incoming", setup)).toMatchObject({
-          kind: "withheld",
-          reply: { text },
-        });
       }),
   );
 
-  it("judges a message its structure check passes by that check's rules too, shows the provider that check's context, and answers a withheld message as the check phrases it", () =>
+  it("judges a message its structure check passes by that check's rules too, and shows the provider that check's context", () =>
     Effect.gen(function* () {
       const requests: DecisionRequest[] = [];
 
       const result = yield* check("incoming", {
         rules: [{ id: "polite", applies: "both", text: "Be polite." }],
         provider: answering({ [privacy.id]: "violation" }, requests),
-        notice,
         structureCheck: () =>
           Effect.succeed({
             kind: "passed",
             textRules: [new TextRule(privacy)],
             protocol: { turn: 2 },
-            replyTo: (feedback) => `Refused: ${feedback}`,
           }),
       });
 
@@ -664,8 +588,8 @@ describe("Firewall structure check", () => {
         ]),
       ).toEqual([[{ turn: 2 }, ["polite", privacy.id]]]);
       expect(result).toMatchObject({
-        kind: "withheld",
-        reply: { text: `Refused: ${privacy.feedback}` },
+        kind: "refused",
+        feedback: [privacy.feedback],
       });
     }));
 });

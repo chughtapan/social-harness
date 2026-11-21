@@ -56,8 +56,9 @@ const unknownId = Schema.decodeUnknownSync(MsgId)(`msg_${"A".repeat(43)}`);
 
 /**
  * Checks the act `text` from `author` against `history` at `now`, and adds
- * its message to the history as one the firewall allowed when the check
- * passes it. A history that holds every message twice gives the same answer.
+ * its message to the history when the check passes it, as a refused message
+ * is not stored. A history that holds every message twice gives the same
+ * answer.
  */
 function attempt(
   norm: Norm,
@@ -79,11 +80,9 @@ function attempt(
   expect(check(norm, candidate, [...history, ...history], taken.now).kind).toBe(
     kind,
   );
-  history.push({
-    message: candidate,
-    checkedAt: taken.now,
-    allowed: kind === "passed",
-  });
+  if (kind === "passed") {
+    history.push({ message: candidate, checkedAt: taken.now });
+  }
   return kind === "passed";
 }
 
@@ -221,13 +220,16 @@ function answersOffer(model: Model, taken: Step, reply: MsgId): boolean {
   return taken.act === "counter" || taken.value === offer.value;
 }
 
-/** Applies a step to the model: its message joins the instance it replies into, and a permitted act takes effect. */
+/** Applies a permitted step to the model: its message joins the instance it replies into, and its act takes effect. A step that is not permitted leaves no message. */
 function advanceModel(
   model: Model,
   taken: Step,
   message: { readonly id: MsgId; readonly reply: Option.Option<MsgId> },
   permitted: boolean,
 ) {
+  if (!permitted) {
+    return;
+  }
   const { id, reply } = message;
   if (
     model.open &&
@@ -236,9 +238,6 @@ function advanceModel(
     model.members.set(id, reply);
   }
   model.known.add(id);
-  if (!permitted) {
-    return;
-  }
   switch (taken.act) {
     case "finish":
       model.open = false;
@@ -333,14 +332,12 @@ it("permits an act with a delay and a limit only once its fact is that old and w
   );
 });
 
-/** `open` starts an instance, `close` ends it, and `reject` answers a withheld act. */
+/** `open` starts an instance and `close` ends it. */
 const exchange = normFrom(`
-(norm exchange :initiator Sender :participant Receiver :on-refusal reject)
+(norm exchange :initiator Sender :participant Receiver)
 (content open :by Sender :starts true :initiates opened
   (field value :type string))
 (content close :by Receiver :when opened :ends true)
-(content reject :by (Sender Receiver) :when opened
-  (field reason :type string))
 `);
 
 it("refuses every text that is not an act of a held norm", () => {
@@ -381,11 +378,10 @@ it.each(["ask", "tell"])(
 );
 
 it.each([
-  { checked: { checkedAt: 1, allowed: true }, continues: "passed" },
-  { checked: { checkedAt: 1, allowed: false }, continues: "refused" },
-  { checked: { allowed: false }, continues: "refused" },
+  { checked: { checkedAt: 1 }, continues: "passed" },
+  { checked: {}, continues: "refused" },
 ])(
-  "continues an instance only from an opening act the firewall allowed: $checked",
+  "continues an instance only from an opening act the firewall checked: $checked",
   ({ checked, continues }) => {
     const open = message(alice, actText("open", "exchange", { value: "x" }));
 
@@ -432,41 +428,22 @@ it.each([
     stage: "protocol",
   },
 ])(
-  "refuses $what in an instance under the norm's $stage rule, and answers with the norm's refusal act",
+  "refuses $what in an instance under the norm's $stage rule",
   ({ text, stage }) => {
     const open = message(alice, actText("open", "exchange", { value: "x" }));
 
     const result = check(
       exchange,
       message(bob, text, { replyToMsgId: open.msgId }),
-      [{ message: open, checkedAt: 1, allowed: true }],
+      [{ message: open, checkedAt: 1 }],
     );
 
     expect(result).toMatchObject({
       kind: "refused",
       ruleId: `exchange-${stage}`,
     });
-    expect(result.kind === "refused" && result.replyTo?.(result.feedback)).toBe(
-      `(reject :ontology exchange :reason ${JSON.stringify(
-        result.kind === "refused" && result.feedback,
-      )})`,
-    );
   },
 );
-
-it("phrases the refusal of an act it passes as the norm's refusal act", () => {
-  const open = message(alice, actText("open", "exchange", { value: "x" }));
-
-  const result = check(
-    exchange,
-    message(bob, actText("close", "exchange"), { replyToMsgId: open.msgId }),
-    [{ message: open, checkedAt: 1, allowed: true }],
-  );
-
-  expect(result.kind === "passed" && result.replyTo?.('Say "please".')).toBe(
-    '(reject :ontology exchange :reason "Say \\"please\\".")',
-  );
-});
 
 /** A norm whose one act, `open`, has the declared fields. */
 const sampleOf = (fields: readonly string[]) =>

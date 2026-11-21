@@ -22,7 +22,7 @@ import {
   type CheckRecord,
   checkRecordSchema,
 } from "./firewall.js";
-import { AgentName, MsgId } from "./messages.js";
+import { AgentName, type Message, MsgId } from "./messages.js";
 
 /**
  * The tables could not be created. Messages name the operator's
@@ -47,8 +47,7 @@ export class DatabasePreparationError extends Data.TaggedError(
  * tables serves a database another login prepared. A database that holds
  * other tables is refused. `messages` holds each message once, in the order
  * it was stored: `client` names its conversation, `from_server` says which of
- * the two agents wrote it, `allowed` is false for one withheld from the
- * server agent, and `checked_at` is when the firewall checked it.
+ * the two agents wrote it, and `checked_at` is when the firewall checked it.
  * `firewall_checks` holds the record of each check.
  */
 export const prepareTables = Effect.fn("prepareDatabase")(
@@ -72,7 +71,6 @@ export const prepareTables = Effect.fn("prepareDatabase")(
             msg_id TEXT NOT NULL,
             text TEXT NOT NULL,
             reply_to TEXT,
-            allowed BOOLEAN NOT NULL,
             checked_at BIGINT,
             UNIQUE(client, from_server, msg_id)
           )`,
@@ -106,7 +104,6 @@ class MessageRow extends Model.Class<MessageRow>("MessageRow")({
   msgId: MsgId,
   text: Schema.String,
   replyTo: Schema.NullOr(MsgId),
-  allowed: Schema.Boolean,
   checkedAt: Schema.NullOr(Schema.NumberFromString),
 }) {}
 
@@ -119,8 +116,8 @@ class CheckRow extends Model.Class<CheckRow>("CheckRow")({
 }) {}
 
 /**
- * A message as the tables hold it: the firewall's check of it, and its place
- * in the order messages were stored.
+ * A message as the tables hold it: the time of the firewall's check of it,
+ * and its place in the order messages were stored.
  */
 export interface StoredMessage extends CheckedMessage {
   readonly sequence: number;
@@ -177,13 +174,13 @@ export const openDatabase = Effect.fn("openDatabase")(function* (
       read(sql`client = ${client} AND sequence > ${after}`, limit),
     /**
      * The messages `reader` received after the place `after`, oldest first:
-     * for the server agent those its firewall allowed from every client, and
-     * for a client the server agent's messages to it.
+     * for the server agent every client's, and for a client the server
+     * agent's messages to it.
      */
     inbox: (reader: AgentName, after: number, limit: number) =>
       read(
         reader === serverAgent
-          ? sql`NOT from_server AND allowed AND sequence > ${after}`
+          ? sql`NOT from_server AND sequence > ${after}`
           : sql`client = ${reader} AND from_server AND sequence > ${after}`,
         limit,
       ),
@@ -208,25 +205,19 @@ export const openDatabase = Effect.fn("openDatabase")(function* (
     /** Saves the record of one check. */
     record,
     /**
-     * Stores messages, each with the record of its check, in one transaction
-     * that takes the store lock first.
+     * Stores a message with the record of its check, in one transaction that
+     * takes the store lock first.
      */
-    store: (
-      entries: ReadonlyArray<
-        CheckedMessage & { readonly record?: CheckRecord }
-      >,
-    ) =>
+    store: (message: Message, decision?: CheckRecord) =>
       sql
         .withTransaction(
           Effect.gen(function* () {
             yield* sql`SELECT pg_advisory_xact_lock(${STORE_LOCK})`;
-            for (const { record: decision, ...checked } of entries) {
-              yield* messages.insertVoid(
-                rowOf({ ...checked, checkedAt: decision?.time }, serverAgent),
-              );
-              if (decision !== undefined) {
-                yield* record(decision);
-              }
+            yield* messages.insertVoid(
+              rowOf({ message, checkedAt: decision?.time }, serverAgent),
+            );
+            if (decision !== undefined) {
+              yield* record(decision);
             }
           }),
         )
@@ -253,13 +244,12 @@ function storedOf(row: MessageRow, serverAgent: AgentName): StoredMessage {
       replyToMsgId: row.replyTo ?? undefined,
       text: row.text,
     },
-    allowed: row.allowed,
     checkedAt: row.checkedAt ?? undefined,
   };
 }
 
 function rowOf(
-  { message, allowed, checkedAt }: CheckedMessage,
+  { message, checkedAt }: CheckedMessage,
   serverAgent: AgentName,
 ): typeof MessageRow.insert.Type {
   const fromServer = message.author === serverAgent;
@@ -269,7 +259,6 @@ function rowOf(
     msgId: message.msgId,
     text: message.text,
     replyTo: message.replyToMsgId ?? null,
-    allowed,
     checkedAt: checkedAt ?? null,
   };
 }

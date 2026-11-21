@@ -40,7 +40,7 @@ export const decisionState = Schema.decodeUnknownSync(
 
 /**
  * A server whose server agent is named `alice` and owned by the owner
- * `alice`, behind a firewall with the given policy, norms, notice and history
+ * `alice`, behind a firewall with the given policy, norms and history
  * limit, or one that allows every message. `firewall` replaces that
  * firewall. `signInAs` gives an MCP connection as the agent of an owner:
  * the owner a name stands for, or the owner given.
@@ -49,7 +49,6 @@ export const inProcessServer = Effect.fn("inProcessServer")(function* (
   options: {
     readonly policy?: MessagePolicy;
     readonly norms?: HeldNorms;
-    readonly notice?: string;
     readonly historyLimit?: number;
     readonly firewall?: Firewall;
   } = {},
@@ -62,7 +61,6 @@ export const inProcessServer = Effect.fn("inProcessServer")(function* (
       makeFirewall({
         policy: options.policy,
         historyLimit: options.historyLimit,
-        notice: options.notice,
         structureCheck: options.norms?.structureCheck,
       }),
   ).pipe(Effect.orDie);

@@ -35,7 +35,8 @@ Then pick the norm that fits and send its opening act with `send_message`.
   `nextCursor`. Pass the latest `nextCursor` on every later call; a call
   returns only what arrived after its cursor.
 
-A send fails only when the message could not be sent; send it again later.
+A refused send was not delivered; its error names what to correct. Any other
+failed send could not be sent; send it again later.
 
 ## Wait for a reply
 

@@ -241,7 +241,6 @@ const serve = Effect.gen(function* () {
     makeFirewall({
       policy: settings.messagePolicy,
       historyLimit: settings.maximumHistoryRecords,
-      notice: `Your message was not accepted: it breaks a rule this agent applies to incoming messages.${norms === undefined ? "" : " Call read_norms to see which messages it accepts."}`,
       structureCheck: norms?.structureCheck,
     }),
   );

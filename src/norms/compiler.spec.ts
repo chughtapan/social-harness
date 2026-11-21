@@ -130,7 +130,6 @@ vitestIt.each<keyof Splices>(["norm", "open", "field", "close", "rule"])(
 );
 
 vitestIt.each([
-  ["a refusal act", "Answerer)\n", "Answerer :on-refusal absent)\n"],
   ["a sender role", "(Asker Answerer)", "(Asker Absent)"],
   ["a fact it clears", ":ends true)", ":ends true :terminates absent)"],
   [

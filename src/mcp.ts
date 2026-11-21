@@ -301,7 +301,7 @@ function registerServerAgentTools(at: Registration) {
     "read_firewall_decisions",
     {
       description:
-        "Read completed firewall decision summaries since inclusive Unix milliseconds. Each gives the decision applied (allowed, refused or withheld), the reason and the deciding rules' registered advice, without message content or private model evidence.",
+        "Read completed firewall decision summaries since inclusive Unix milliseconds. Each gives the decision applied (allowed or refused), the reason and the deciding rules' registered advice, without message content or private model evidence.",
       input: Schema.Struct({ since: Schema.optional(Schema.NonNegativeInt) }),
       output: Schema.Struct({ decisions: Schema.Array(checkRecordSchema) }),
       readOnly: true,
@@ -321,7 +321,7 @@ function registerClientTools(at: Registration, client: AgentName) {
     "send_message",
     {
       description:
-        "Send a message to the server agent. Returns the message id. Read its reply with receive_messages.",
+        "Send a message to the server agent. Returns the message id. A refusal names the rule to correct. Read its reply with receive_messages.",
       input: Schema.Struct(sentFields),
       output: SendResult,
     },
@@ -337,7 +337,7 @@ function registerClientTools(at: Registration, client: AgentName) {
       output: conversationPage,
       readOnly: true,
     },
-    ({ cursor }) => server.conversation(client, client, cursor),
+    ({ cursor }) => server.conversation(client, cursor),
   );
 }
 

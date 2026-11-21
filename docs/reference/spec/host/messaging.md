@@ -26,7 +26,8 @@ fails with `unknown-agent`. These failures create no message.
 The server agent's send supplies a destination and text; a client's supplies text. Session focus and prior messages cannot supply an
 omitted destination.
 
-The daemon validates input, resolves the recipient and checks outgoing policy.
+The daemon validates input, resolves the recipient and checks the message
+against the server agent's message policy.
 A successful result for a message means the daemon has ordered it and saved
 it for every member of the conversation. Every new call, including identical input, creates a fresh
 invocation.

@@ -12,7 +12,7 @@ import type {
   FirewallRefusalReason,
   StructureDetail,
 } from "./firewall.js";
-import { openDatabase, type StoredMessage } from "./database.js";
+import { openDatabase } from "./database.js";
 import { type AgentName, Message, type MsgId } from "./messages.js";
 
 /** The most entries one read of an inbox or a conversation returns. */
@@ -67,9 +67,8 @@ export interface Server {
     reader: AgentName,
     request: { readonly cursor?: string; readonly wait?: number },
   ) => Effect.Effect<InboxPage>;
-  /** A page of `client`'s conversation as `reader` reads it. */
+  /** A page of `client`'s conversation after `cursor`, oldest first. */
   readonly conversation: (
-    reader: AgentName,
     client: AgentName,
     cursor?: string,
   ) => Effect.Effect<ConversationPage>;
@@ -92,8 +91,8 @@ const refusalText: Readonly<Record<FirewallRefusalReason, string>> = {
 };
 
 /**
- * A send the server agent's firewall refused. `rule` and `detail` are those
- * of a structure check. The message states each deciding rule's feedback as
+ * A send the server agent's firewall refused, whichever agent sent it.
+ * `rule` and `detail` are those of a structure check. The message states each deciding rule's feedback as
  * an error, or the reason when there is none, then the check. Feedback is a
  * plain sentence: this message alone marks it as an error.
  */
@@ -156,49 +155,11 @@ export const openServer = Effect.fn("openServer")(function* (
       Effect.asVoid,
     );
 
-  /** Stores `entries` and wakes the recipient of each one it may read. */
-  const deliver = (entries: Parameters<typeof database.store>[0]) =>
-    Effect.zipRight(
-      database.store(entries),
-      Effect.forEach(
-        entries.filter((entry) => entry.allowed),
-        ({ message }) => PubSub.publish(readable, message.recipient),
-        { concurrency: 1, discard: true },
-      ),
-    );
-
   /**
-   * The firewall's reply to a message it withheld, as a message from the
-   * server agent that answers it. There is none when the firewall gave no
-   * reply or its text cannot be a message.
-   */
-  const replyTo = (
-    withheld: Message,
-    reply?: { readonly text: string; readonly record: CheckRecord },
-  ) =>
-    reply === undefined
-      ? Effect.succeed([])
-      : Message.create({
-          author: name,
-          recipient: withheld.author,
-          text: reply.text,
-          replyToMsgId: withheld.msgId,
-        }).pipe(
-          Effect.map((message) => [
-            { message, allowed: true, record: reply.record },
-          ]),
-          Effect.orElseSucceed(() => []),
-        );
-
-  /**
-   * Sends one message in `client`'s conversation, from the server agent when
-   * `author` is its name and from the client otherwise. A check reads the
-   * conversation's earlier messages, so the conversation's lock is held from
-   * that read until the message is stored, while other conversations do not
-   * wait. No transaction is open while a check runs. A refused message fails
-   * the send and is not stored. A withheld message is stored where the
-   * server agent does not read it, in one transaction with the firewall's
-   * reply to its sender.
+   * A check reads the conversation's earlier messages, so the conversation's
+   * lock is held from that read until the message is stored, while other
+   * conversations do not wait. No transaction is open while a check runs. A
+   * refused message is not stored.
    */
   const send = Effect.fn("send")(
     function* (
@@ -239,14 +200,8 @@ export const openServer = Effect.fn("openServer")(function* (
           detail: decision.detail,
         });
       }
-      yield* deliver(
-        decision.kind === "allowed"
-          ? [{ message, allowed: true, record: decision.record }]
-          : [
-              { message, allowed: false, record: decision.record },
-              ...(yield* replyTo(message, decision.reply)),
-            ],
-      );
+      yield* database.store(message, decision.record);
+      yield* PubSub.publish(readable, message.recipient);
       return { id: message.msgId };
     },
     Effect.scoped,
@@ -262,10 +217,7 @@ export const openServer = Effect.fn("openServer")(function* (
       ),
   );
 
-  /**
-   * The server agent's inbox holds the messages its firewall allowed from
-   * every client; a client's holds the server agent's messages to it.
-   */
+  /** The server agent's inbox holds every client's messages; a client's holds the server agent's messages to it. */
   const inbox = Effect.fn("readInbox")(function* (
     reader: AgentName,
     { limit, cursor }: { readonly limit: number; readonly cursor?: string },
@@ -274,7 +226,7 @@ export const openServer = Effect.fn("openServer")(function* (
     const stored = yield* database.inbox(reader, from, limit + 1);
     const page = stored.slice(0, limit);
     return {
-      entries: page.flatMap(readBy(reader)),
+      entries: page.map(({ message }) => ({ message })),
       nextCursor: String(page.at(-1)?.sequence ?? from),
       hasMore: stored.length > limit,
     };
@@ -298,7 +250,6 @@ export const openServer = Effect.fn("openServer")(function* (
   }, Effect.scoped);
 
   const conversation = Effect.fn("historyRecords")(function* (
-    reader: AgentName,
     client: AgentName,
     cursor?: string,
   ) {
@@ -310,7 +261,7 @@ export const openServer = Effect.fn("openServer")(function* (
     const page = stored.slice(0, PAGE_SIZE);
     const last = page.at(-1);
     return {
-      records: page.flatMap(readBy(reader)),
+      records: page.map(({ message }) => ({ message })),
       ...(stored.length > PAGE_SIZE && last !== undefined
         ? { nextCursor: String(last.sequence) }
         : {}),
@@ -319,7 +270,7 @@ export const openServer = Effect.fn("openServer")(function* (
 
   const conversationWith = (client: AgentName, cursor?: string) =>
     Effect.gen(function* () {
-      const page = yield* conversation(name, client, cursor);
+      const page = yield* conversation(client, cursor);
       if (
         page.records.length === 0 &&
         (yield* database.conversation(client, 0, 1)).length === 0
@@ -348,10 +299,4 @@ export const openServer = Effect.fn("openServer")(function* (
 interface ReceiveRequest {
   readonly cursor?: string;
   readonly wait?: number;
-}
-
-/** What `reader` reads of a stored message: one it sent, and one it received unless that message was withheld. */
-function readBy(reader: AgentName) {
-  return ({ message, allowed }: StoredMessage): InboxEntry[] =>
-    allowed || message.author === reader ? [{ message }] : [];
 }

@@ -121,7 +121,6 @@ const normSchema = Schema.Struct({
       act: Schema.optional(name),
     }),
   ),
-  onRefusal: Schema.optional(name),
 });
 
 /** A compiled norm: data messages are checked against, with no code of its own. */
@@ -244,19 +243,6 @@ export function checkStructure(
     : Either.left(structural(failures.join(" ")));
 }
 
-/** An act as message text, with strings quoted as a norm document quotes them. */
-export function formatAct(act: Act): string {
-  const values: SExpression[] = [
-    { kind: "symbol", value: act.name },
-    { kind: "symbol", value: ":ontology" },
-    { kind: "symbol", value: act.norm },
-  ];
-  for (const [field, value] of Object.entries(act.fields)) {
-    values.push({ kind: "symbol", value: `:${field}` }, valueExpression(value));
-  }
-  return writeSExpression({ kind: "list", values });
-}
-
 /**
  * Reads every expression of `source`. A document may carry `;` comments; a
  * reader of a message passes `comments` false, so that every token of the
@@ -285,22 +271,6 @@ export function readSExpressions(
   return stack.length === 1
     ? Either.right(roots)
     : Either.left({ offset, detail: "An opening parenthesis is not closed." });
-}
-
-/** The text of one expression, with strings quoted as JSON, which `readSExpressions` reads back. */
-function writeSExpression(value: SExpression): string {
-  switch (value.kind) {
-    case "symbol":
-      return value.value;
-    case "string":
-      return JSON.stringify(value.value);
-    case "list":
-      return `(${value.values.map((item) => writeSExpression(item)).join(" ")})`;
-    default: {
-      const exhaustive: never = value;
-      return exhaustive;
-    }
-  }
 }
 
 /** Whether `value` has the type of `field` and lies within its bounds. A string's length counts code points. */
@@ -400,19 +370,6 @@ function readValue(
   return Number.isFinite(Number(node.value))
     ? Either.right(Number(node.value))
     : Either.left(structural("Numbers must be finite."));
-}
-
-function valueExpression(value: Act["fields"][string]): SExpression {
-  if (typeof value === "string") {
-    return { kind: "string", value };
-  }
-  if (typeof value === "number") {
-    return { kind: "symbol", value: String(value) };
-  }
-  return {
-    kind: "list",
-    values: value.map((choice) => ({ kind: "string", value: choice })),
-  };
 }
 
 function structural(detail: string, field?: string): NormProblem {

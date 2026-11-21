@@ -27,16 +27,14 @@ applicable English rules.
 
 A continuation's reply reference must belong to the active instance. A
 reference from an ended instance cannot change or end a later instance
-in the same conversation. Withheld messages retain their reference ancestry
-for correction replies without advancing protocol state. An unreferenced
-withheld message does not establish membership in the active instance.
+in the same conversation.
 
 ## Decisions
 
 Applicable text rules judge messages that remain eligible after structural,
 and protocol checks. Checks capture the active
-rules. A reject or hold judgment refuses an outgoing send or withholds an
-incoming message. Findings combine in priority order:
+rules. A reject or hold judgment refuses the message, whichever agent sent
+it: the send fails. Findings combine in priority order:
 
 1. A settled rule violation rejects.
 2. Required missing evidence, unavailable checks or an unsure answer hold.
@@ -62,11 +60,11 @@ as its peer sender's.
 An answer is unsure if its probability is below `minimumProbability` or lower
 than the other answer's.
 
-| Answer | Outgoing draft | Incoming message |
-| --- | --- | --- |
-| Settled violation | Refused, with the rule's feedback | Withheld; a `reply` rule answers the sender |
-| Settled compliant | Sent | Allowed |
-| Unsure | Held as unresolved evidence and refused with the rule's feedback, so the agent can revise it | Withheld as unresolved evidence |
+| Answer | Outgoing draft or incoming message |
+| --- | --- |
+| Settled violation | Refused, with the rule's feedback |
+| Settled compliant | Allowed |
+| Unsure | Held as unresolved evidence and refused with the rule's feedback, so its sender can revise it |
 
 Settled violations retain
 their effect. Invalid output or provider failure is unavailable; required
@@ -75,13 +73,10 @@ accuracy of its checks in any language.
 
 ## Incoming messages
 
-Allowed peer content reaches the host unchanged.
-
-A text rule whose `action` is `reply` answers each message it withholds for a
-rule violation: the sender receives the rule's registered feedback text.
-A reply is an ordinary message from this agent to the conversation of the
-withheld message, sent once for that message. A message withheld for unresolved evidence
-gets no reply, and `deny`, the default, withholds silently.
+Allowed peer content reaches the host unchanged. A refused peer message is
+not stored and the agent never reads it. Its sender's send fails with the same
+refusal an outgoing draft gets, so the peer reads the feedback of the rules
+its message broke.
 
 ## Outgoing messages
 
@@ -112,12 +107,8 @@ private context are excluded. `earlierHistoryOmitted` alone causes no hold.
 Exceeding the
 history window's separate 2 MiB budget creates an evidence gap. Required
 missing evidence holds. Installed structured
-contracts separately receive the complete preceding history with the time and
-decision of each local check, outside the bounded history window.
-
-The firewall may use earlier messages it withheld or blocked when checking a
-new message. Their content remains private, as though the agent had not seen
-it.
+contracts separately receive the complete preceding history with the time of
+each local check, outside the bounded history window.
 
 Rules needing other conversations, older messages or owner instructions
 elsewhere require separately supplied evidence.
@@ -145,8 +136,7 @@ The settings file's `messagePolicyFile` names a JSON file.
 | `id` | Required. |
 | `text` | Required. |
 | `applies` | Required: `incoming`, `outgoing` or `both`. |
-| `feedback` | Optional. |
-| `action` | Optional: `deny` or `reply`. |
+| `feedback` | Optional: what the sender of a message that breaks the rule reads. |
 
 Duplicate ids prevent startup.
 
@@ -162,8 +152,7 @@ remain unavailable checks.
 ## Decision reasons
 
 The decision feed gives
-the `decision`: `allowed` or `refused` for a message the agent sent, `allowed`
-or `withheld` for one it received. `checkedRuleIds` lists the rules the check
+the `decision`: `allowed` or `refused`. `checkedRuleIds` lists the rules the check
 judged; a rule that does not apply to the message, by its direction, is not listed.
 Outgoing checks produce one row for the recipient captured before
 the check, including refused first messages without a conversation. Incoming

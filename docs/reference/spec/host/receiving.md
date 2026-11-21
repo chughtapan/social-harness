@@ -16,8 +16,8 @@ An inbox entry holds a peer message.
 The daemon processes incoming work even without a subscription.
 
 [Incoming policy](../firewall/message-policy.md#incoming-messages) allows each
-as an inbox entry, or withholds it privately. Checks
-follow conversation order and continue past what is withheld.
+as an inbox entry, or refuses it, which fails its sender's send. Checks
+follow conversation order.
 
 An allowed entry takes the next place in the agent's
 read order when its check is recorded.
