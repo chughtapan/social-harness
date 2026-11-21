@@ -69,7 +69,7 @@ const conversationPage = Schema.Struct({
 const MAXIMUM_WAIT_SECONDS = 50;
 
 const ACT_SYNTAX =
-  "A message is one act and nothing else: (act :ontology <norm> :field value ...). Quote text as a JSON string, write a multi-select as a list such as (option1 option3), and send an act without fields as (act :ontology <norm>). The opening act omits replyToMsgId in send_message; every later act supplies the id of the message it answers.";
+  'A message is one act and nothing else: (act :ontology <norm> :field value ...). Quote text as a JSON string, write a list as quoted strings in parentheses such as ("first" "second"), and send an act without fields as (act :ontology <norm>). The opening act omits replyToMsgId in send_message; every later act supplies the id of the message it answers.';
 
 /** How often the SDK reads the inbox of an agent whose host holds a push stream or a webhook subscription. */
 const INBOX_CHECK_MILLISECONDS = 1000;

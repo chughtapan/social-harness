@@ -20,7 +20,8 @@ export class NormsConfigurationError extends Data.TaggedError(
 /**
  * The norms a server holds: the structure check that holds each message to
  * them, each norm's document as an agent reads it, and whether any describes
- * a string field, which gives it a text rule that needs a decision provider.
+ * a string or list field, which gives it a text rule that needs a decision
+ * provider.
  */
 export interface HeldNorms {
   readonly structureCheck: StructureCheck;

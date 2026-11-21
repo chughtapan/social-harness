@@ -82,11 +82,11 @@ conversation may contain, which of `client` and `server` sends each, in what
 order, and what each field holds; the
 [norm grammar](https://github.com/chughtapan/social-harness/blob/next/docs/reference/spec/norms/norms.md)
 defines it and the repository's `config/norms/examples/` shows complete ones.
-The server enforces them on both sides, your server agent included. A string
-field's description is enforced too: a model judges that the field holds what
-the description says and nothing else, so write each description as exactly
-what belongs in the field. Described string fields need `decisionProvider` in
-the settings, and its key. Clients read every norm whole, and a refused
+The server enforces them on both sides, your server agent included. The
+description of a string or list field is enforced too: a model judges that
+the field holds what the description says and nothing else, so write each
+description as exactly what belongs in the field. Described fields need
+`decisionProvider` in the settings, and its key. Clients read every norm whole, and a refused
 message's sender is told what did not fit, so put nothing in a norm that a
 client should not read.
 

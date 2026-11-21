@@ -31,7 +31,7 @@ interface Declaration {
 const attributes: Readonly<Record<string, readonly string[]>> = {
   string: [":min-length", ":max-length"],
   integer: [":minimum", ":maximum"],
-  "multi-select": [":choices", ":min-items", ":max-items"],
+  list: [":min-items", ":max-items"],
 };
 
 /** The norm `source` declares. Its digest names the exact document bytes both members read. */
@@ -162,54 +162,25 @@ function compileRelation(form: Declaration) {
 
 type Source = MessageForm["relations"][number]["source"];
 
+/** A value source: `(previous act field)`, the field of an earlier act. */
 function compileSource(node: SExpression): Compiled<Source> {
-  return Either.gen(function* () {
-    if (node.kind !== "list") {
-      return yield* Either.left(
-        "A value source is a previous field, present fields, or selected values.",
-      );
-    }
-    const [head, act, ...rest] = node.values;
-    if (act === undefined) {
-      return yield* Either.left("An act reference names one act or one fact.");
-    }
-    const name = yield* compileActReference(act);
-    if (
-      atom(head) === "previous" &&
-      rest.length === 1 &&
-      atom(rest[0]) !== undefined
-    ) {
-      return { kind: "field", act: name, field: atom(rest[0]) ?? "" };
-    }
-    if (atom(head) === "present") {
-      return {
-        kind: "present",
-        act: name,
-        fields: yield* names({ kind: "list", values: rest }),
-      };
-    }
-    if (atom(head) === "values") {
-      if (rest.length === 1 && rest[0]?.kind === "list") {
-        const keys = yield* compileSource(rest[0]);
-        if (keys.kind === "field") {
-          return { kind: "values", act: name, keys };
-        }
-      } else {
-        const [first, ...others] = yield* names({ kind: "list", values: rest });
-        if (first !== undefined) {
-          return {
-            kind: "field-values",
-            act: name,
-            fields: [first, ...others],
-          };
-        }
-      }
-    }
-    return yield* Either.left("Invalid value source.");
-  });
+  const [head, act, field, ...rest] = node.kind === "list" ? node.values : [];
+  const named = atom(field);
+  if (
+    atom(head) !== "previous" ||
+    act === undefined ||
+    named === undefined ||
+    rest.length !== 0
+  ) {
+    return Either.left("A value source is (previous act field).");
+  }
+  return Either.map(compileActReference(act), (reference) => ({
+    act: reference,
+    field: named,
+  }));
 }
 
-/** Relations may read the same fields from alternative forms of a referenced exchange. */
+/** A fact names every act that sets it, so a relation may read the same field from alternative forms. */
 function compileActReference(node: SExpression): Compiled<Source["act"]> {
   if (node.kind === "list" && atom(node.values[0]) === "fact") {
     const fact = atom(node.values[1]);
@@ -261,21 +232,11 @@ function compileField(form: Declaration) {
         "A field cannot redefine envelope metadata or contain child declarations.",
       );
     }
-    const choices = yield* names(form.attributes.get(":choices"));
-    if (
-      type === "multi-select" &&
-      (choices.length === 0 || new Set(choices).size !== choices.length)
-    ) {
-      return yield* Either.left(
-        "Choice fields need distinct, nonempty :choices.",
-      );
-    }
     const description = atom(form.attributes.get(":description"));
     return {
       name: form.name,
       optional: yield* booleanAttribute(form, ":optional"),
       type,
-      ...(type === "multi-select" ? { choices } : {}),
       ...(yield* readBounds(form)),
       ...(description === undefined ? {} : { description }),
     };
@@ -522,73 +483,39 @@ function anchored(norm: Norm, delay: NonNullable<MessageForm["delay"]>) {
   );
 }
 
+/**
+ * Whether a relation's field and its source field are declared, on every act
+ * the source may name, with the types its operator relates: `equals` two
+ * fields of one type, `member` a string to a list, `subset` two lists.
+ */
 function validateRelation(
   form: MessageForm,
-  relation: MessageForm["relations"][number],
+  { operator, field, source }: MessageForm["relations"][number],
   forms: ReadonlyMap<string, MessageForm>,
 ): Either.Either<void, string> {
-  const candidate = fieldOf(form, relation.field);
-  if (candidate === undefined) {
+  const candidate = fieldOf(form, field)?.type;
+  const sources = referenceNames(source.act, forms).map((act) => {
+    const target = forms.get(act);
+    return target && fieldOf(target, source.field)?.type;
+  });
+  if (
+    candidate === undefined ||
+    sources.length === 0 ||
+    sources.includes(undefined)
+  ) {
     return Either.left("A relation refers to undeclared acts or fields.");
   }
-  if (relation.operator === "subset" && candidate.type !== "multi-select") {
-    return Either.left("A subset relation requires a list field.");
-  }
-  const targets = referenceNames(relation.source.act, forms);
-  if (targets.length === 0) {
-    return Either.left("A relation refers to an undeclared source.");
-  }
-  return Either.all(
-    targets.map((act) => {
-      const target = forms.get(act);
-      return target === undefined
-        ? Either.left("A relation refers to undeclared acts or fields.")
-        : validateSource(relation.source, target, forms);
-    }),
-  ).pipe(Either.map(() => undefined));
-}
-
-function validateSource(
-  source: Source,
-  target: MessageForm,
-  forms: ReadonlyMap<string, MessageForm>,
-): Either.Either<void, string> {
-  if (source.kind === "values") {
-    return validateSelectedValues(source.keys, target, forms);
-  }
-  const fields = source.kind === "field" ? [source.field] : source.fields;
-  if (fields.some((field) => fieldOf(target, field) === undefined)) {
-    return Either.left("A relation names an undeclared source field.");
-  }
-  return source.kind === "field-values" &&
-    fields.some((field) => fieldOf(target, field)?.type !== "string")
-    ? Either.left("Direct values require declared string fields.")
-    : Either.void;
-}
-
-function validateSelectedValues(
-  keys: Extract<Source, { readonly kind: "field" }>,
-  target: MessageForm,
-  forms: ReadonlyMap<string, MessageForm>,
-): Either.Either<void, string> {
-  const targets = referenceNames(keys.act, forms);
-  if (targets.length === 0) {
-    return Either.left("A relation refers to an undeclared source.");
-  }
-  for (const act of targets) {
-    const field = forms
-      .get(act)
-      ?.fields.find((declared) => declared.name === keys.field);
-    if (field?.type !== "multi-select") {
-      return Either.left(
-        "Selected values require a choice list of declared string field names.",
+  const expected = {
+    equals: [candidate, candidate],
+    member: ["string", "list"],
+    subset: ["list", "list"],
+  }[operator];
+  return candidate === expected[0] &&
+    sources.every((type) => type === expected[1])
+    ? Either.void
+    : Either.left(
+        "An equals relation holds a field to one of its type, a member relation a string to a list, and a subset relation a list to a list.",
       );
-    }
-    if (field.choices.some((key) => fieldOf(target, key)?.type !== "string")) {
-      return Either.left("Selected values name an undeclared string field.");
-    }
-  }
-  return Either.void;
 }
 
 function referenceNames(

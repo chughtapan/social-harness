@@ -25,7 +25,7 @@ const refused = (document: string) =>
 const fieldTypes = {
   string: ":type string :min-length 1",
   integer: ":type integer :maximum 9",
-  "multi-select": ":type multi-select :choices (one two) :max-items 2",
+  list: ":type list :max-items 2",
 } as const;
 
 /** The fields of an act's form: distinct names, each with a type and whether it is optional. */
@@ -34,11 +34,7 @@ const fields = fc.uniqueArray(
     name: fc
       .stringMatching(/^[a-z][a-z0-9-]{0,7}$/u)
       .filter((name) => name !== "ontology"),
-    type: fc.constantFrom<keyof typeof fieldTypes>(
-      "string",
-      "integer",
-      "multi-select",
-    ),
+    type: fc.constantFrom<keyof typeof fieldTypes>("string", "integer", "list"),
     optional: fc.boolean(),
   }),
   { selector: (field) => field.name, maxLength: 4 },
@@ -141,11 +137,30 @@ vitestIt.each([
     ":ends true)",
     ":ends true (relation equals absent (previous open absent)))",
   ],
+  [
+    "a field of the act a relation reads",
+    ":ends true)",
+    ":ends true (field copy :type string) (relation equals copy (previous open absent)))",
+  ],
 ])(
   "refuses a document that names %s it does not declare",
   (...[, declared, undeclared]) => {
     expect(sample).toContain(declared);
     expect(refused(sample.replace(declared, undeclared))).toBe(true);
+  },
+);
+
+vitestIt.each(["member", "subset"])(
+  "refuses a %s relation that holds a string to a string",
+  (operator) => {
+    expect(
+      refused(
+        sample.replace(
+          ":ends true)",
+          `:ends true (field copy :type string) (relation ${operator} copy (previous open topic)))`,
+        ),
+      ),
+    ).toBe(true);
   },
 );
 

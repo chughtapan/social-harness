@@ -137,15 +137,16 @@ function pass(view: ProtocolView, { act, norm, form }: FittedAct): Result {
   const named = { norm: norm.name, digest: norm.digest };
   return {
     kind: "passed",
-    textRules: describedFields(form).flatMap(({ name, description }) =>
-      Object.hasOwn(act.fields, name)
-        ? [
-            {
-              id: `${norm.name}.${act.name}.${name}`,
-              text: `${name} must hold what its description says and nothing else: ${description}`,
-            },
-          ]
-        : [],
+    textRules: describedFields(form).flatMap(
+      ({ name, subject, description }) =>
+        Object.hasOwn(act.fields, name)
+          ? [
+              {
+                id: `${norm.name}.${act.name}.${name}`,
+                text: `${subject} must hold what its description says and nothing else: ${description}`,
+              },
+            ]
+          : [],
     ),
     protocol: {
       ...named,
@@ -485,6 +486,7 @@ function related(
   }
 }
 
+/** The value a relation holds a field to: the source's field of the earlier act it names, which the reply chain must hold. An optional field the act left out settles nothing. */
 function sourceValue(
   instance: Instance,
   source: MessageForm["relations"][number]["source"],
@@ -495,41 +497,14 @@ function sourceValue(
   if (fields === undefined) {
     return Either.left(invalid);
   }
-  if (source.kind === "field") {
-    const value = fields[source.field];
-    return value === undefined
-      ? Either.left(
-          unavailable(
-            "A declared relation needs an earlier field that is missing.",
-          ),
-        )
-      : Either.right(value);
-  }
-  const present = (names: readonly string[]) =>
-    names.filter((field) => Object.hasOwn(fields, field));
-  if (source.kind === "present") {
-    return Either.right(present(source.fields));
-  }
-  const keys =
-    source.kind === "field-values"
-      ? Either.right(present(source.fields))
-      : sourceValue(instance, source.keys, ancestry, invalid);
-  return Either.flatMap(keys, (selected) => {
-    if (typeof selected !== "object") {
-      return Either.left(
-        unavailable("A selected-values relation needs a list of field names."),
-      );
-    }
-    const values = selected.flatMap((key) => {
-      const value = fields[key];
-      return typeof value === "string" ? [value] : [];
-    });
-    return values.length === selected.length
-      ? Either.right(values)
-      : Either.left(
-          unavailable("A selected value is missing or is not a string."),
-        );
-  });
+  const value = fields[source.field];
+  return value === undefined
+    ? Either.left(
+        unavailable(
+          "A declared relation needs an earlier field that is missing.",
+        ),
+      )
+    : Either.right(value);
 }
 
 function referencedAct(

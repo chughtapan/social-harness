@@ -101,7 +101,7 @@ const loadSettings = Effect.fn("loadSettings")(function* () {
       : yield* loadNorms(resolve(settingsDirectory, file.normsDirectory));
   if (norms?.hasTextRules === true && file.decisionProvider === undefined) {
     return yield* refused(
-      "The configured norms describe string fields, which need a decisionProvider to judge them",
+      "The configured norms describe string or list fields, which need a decisionProvider to judge them",
     );
   }
   const named = file.decisionProvider;

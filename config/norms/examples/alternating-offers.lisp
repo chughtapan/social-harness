@@ -3,27 +3,19 @@
 
 (content request-propose :by client :starts true :initiates offered
   (field topic :type string :min-length 1
-    :description "The meeting subject. Its duration and a broad timeframe such as next week are allowed; candidate times belong in the options.")
-  (field option1 :type string :min-length 1
-    :description "One candidate meeting slot: a date, start and end times, and a timezone.")
-  (field option2 :type string :min-length 1 :optional true
-    :description "One candidate meeting slot: a date, start and end times, and a timezone.")
-  (field option3 :type string :min-length 1 :optional true
+    :description "The meeting subject. Its duration and a broad timeframe such as next week are allowed; candidate times belong in options.")
+  (field options :type list :min-items 1 :max-items 3
     :description "One candidate meeting slot: a date, start and end times, and a timezone."))
 
 (content counter-propose :by (recipient (fact offered))
   :when offered :initiates offered
-  (field option1 :type string :min-length 1
-    :description "One candidate meeting slot: a date, start and end times, and a timezone.")
-  (field option2 :type string :min-length 1 :optional true
-    :description "One candidate meeting slot: a date, start and end times, and a timezone.")
-  (field option3 :type string :min-length 1 :optional true
+  (field options :type list :min-items 1 :max-items 3
     :description "One candidate meeting slot: a date, start and end times, and a timezone."))
 
 (content accept-proposal :by (recipient (fact offered))
   :when offered :terminates offered :initiates agreed
   (field slot :type string :min-length 1
     :description "One slot of the current offer, copied exactly.")
-  (relation member slot (values (fact offered) option1 option2 option3)))
+  (relation member slot (previous (fact offered) options)))
 
 (content cancel :by (client server) :ends true)

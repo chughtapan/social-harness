@@ -43,7 +43,7 @@ of thing.
 | --- | --- |
 | **firewall** | What holds every message of the server agent's conversations to the held norms when it is sent. |
 | **check** | One evaluation of one message against the held norms, identified by its **check id**. |
-| **text rule** | The requirement that a string field hold what its description says and nothing else, which the **decision provider** judges. |
+| **text rule** | The requirement that a string or list field hold what its description says and nothing else, which the **decision provider** judges. |
 | **decision provider** | The service that answers whether a message breaks a text rule. |
 | **decision** | What the firewall tells the daemon to do with a message, whichever member sent it: it is **allowed** or **refused**. |
 | **reason** | Why a check decided as it did: eligible, rule-violation or unresolved-evidence. A message whose check could not run is refused as check-unavailable. |

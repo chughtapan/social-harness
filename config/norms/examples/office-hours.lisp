@@ -6,17 +6,13 @@
     :description "The subject to discuss. Dates that belong to the subject are allowed; meeting times, availability and counteroffers are not."))
 (content propose :by server :when offer-due :max 2
   :terminates (offer-due decision-due) :initiates offered
-  (field option1 :type string :min-length 1 :max-length 120
-    :description "One meeting slot: a date, start and end times, and a timezone.")
-  (field option2 :type string :min-length 1 :max-length 120
-    :description "One meeting slot: a date, start and end times, and a timezone.")
-  (field option3 :type string :max-length 120 :optional true
+  (field options :type list :min-items 2 :max-items 3
     :description "One meeting slot: a date, start and end times, and a timezone."))
 (content accept-proposal :by client :when offered
   :terminates offered :initiates hold-due
-  (field available :type multi-select :choices (option1 option2 option3) :min-items 1
-    :description "Every offered option the client can attend, by field name from the latest offer.")
-  (relation subset available (present propose option1 option2 option3)))
+  (field available :type list :min-items 1
+    :description "An offered slot the client can attend, copied exactly from the latest offer.")
+  (relation subset available (previous propose options)))
 (content reject-proposal :by client :when offered
   :terminates offered :initiates offer-due)
 (content agree :by server :when hold-due
@@ -29,7 +25,7 @@
 (content confirm :by server :when decision-due :ends true
   (field slot :type string :max-length 120
     :description "The slot the server booked, copied exactly from the offer.")
-  (relation member slot (values propose (previous accept-proposal available))))
+  (relation member slot (previous accept-proposal available)))
 (content failure :by server :when open :ends true
   (field reason :type string :min-length 1 :max-length 300
     :description "Why this request cannot be completed or needs the professor's attention. It does not tell the client to start a new request to get around the offer limit."))

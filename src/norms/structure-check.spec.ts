@@ -349,16 +349,22 @@ it("refuses every text that is not an act of a held norm", () => {
   );
 });
 
-it("passes an act with one text rule for each described string field it states, which holds the field to its description", () => {
+it("passes an act with one text rule for each described string or list field it states, which holds the field to its description", () => {
   const described = normFrom(`
 (norm described)
 (content ask :by client :starts true :ends true
   (field topic :type string :description "The subject.")
+  (field slots :type list :description "One slot.")
   (field note :type string :optional true :description "A short note.")
   (field plain :type string :optional true)
   (field count :type integer :optional true :description "How many."))
 `);
-  const ask = actText("ask", "described", { topic: "x", plain: "y", count: 2 });
+  const ask = actText("ask", "described", {
+    topic: "x",
+    slots: ["mon"],
+    plain: "y",
+    count: 2,
+  });
 
   expect(check(described, message(alice, ask))).toMatchObject({
     kind: "passed",
@@ -366,6 +372,10 @@ it("passes an act with one text rule for each described string field it states, 
       {
         id: "described.ask.topic",
         text: "topic must hold what its description says and nothing else: The subject.",
+      },
+      {
+        id: "described.ask.slots",
+        text: "each item of slots must hold what its description says and nothing else: One slot.",
       },
     ],
     protocol: { norm: "described", act: "ask" },
@@ -539,7 +549,7 @@ it("refuses a value another type of field is given", () => {
   const kinds = [
     { declaration: ":type string", value: "a" },
     { declaration: ":type integer", value: 1 },
-    { declaration: ":type multi-select :choices (a)", value: ["a"] },
+    { declaration: ":type list", value: ["a"] },
   ];
   for (const asked of kinds) {
     for (const given of kinds) {
@@ -590,23 +600,66 @@ it("reads any quoted string and counts its length in code points against its bou
   );
 });
 
-it("checks each selected item against the choices and their count against its bounds", () => {
+it("holds a list to nonempty items and their count to its bounds", () => {
   fc.assert(
     fc.property(
-      fc.array(fc.constantFrom("a", "b", "x"), { maxLength: 5 }),
+      fc.array(fc.constantFrom("a", "b", ""), { maxLength: 5 }),
       fc.integer({ min: 0, max: 3 }),
       fc.integer({ min: 0, max: 3 }),
-      (selected, minItems, span) => {
+      (items, minItems, span) => {
         const maxItems = minItems + span;
         expect(
           accepted(
-            `:type multi-select :choices (a b) :min-items ${minItems} :max-items ${maxItems}`,
-            selected,
+            `:type list :min-items ${minItems} :max-items ${maxItems}`,
+            items,
           ),
         ).toBe(
-          selected.length >= minItems &&
-            selected.length <= maxItems &&
-            !selected.includes("x"),
+          items.length >= minItems &&
+            items.length <= maxItems &&
+            !items.includes(""),
+        );
+      },
+    ),
+  );
+});
+
+/** The client offers slots, the server keeps some of them, and the client picks one of those kept. */
+const picking = normFrom(`
+(norm picking)
+(content offer :by client :starts true :initiates offered
+  (field slots :type list :min-items 1))
+(content keep :by server :when offered :initiates kept
+  (field slots :type list :min-items 1)
+  (relation subset slots (previous offer slots)))
+(content pick :by client :when kept :ends true
+  (field slot :type string)
+  (relation member slot (previous (fact kept) slots)))
+`);
+
+it("holds a list to a subset of an earlier list, and a string to one of an earlier list's items", () => {
+  const item = fc.constantFrom("mon", "tue", "wed");
+  fc.assert(
+    fc.property(
+      fc.array(item, { minLength: 1, maxLength: 3 }),
+      fc.array(item, { minLength: 1, maxLength: 3 }),
+      item,
+      (offered, kept, picked) => {
+        const history: CheckedMessage[] = [];
+        const send = (author: AgentName, text: string) =>
+          attempt(picking, history, {
+            author,
+            text,
+            now: 1,
+            reply: Option.fromNullable(history.at(-1)?.message.msgId),
+          });
+
+        send(alice, actText("offer", "picking", { slots: offered }));
+        const within = kept.every((slot) => offered.includes(slot));
+        expect(send(bob, actText("keep", "picking", { slots: kept }))).toBe(
+          within,
+        );
+        expect(send(alice, actText("pick", "picking", { slot: picked }))).toBe(
+          within && kept.includes(picked),
         );
       },
     ),

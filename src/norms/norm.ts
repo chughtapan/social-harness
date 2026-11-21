@@ -15,7 +15,7 @@ const bound = Schema.optionalWith(Schema.Number.pipe(Schema.finite()), {
   exact: true,
 });
 
-/** What every field carries. A description says what the field holds, and a decision provider judges the text of a string field against it. */
+/** What every field carries. A description says what the field holds, and a decision provider judges the text of a string or list field against it. */
 const described = {
   name,
   optional: Schema.Boolean,
@@ -23,8 +23,8 @@ const described = {
 };
 
 /**
- * One field of a form: a string, an integer or a selection of several listed
- * strings, with its bounds. An act must state it unless it is optional.
+ * One field of a form: a string, an integer or a list of nonempty strings,
+ * with its bounds. An act must state it unless it is optional.
  */
 const fieldSchema = Schema.Union(
   Schema.Struct({
@@ -41,36 +41,12 @@ const fieldSchema = Schema.Union(
   }),
   Schema.Struct({
     ...described,
-    type: Schema.Literal("multi-select"),
-    choices: Schema.Array(Schema.String),
+    type: Schema.Literal("list"),
     minItems: bound,
     maxItems: bound,
   }),
 );
 
-const fieldSource = Schema.Struct({
-  kind: Schema.Literal("field"),
-  act: actReference,
-  field: name,
-});
-const sourceSchema = Schema.Union(
-  fieldSource,
-  Schema.Struct({
-    kind: Schema.Literal("present"),
-    act: actReference,
-    fields: names,
-  }),
-  Schema.Struct({
-    kind: Schema.Literal("values"),
-    act: actReference,
-    keys: fieldSource,
-  }),
-  Schema.Struct({
-    kind: Schema.Literal("field-values"),
-    act: actReference,
-    fields: Schema.NonEmptyArray(name),
-  }),
-);
 const formSchema = Schema.Struct({
   act: name,
   by: Schema.Union(
@@ -89,7 +65,7 @@ const formSchema = Schema.Struct({
     Schema.Struct({
       operator: Schema.Literal("equals", "member", "subset"),
       field: name,
-      source: sourceSchema,
+      source: Schema.Struct({ act: actReference, field: name }),
     }),
   ),
 });
@@ -97,7 +73,10 @@ const formSchema = Schema.Struct({
 /**
  * The form of one performative: its fields, which members may send it, and
  * the facts it needs, sets and clears. `by` lists roles, or names a fact
- * whose message's recipient is the one member that may send the act.
+ * whose message's recipient is the one member that may send the act. A
+ * relation holds a field to a field of an earlier act: equal to it, a member
+ * of its list or a subset of its list. The earlier act is the latest of a
+ * name, or the one that set a fact.
  */
 export type MessageForm = typeof formSchema.Type;
 
@@ -115,14 +94,21 @@ const normSchema = Schema.Struct({
 
 /**
  * The fields of `form` whose text a decision provider judges: the string
- * fields that have a description. A field of another type is held by its
- * bounds or choices alone.
+ * and list fields that have a description, each with what the description
+ * holds to it. An integer is held by its bounds alone.
  */
 export function describedFields(form: MessageForm) {
   return form.fields.flatMap((field) =>
-    field.type === "string" && field.description !== undefined
-      ? [{ name: field.name, description: field.description }]
-      : [],
+    field.type === "integer" || field.description === undefined
+      ? []
+      : [
+          {
+            name: field.name,
+            subject:
+              field.type === "list" ? `each item of ${field.name}` : field.name,
+            description: field.description,
+          },
+        ],
   );
 }
 
@@ -288,10 +274,10 @@ function accepts(
         Number.isInteger(value) &&
         within(value, field.minimum, field.maximum)
       );
-    case "multi-select":
+    case "list":
       return (
         typeof value === "object" &&
-        value.every((choice) => field.choices.includes(choice)) &&
+        value.every((item) => item !== "") &&
         within(value.length, field.minItems, field.maxItems)
       );
     default: {
@@ -360,7 +346,7 @@ function readValue(
     );
     return choices.length === node.values.length
       ? Either.right(choices)
-      : Either.left(structural("A list field contains scalar choices."));
+      : Either.left(structural("A list holds strings, not lists."));
   }
   if (!/^-?(?:0|[1-9]\d*)(?:\.\d+)?(?:[eE][+-]?\d+)?$/u.test(node.value)) {
     return Either.right(node.value);

@@ -101,15 +101,15 @@ reply chain is valid. The selector never supplies or changes `replyToMsgId`.
 ### Fields
 
 Fields are required unless `:optional true`. `:description` says what a
-field holds, and for a string field it is also the field's
-[text rule](#text-rules). Only the following primitive shapes and constraints
-are supported:
+field holds, and for a string or list field it is also the field's
+[text rule](#text-rules). Only the following shapes and constraints are
+supported:
 
-| Type | Constraints |
-| --- | --- |
-| `string` | Optional `:min-length` and `:max-length`. |
-| `integer` | Optional inclusive `:minimum` and `:maximum`. |
-| `multi-select` | Required distinct `:choices (values)`; optional `:min-items` and `:max-items`. |
+| Type | Holds | Constraints |
+| --- | --- | --- |
+| `string` | Text. | Optional `:min-length` and `:max-length`. |
+| `integer` | A whole number. | Optional inclusive `:minimum` and `:maximum`. |
+| `list` | Nonempty strings. | Optional `:min-items` and `:max-items`. |
 
 Bounds must be ordered. Length and item bounds are nonnegative integers.
 Every message field must be declared. `ontology` is reserved metadata;
@@ -117,50 +117,45 @@ Every message field must be declared. `ontology` is reserved metadata;
 
 ### Relations to preceding messages
 
-A form can constrain a field of the message under check through `(relation operator field source)`.
-`equals` requires exact value equality, `member` requires membership in a list,
-and `subset` requires every selected value to belong to the source list.
-Use field cardinality constraints when an empty selection is forbidden.
+A form can hold a field of the message under check to a field of an earlier
+act through `(relation operator field (previous act field))`:
 
-Sources follow the supplied `replyToMsgId` and its preceding reply chain, using
-the nearest allowed occurrence of the named act in that exchange:
+| Operator | The field | The earlier field |
+| --- | --- | --- |
+| `equals` | Has exactly its value. | A field of the same type. |
+| `member` | A string that is one of its items. | A list. |
+| `subset` | A list whose every item is one of its items. | A list. |
 
 ```lisp
 (relation equals slot (previous propose slot))
-(relation subset available (present propose option1 option2 option3))
-(relation member slot (values propose (previous accept-proposal available)))
-(relation member slot (values (fact offered) option1 option2 option3))
+(relation subset available (previous propose options))
+(relation member slot (previous (fact offered) options))
 ```
 
-`previous` reads a field. `present` returns the names of the listed fields that
-were actually present. `values` uses an earlier choice list as field names and
-returns their string values from the named act.
-
-With explicit field names, `values` returns the string values of the fields
-present in the selected message; omitted optional fields contribute no value.
-Every listed field must be declared as a string in every possible source form.
-`(fact offered)` names the message that
-established the current `offered` fact. That message must be in the supplied
-reply chain. Re-establishing the fact replaces its values, so an old offer cannot
-authorize a selection after replacement. Every form that establishes the fact
-must declare the source fields. This source constraint does not change general
-`:when` conditions, which remain instance-wide. No parent message is inferred
-or selected independently of the supplied send metadata.
+The earlier act is found along the supplied `replyToMsgId` and its preceding
+reply chain. An act name selects the nearest allowed occurrence of that act
+in the chain. `(fact offered)` selects the message that established the
+current `offered` fact, which must be in the chain. Re-establishing the fact
+replaces its values, so an old offer cannot authorize a selection after
+replacement, and every form that establishes the fact must declare the
+earlier field. A relation does not change `:when` conditions, which remain
+instance-wide. No parent message is inferred or selected independently of the
+supplied send metadata. Use `:min-items` when an empty list is forbidden.
 
 ### Text rules
 
-The description of a string field is its text rule. When an act states a
-described string field, the decision provider judges whether the field holds
-what its description says and nothing else. A document declares no other
-rule and no feedback: the sender of an act that breaks a description reads
-the field's name and that description.
+The description of a string or list field is its text rule. When an act
+states a described field, the decision provider judges whether the field
+holds what its description says and nothing else. A list's description says
+what each of its items holds. A document declares no other rule and no
+feedback: the sender of an act that breaks a description reads the field's
+name and that description.
 
 Write a description as what the field holds, such as "One meeting slot: a
 date, start and end times, and a timezone." Anything else in the field breaks
 the rule, so a description need not list unrelated instructions or prompt
-injection. A string field without a description is not judged. A field of
-another type is held by its bounds or choices alone, and its description only
-explains it.
+injection. A field without a description is not judged. An integer is held by
+its bounds alone, and its description only explains it.
 
 The provider judges the act using which member sent it, the preceding bounded
 conversation, the declared form, the current facts and the norm description.
@@ -186,7 +181,8 @@ Supply the referenced message id separately as `replyToMsgId` in the send input.
 Opening acts may omit it; continuations require it. No reference is inferred.
 
 Parameter names must be distinct. Metadata values are strings or symbols.
-Field values retain their declared primitive types. Lists carry choice strings.
+Field values retain their declared types. A list is written in parentheses:
+`:options ("Mon 10:00" "Tue 14:00")`.
 Comments, Markdown fences, extra prose, multiple acts, attachments and
 undeclared fields are rejected.
 

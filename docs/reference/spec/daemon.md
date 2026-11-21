@@ -38,7 +38,7 @@ The settings file is a JSON document that takes these properties. Unknown proper
 | `host` | Required listener address |
 | `authentication` | Required: the OAuth configuration below, or `"development"` |
 | `serverAgent` | Required `name` and `subject` of the [server agent](./modes.md#server-agent-and-clients) |
-| `normsDirectory` | Optional [norms directory](./norms/norms.md#scope-and-installation), resolved relative to the settings file. Norms that describe a string field need `decisionProvider` |
+| `normsDirectory` | Optional [norms directory](./norms/norms.md#scope-and-installation), resolved relative to the settings file. Norms that describe a string or list field need `decisionProvider` |
 | `decisionProvider` | Optional [decision provider](./firewall.md#decision-provider) that judges the norms' text rules |
 | `maximumHistoryRecords` | Default 256; [window bounds](./firewall.md#available-history). |
 

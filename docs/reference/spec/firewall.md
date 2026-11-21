@@ -30,8 +30,8 @@ A check has two parts, in order:
    its form and its place in the conversation's protocol. It refuses a
    message that fails either.
 2. The decision provider judges the text rules of an act that passed: one
-   rule for each [described string field](./norms/norms.md#text-rules) the
-   act states.
+   rule for each [described string or list field](./norms/norms.md#text-rules)
+   the act states.
 
 A continuation's reply reference must belong to the active instance. A
 reference from an ended instance cannot change or end a later instance
@@ -145,7 +145,7 @@ rules:
 | `timeoutMilliseconds` | Default 15000: the time all of one check's requests to the provider may take together. |
 | `maximumConcurrentChecks` | From 1 to 32, default 4: how many checks ask the provider at once. |
 
-Norms that describe a string field need `decisionProvider`, and the daemon
+Norms that describe a string or list field need `decisionProvider`, and the daemon
 refuses to start without it. Without `decisionProvider`, no provider or key
 is used. A check asks the provider again twice after a failure that may pass,
 such as a rate limit, and is unavailable when no attempt answers within the
