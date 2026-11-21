@@ -14,10 +14,11 @@ import {
   FastCheck as fc,
   Fiber,
   Order,
+  Schema,
   Struct,
 } from "effect";
 import { expect } from "vitest";
-import type { DecisionProvider } from "./decision-provider.js";
+import type { DecisionProvider, DecisionRequest } from "./decision-provider.js";
 import type { Firewall, MessagePolicy } from "./firewall.js";
 import { openTestDatabase } from "../tests/support/database.js";
 import { answersTo } from "../tests/support/decision-provider.js";
@@ -27,12 +28,17 @@ import {
   send,
   type SignedIn,
 } from "../tests/support/host.js";
-import {
-  decisionState,
-  inProcessServer,
-} from "../tests/support/in-process-server.js";
+import { inProcessServer } from "../tests/support/in-process-server.js";
 import { prepareTables } from "./database.js";
 import { holdNorms } from "./norms/index.js";
+
+/** The text of the message a provider is asked to judge. */
+const candidateText = (request: DecisionRequest) =>
+  Schema.decodeUnknownSync(
+    Schema.parseJson(
+      Schema.Struct({ candidate: Schema.Struct({ text: Schema.String }) }),
+    ),
+  )(request.state).candidate.text;
 
 /** A firewall that allows every message a client sends and decides each of the server agent's with `decide`. */
 const decidingOutgoing = (
@@ -252,9 +258,7 @@ const privateViolation: DecisionProvider = {
       answersTo(
         request,
         {},
-        decisionState(request.state).candidate.text === "private"
-          ? "violation"
-          : "compliant",
+        candidateText(request) === "private" ? "violation" : "compliant",
       ),
     ),
 };
@@ -305,7 +309,7 @@ it("checks the messages of one conversation in order while another conversation 
       policy: policy({
         decide: (request) =>
           Effect.gen(function* () {
-            const { text } = decisionState(request.state).candidate;
+            const text = candidateText(request);
             assessed.push(text);
             if (text === "First") {
               yield* Deferred.succeed(entered, undefined);

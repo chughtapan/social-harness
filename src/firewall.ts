@@ -19,15 +19,8 @@ import { AgentName, type Message } from "./messages.js";
 
 const identifier = Schema.NonEmptyTrimmedString;
 
-/** Operational holds remain distinct from a settled rule violation. */
-const firewallRefusalReasonSchema = Schema.Literal(
-  "rule-violation",
-  "unresolved-evidence",
-  "check-unavailable",
-);
-
-/** Why the firewall refused a message. */
-export type FirewallRefusalReason = typeof firewallRefusalReasonSchema.Type;
+/** Why the firewall refused a message: it broke a rule, left one unsettled, or its check could not run. */
+export type FirewallRefusalReason = Refusal["reason"] | "check-unavailable";
 
 /**
  * One text rule: the prose a decision provider judges and the feedback it
@@ -58,7 +51,7 @@ export const checkRecordSchema = Schema.Struct({
   decision: Schema.Literal("allowed", "refused"),
   time: Schema.NonNegativeInt,
   peer: AgentName,
-  reason: Schema.Union(Schema.Literal("eligible"), firewallRefusalReasonSchema),
+  reason: Schema.Literal("eligible", "rule-violation", "unresolved-evidence"),
   decidedBy: Schema.Array(
     Schema.Struct({
       ruleId: Schema.NonEmptyString,
@@ -169,7 +162,7 @@ interface Checked {
 
 /** What a check that refuses its message concluded. */
 interface Refusal extends Pick<CheckRecord, "decidedBy" | "checkedRuleIds"> {
-  readonly reason: "rule-violation" | "unresolved-evidence";
+  readonly reason: Exclude<CheckRecord["reason"], "eligible">;
   readonly rule?: string;
   readonly feedback: readonly string[];
   readonly detail?: StructureDetail;
@@ -266,7 +259,7 @@ function conclude(
   if (deciding.length === 0 && !asked.gap) {
     return {
       kind: "allowed",
-      record: recordOf(checked, mintCheckId(), "allowed", {
+      record: recordOf(checked, mintCheckId(), {
         reason: "eligible",
         decidedBy: [],
         checkedRuleIds,
@@ -293,7 +286,7 @@ function refused(checked: Checked, refusal: Refusal): Refused {
     kind: "refused",
     checkId,
     ...Struct.pick(refusal, "reason", "rule", "feedback", "detail"),
-    record: recordOf(checked, checkId, "refused", refusal),
+    record: recordOf(checked, checkId, refusal),
   };
 }
 
@@ -312,13 +305,12 @@ function unavailable(detail?: StructureDetail): Refused {
 function recordOf(
   { message, direction, now }: Checked,
   checkId: string,
-  decision: CheckRecord["decision"],
   concluded: Pick<CheckRecord, "reason" | "decidedBy" | "checkedRuleIds">,
 ): CheckRecord {
   return {
     checkId,
     direction,
-    decision,
+    decision: concluded.reason === "eligible" ? "allowed" : "refused",
     time: now,
     peer: direction === "outgoing" ? message.recipient : message.author,
     ...Struct.pick(concluded, "reason", "decidedBy", "checkedRuleIds"),

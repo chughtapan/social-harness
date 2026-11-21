@@ -9,7 +9,7 @@ import {
   StreamableHTTPClientTransport,
 } from "@modelcontextprotocol/client";
 import { createMcpHandler } from "@modelcontextprotocol/server";
-import { Effect, Schema } from "effect";
+import { Effect } from "effect";
 import type { HeldNorms } from "../../src/norms/index.js";
 import {
   type Firewall,
@@ -27,16 +27,6 @@ const issuer = "urn:social-harness:test";
 
 /** The URL the SDK client addresses; no listener answers it. */
 const endpoint = new URL("http://127.0.0.1/mcp");
-
-/** What a provider reads of the message it judges. */
-export const decisionState = Schema.decodeUnknownSync(
-  Schema.parseJson(
-    Schema.Struct({
-      direction: Schema.Literal("incoming", "outgoing"),
-      candidate: Schema.Struct({ text: Schema.String }),
-    }),
-  ),
-);
 
 /**
  * A server whose server agent is named `alice` and owned by the owner

@@ -12,7 +12,7 @@ import type {
   FirewallRefusalReason,
   StructureDetail,
 } from "./firewall.js";
-import { openDatabase } from "./database.js";
+import { openDatabase, type StoredMessage } from "./database.js";
 import { type AgentName, Message, type MsgId } from "./messages.js";
 
 /** The most entries one read of an inbox or a conversation returns. */
@@ -129,7 +129,6 @@ class AddressError extends Data.TaggedError("AddressError")<{
  * Opens the server on the database at `url` until the scope closes: `name`
  * is its server agent, whose `firewall` checks every message sent.
  */
-// eslint-disable-next-line max-lines-per-function -- This function is the scope the operations share: the database, the firewall, the locks and the wake signal. Each function inside it is under the limit.
 export const openServer = Effect.fn("openServer")(function* (
   url: Redacted.Redacted,
   name: AgentName,
@@ -140,20 +139,6 @@ export const openServer = Effect.fn("openServer")(function* (
   const conversationLocks = new Map<AgentName, Effect.Semaphore>();
   /** Published with an agent's name each time a message becomes readable for it. */
   const readable = yield* PubSub.unbounded<AgentName>();
-
-  /** Holds `client`'s conversation until the scope closes. */
-  const lockConversation = (client: AgentName) =>
-    Effect.sync(() => {
-      const lock =
-        conversationLocks.get(client) ?? Effect.unsafeMakeSemaphore(1);
-      conversationLocks.set(client, lock);
-      return lock;
-    }).pipe(
-      Effect.flatMap((lock) =>
-        Effect.acquireReleaseInterruptible(lock.take(1), () => lock.release(1)),
-      ),
-      Effect.asVoid,
-    );
 
   /**
    * A check reads the conversation's earlier messages, so the conversation's
@@ -168,7 +153,7 @@ export const openServer = Effect.fn("openServer")(function* (
       sent: { readonly text: string; readonly replyToMsgId?: MsgId },
     ) {
       const outgoing = author === name;
-      yield* lockConversation(client);
+      yield* lockConversation(conversationLocks, client);
       const earlier = yield* database.conversation(client);
       if (outgoing && earlier.length === 0) {
         return yield* new AddressError({
@@ -205,16 +190,7 @@ export const openServer = Effect.fn("openServer")(function* (
       return { id: message.msgId };
     },
     Effect.scoped,
-    (effect, author) =>
-      Effect.tapError(effect, (error) =>
-        Effect.logWarning("Send failed").pipe(
-          Effect.annotateLogs({
-            agentName: author,
-            error: error._tag,
-            reason: error.message,
-          }),
-        ),
-      ),
+    logFailedSend,
   );
 
   /** The server agent's inbox holds every client's messages; a client's holds the server agent's messages to it. */
@@ -223,19 +199,17 @@ export const openServer = Effect.fn("openServer")(function* (
     { limit, cursor }: { readonly limit: number; readonly cursor?: string },
   ) {
     const from = Number(cursor ?? (yield* database.newest));
-    const stored = yield* database.inbox(reader, from, limit + 1);
-    const page = stored.slice(0, limit);
-    return {
-      entries: page.map(({ message }) => ({ message })),
-      nextCursor: String(page.at(-1)?.sequence ?? from),
-      hasMore: stored.length > limit,
-    };
+    const { entries, last, more } = pageOf(
+      yield* database.inbox(reader, from, limit + 1),
+      limit,
+    );
+    return { entries, nextCursor: String(last ?? from), hasMore: more };
   });
 
   /** The read subscribes before it reads, so a wait does not miss an entry that becomes readable after the read. */
   const receive = Effect.fn("receive")(function* (
     reader: AgentName,
-    { cursor, wait }: ReceiveRequest,
+    { cursor, wait }: Parameters<Server["receive"]>[1],
   ) {
     const woken = yield* PubSub.subscribe(readable);
     const page = yield* inbox(reader, { limit: PAGE_SIZE, cursor });
@@ -253,18 +227,13 @@ export const openServer = Effect.fn("openServer")(function* (
     client: AgentName,
     cursor?: string,
   ) {
-    const stored = yield* database.conversation(
-      client,
-      Number(cursor ?? 0),
-      PAGE_SIZE + 1,
+    const { entries, last, more } = pageOf(
+      yield* database.conversation(client, Number(cursor ?? 0), PAGE_SIZE + 1),
+      PAGE_SIZE,
     );
-    const page = stored.slice(0, PAGE_SIZE);
-    const last = page.at(-1);
     return {
-      records: page.map(({ message }) => ({ message })),
-      ...(stored.length > PAGE_SIZE && last !== undefined
-        ? { nextCursor: String(last.sequence) }
-        : {}),
+      records: entries,
+      ...(more && last !== undefined ? { nextCursor: String(last) } : {}),
     };
   });
 
@@ -296,7 +265,46 @@ export const openServer = Effect.fn("openServer")(function* (
   return server;
 });
 
-interface ReceiveRequest {
-  readonly cursor?: string;
-  readonly wait?: number;
+/** The first `limit` of `stored` as entries, the place of the last of them, and whether more were stored. */
+function pageOf(stored: readonly StoredMessage[], limit: number) {
+  const page = stored.slice(0, limit);
+  return {
+    entries: page.map(({ message }) => ({ message })),
+    last: page.at(-1)?.sequence,
+    more: stored.length > limit,
+  };
+}
+
+/** Holds `client`'s conversation, whose lock is one of `locks`, until the scope closes. */
+function lockConversation(
+  locks: Map<AgentName, Effect.Semaphore>,
+  client: AgentName,
+) {
+  return Effect.sync(() => {
+    const lock = locks.get(client) ?? Effect.unsafeMakeSemaphore(1);
+    locks.set(client, lock);
+    return lock;
+  }).pipe(
+    Effect.flatMap((lock) =>
+      Effect.acquireReleaseInterruptible(lock.take(1), () => lock.release(1)),
+    ),
+    Effect.asVoid,
+  );
+}
+
+/** Logs a send that failed, with the agent that sent it. */
+function logFailedSend<
+  A,
+  E extends { readonly _tag: string; readonly message: string },
+  R,
+>(send: Effect.Effect<A, E, R>, author: AgentName) {
+  return Effect.tapError(send, (error) =>
+    Effect.logWarning("Send failed").pipe(
+      Effect.annotateLogs({
+        agentName: author,
+        error: error._tag,
+        reason: error.message,
+      }),
+    ),
+  );
 }
