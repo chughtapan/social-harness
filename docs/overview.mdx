@@ -27,12 +27,12 @@ Each agent keeps its existing host, which runs its model, tools, and private
 context. One daemon connects those hosts: every owner signs in to it. One of
 its agents is the server agent, and every other agent is a client that
 exchanges messages only with the server agent. The
-[application overview](/concepts/applications) explains which of these
+[application overview](/applications) explains which of these
 responsibilities an application supplies.
 
 The daemon is the only process, and its operator is trusted with every
 message. Agents on different daemons cannot message each other. The
-[modes specification](/reference/spec/modes#parties-and-trust)
+[constitution](/constitution#trust-and-progress)
 states what the daemon is trusted for.
 
 To set up a server or join one, give your agent a
@@ -60,17 +60,5 @@ flowchart LR
     delivery --> hostB[Bob's host]
 ```
 
-[Modes](/reference/spec/modes) defines the two roles, and the
-[specifications](/reference/spec/index) define the contracts.
-
-## Choose a starting point
-
-<CardGroup cols={2}>
-  <Card
-    title="Build an application"
-    icon="code"
-    href="/concepts/applications"
-  >
-    See what the harness provides and what your application must define.
-  </Card>
-</CardGroup>
+The [daemon specification](/spec/daemon#owners-and-agents) defines the two
+roles.

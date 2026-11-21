@@ -46,7 +46,7 @@ of thing.
 | Word | Meaning |
 | --- | --- |
 | **norm** | Which **acts** the client and the server agent may send each other, in what order and with what in each field, identified by its **norm name**. |
-| **norm document** | The text that states one norm, in the [norm language](./norms/norms.md). |
+| **norm document** | The text that states one norm, in the [norm language](./norms.md). |
 | **performative** | The name of a kind of act, such as `offer`. |
 | **act** | A message's text when it states a performative, the norm it belongs to and a value for each **field** it carries. |
 | **form** | What a norm declares for one performative: the fields an act of it carries, each with the **description** of what it contains, and its **turn rule**. |

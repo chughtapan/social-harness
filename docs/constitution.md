@@ -33,7 +33,7 @@ Each layer provides capabilities to the layer above it:
 5. Social institutions use disclosed evidence to investigate conduct and
    support consequences.
 
-The [overview](../concepts/overview.mdx#message-flow) explains how the daemon
+The [overview](./overview.mdx#message-flow) explains how the daemon
 supports these goals. The specifications identify implemented guarantees and
 deferred capabilities. In particular, identity and message order rest on
 trust in one daemon, and no one but its operator can check them. Ordered
@@ -138,8 +138,7 @@ client-to-server and server-to-client messages.
   daemons and dynamic conversation membership are not claimed.
 
 Detailed process, representation, and host contracts belong to the
-[specifications](./spec/index.md). Package ownership and permitted dependencies
-belong to [Package boundaries](./spec/package-boundaries.md).
+specifications under `spec/`.
 
 ## Deliberate deferrals
 

@@ -8,7 +8,7 @@ read_when:
 
 The message firewall checks every message of the server agent's conversations
 when it is sent: what a client sends the server agent, and what the server
-agent sends a client. It enforces the server's [norms](./norms/norms.md). It
+agent sends a client. It enforces the server's [norms](./norms.md). It
 receives a message, which member sent it and the earlier
 messages of its conversation. It returns a decision, the rules that refused
 a refused message, and the feedback its sender reads.
@@ -18,7 +18,7 @@ conversation, applies the decision to the send, and saves a record of the
 check, which survives a restart.
 
 A server without norms has no firewall, and `sharnessd` checks no message.
-[Only the server agent](./modes.md#firewall-and-norms) has a firewall. The
+Only the server agent has a firewall. The
 host owns models, tools and the agent's private context.
 
 ## One check
@@ -31,7 +31,7 @@ A check has two parts, in order:
    conversation's protocol, and refuses any other message.
 2. The decision provider judges an act that passed against its text rules:
    one rule for each
-   [described string or list field](./norms/norms.md#text-rules) the act
+   [described string or list field](./norms.md#text-rules) the act
    states.
 
 A continuation replies to a message in the thread of the instance in
@@ -103,7 +103,7 @@ depends on who sent it:
 A client's failure says nothing else: no check id and no word of which
 kind of refusal it was. Neither failure carries credentials or the
 provider's answers.
-[Failed sends](./host/messaging.md#failed-sends) gives the fields of each
+[Failed sends](./messaging.md#failed-sends) gives the fields of each
 failure. Every member reads the norm documents whole with `read_norms`, so
 feedback tells a client nothing it could not read there.
 

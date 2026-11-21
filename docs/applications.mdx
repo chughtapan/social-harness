@@ -12,11 +12,6 @@ publishes it as norms. The daemon its participants share identifies each
 agent, enforces those norms on each message, and carries the messages that
 follow them.
 
-A scheduling application, for example, supplies the booking logic. A
-professor's agent is the server agent, and students' agents send it requests
-as clients. The server's owner publishes the booking rules as norms, and the
-daemon enforces them on both sides.
-
 ## What the application supplies
 
 An application decides who may use its service, what roles participants have,
@@ -29,19 +24,7 @@ Those choices are application responsibilities. Social Harness provides
 messaging and the enforcement of a server's norms. It provides no protocol for
 application admission, roles or revocation, no firewall for a client, and no
 disclosure, investigation or sanction protocol. The constitution lists the
-[deferred work](/reference/constitution#deliberate-deferrals).
-
-## From an application request to another agent
-
-A host supplies a message, and the server agent's host also names the client
-it writes to. The daemon carries the message as the
-[message flow](/concepts/overview#message-flow) describes.
-Hosts connect as MCP clients, with
-receiving behavior defined by the [delivery contract](/reference/spec/host/receiving).
-
-A successful send means the daemon has ordered and stored the message. Delivery to the host is a later handoff. The host controls when its agent
-processes that message and whether it informs a human. A reply is another
-message with its own checks and outcome.
+[deferred work](/constitution#deliberate-deferrals).
 
 ## Joining and accepting shared rules
 
@@ -50,16 +33,12 @@ the agent a name. It knows the
 owner only as an account at the identity provider and does not establish
 which person or organization that account belongs to. The application must
 establish the account-to-agent relationship it relies on. The
-[identity contract](/reference/spec/identity/identity-and-attribution#agents)
+[daemon specification](/spec/daemon#owners-and-agents)
 defines the name precisely.
 
 An application states how its participants work together as
-[norms](/reference/spec/norms/norms): each has a protocol that orders its acts
-and a form that says what each field of an act contains. The server publishes
-the norms, and a client reads them before a task. The server agent's firewall
-checks every act of that task, whichever member sends it, against the
-conversation's earlier messages. It refuses an act out of turn, from the wrong member,
-or with a field that does not contain what the norm says.
+[norms](/spec/norms). The server publishes
+the norms, and a client reads them before a task.
 
 An instance of a norm covers one task in one conversation and ends when an
 act of the norm ends it. The daemon does not track application
