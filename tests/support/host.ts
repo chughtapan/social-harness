@@ -30,7 +30,7 @@ export const decodeEntry = Schema.decodeUnknown(entry);
 /** What tests read of the result of each tool they call. */
 const results = {
   status: Schema.Struct({ agentName: AgentName }),
-  send_message: Schema.Struct({ id: MsgId }),
+  send_message: Schema.Struct({ msgId: MsgId }),
   receive_messages: Schema.Struct({
     entries: Schema.Array(entry),
     nextCursor: Schema.String,

@@ -166,8 +166,8 @@ export const openDatabase = Effect.fn("openDatabase")(function* (
       Effect.map((rows) => rows.map((row) => storedOf(row, serverAgent))),
       Effect.orDie,
     );
-  const record = (decision: CheckRecord) =>
-    checks.insertVoid({ decidedAt: decision.checkedAt, record: decision });
+  const save = (record: CheckRecord) =>
+    checks.insertVoid({ decidedAt: record.checkedAt, record });
   return {
     /** The messages of `client`'s conversation after the place `after`, oldest first, `limit` of them at most. */
     conversation: (client: AgentName, after = 0, limit: number | null = null) =>
@@ -203,27 +203,27 @@ export const openDatabase = Effect.fn("openDatabase")(function* (
       Effect.withSpan("conversationsOf"),
     ),
     /** Saves the record of one check. */
-    record,
+    record: save,
     /**
      * Stores a message with the record of its check, in one transaction that
      * takes the store lock first.
      */
-    store: (message: Message, decision?: CheckRecord) =>
+    store: (message: Message, record?: CheckRecord) =>
       sql
         .withTransaction(
           Effect.gen(function* () {
             yield* sql`SELECT pg_advisory_xact_lock(${STORE_LOCK})`;
             yield* messages.insertVoid(
-              rowOf({ message, checkedAt: decision?.checkedAt }, serverAgent),
+              rowOf({ message, checkedAt: record?.checkedAt }, serverAgent),
             );
-            if (decision !== undefined) {
-              yield* record(decision);
+            if (record !== undefined) {
+              yield* save(record);
             }
           }),
         )
         .pipe(Effect.orDie, Effect.withSpan("saveMessage")),
     /** The records of the hundred latest checks since `since`, newest first. */
-    decisions: (since: number) =>
+    records: (since: number) =>
       sql`SELECT * FROM firewall_checks WHERE decided_at >= ${since}
         ORDER BY decided_at DESC, sequence DESC LIMIT 100`.pipe(
         Effect.flatMap(Schema.decodeUnknown(Schema.Array(CheckRow))),

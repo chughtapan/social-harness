@@ -1,11 +1,12 @@
 /**
  * @file Compiles a norm document: the Lisp frontend reads it as a norm, and
- * the norm is checked to be well formed. The checks read the norm alone,
- * whatever frontend produced it, so that the structure check never meets a
- * form that refers to something its norm lacks.
+ * the norm must be well formed. The well-formedness rules read the norm
+ * alone, whatever frontend produced it, so that the structure check never
+ * meets a form that refers to something its norm lacks, or a turn rule it
+ * cannot settle.
  */
 
-import { Either } from "effect";
+import { Array, Either, Option } from "effect";
 import { readNorm } from "./lisp.js";
 import {
   type Delay,
@@ -18,8 +19,8 @@ import {
   type Relation,
 } from "./norm.js";
 
-/** Nothing when a norm is well formed, or the first rule it breaks, in words that do not echo its document. */
-type WellFormed = Either.Either<void, string>;
+/** One well-formedness rule as it applies to a norm: whether the norm breaks it, and the rule in words that do not echo the norm's document. */
+type Applied = readonly [broken: boolean, rule: string];
 
 const NAME_RULE =
   "A norm, an act, a field and a fact each have a lowercase name: a letter, then letters, digits or hyphens, 64 characters at most.";
@@ -27,110 +28,122 @@ const NAME_RULE =
 /** The well-formed norm `document` states, or why it states none. */
 export function compileNorm(document: string): Either.Either<Norm, string> {
   return Either.flatMap(readNorm(document), (norm) =>
-    Either.map(checkNorm(norm), () => norm),
+    Option.match(brokenRule(norm), {
+      onNone: () => Either.right(norm),
+      onSome: (rule) => Either.left(rule),
+    }),
   );
 }
 
 /**
- * Whether `norm` is well formed: its names are names, each performative has
- * one form and some form starts an instance, and every form is well formed
- * within it.
+ * The first rule `norm` breaks, when it is not well formed: its names are
+ * names, each performative has one form, some form starts an instance, and
+ * every form is well formed within it.
  */
-function checkNorm(norm: Norm): WellFormed {
+function brokenRule(norm: Norm): Option.Option<string> {
   const performatives = norm.forms.map((form) => form.performative);
   const facts = new Set(norm.forms.flatMap((form) => form.sets));
-  if (![norm.name, ...performatives, ...facts].every(isName)) {
-    return Either.left(NAME_RULE);
-  }
-  if (new Set(performatives).size !== performatives.length) {
-    return Either.left("An act has exactly one declared form.");
-  }
-  if (!norm.forms.some((form) => form.starts)) {
-    return Either.left("Declare at least one act with :starts true.");
-  }
-  return Either.map(
-    Either.all(norm.forms.map((form) => checkForm(norm, form, facts))),
-    () => undefined,
+  return Option.orElse(
+    firstBroken([
+      [![norm.name, ...performatives, ...facts].every(isName), NAME_RULE],
+      [
+        new Set(performatives).size !== performatives.length,
+        "An act has exactly one declared form.",
+      ],
+      [
+        !norm.forms.some((form) => form.starts),
+        "Declare at least one act with :starts true.",
+      ],
+    ]),
+    () =>
+      Option.firstSomeOf(
+        norm.forms.map((form) => brokenFormRule(norm, form, facts)),
+      ),
   );
 }
 
 /**
- * Whether one form is well formed in its norm, where `facts` are the facts
- * some form sets. Its fields are distinct and bounded in order. Every fact
- * it reads is one of `facts`. A form that starts an instance needs nothing
- * earlier. Its delay and each of its relations refer to fields of the right
- * types.
+ * The first rule one form breaks in its norm, where `facts` are the facts
+ * some form sets. Its fields are distinct and their bounds ordered. Every
+ * fact it reads is one of `facts`. A form that starts an instance needs
+ * nothing earlier. Its delay and each of its relations refer to fields the
+ * structure check will find.
  */
-function checkForm(
+function brokenFormRule(
   norm: Norm,
   form: Form,
   facts: ReadonlySet<string>,
-): WellFormed {
+): Option.Option<string> {
   const fieldNames = form.fields.map((field) => field.name);
-  if (!fieldNames.every(isName)) {
-    return Either.left(NAME_RULE);
-  }
-  if (new Set(fieldNames).size !== fieldNames.length) {
-    return Either.left("Field names must be unique within a form.");
-  }
-  if (!form.fields.every(isBounded)) {
-    return Either.left(
-      "Field bounds must be ordered; length and item bounds are nonnegative integers.",
-    );
-  }
-  if (form.max !== undefined && !(Number.isInteger(form.max) && form.max > 0)) {
-    return Either.left(":max takes a positive integer.");
-  }
-  if (form.by.kind === "roles" && form.by.roles.length === 0) {
-    return Either.left("An act's :by names client, server or both.");
-  }
-  if (form.by.kind === "recipient" && !facts.has(form.by.fact)) {
-    return Either.left("A recipient sender selector names a fact no act sets.");
-  }
-  if (![...form.when, ...form.clears].every((fact) => facts.has(fact))) {
-    return Either.left(":when and :clears name facts some act sets.");
-  }
-  if (form.starts && !canStart(form)) {
-    return Either.left(
-      "An act that starts an instance names its senders by role and cannot depend on an earlier act.",
-    );
-  }
-  if (form.delay !== undefined && !isAnchored(norm, form.delay)) {
-    return Either.left(
-      "A delay names a required nonnegative integer field on every act that sets its fact.",
-    );
-  }
-  return Either.map(
-    Either.all(
-      form.relations.map((relation) => checkRelation(norm, form, relation)),
-    ),
-    () => undefined,
+  const { by, max, delay } = form;
+  return Option.orElse(
+    firstBroken([
+      [!fieldNames.every(isName), NAME_RULE],
+      [
+        new Set(fieldNames).size !== fieldNames.length,
+        "Field names must be unique within a form.",
+      ],
+      [
+        !form.fields.every(hasOrderedBounds),
+        "Field bounds must be ordered; length and item bounds are nonnegative integers.",
+      ],
+      [
+        max !== undefined && !(Number.isInteger(max) && max > 0),
+        ":max takes a positive integer.",
+      ],
+      [
+        by.kind === "roles" && by.roles.length === 0,
+        "An act's :by names client, server or both.",
+      ],
+      [
+        by.kind === "recipient" && !facts.has(by.fact),
+        "A recipient sender selector names a fact no act sets.",
+      ],
+      [
+        ![...form.when, ...form.clears].every((fact) => facts.has(fact)),
+        ":when and :clears name facts some act sets.",
+      ],
+      [
+        form.starts && !canStart(form),
+        "An act that starts an instance names its senders by role and cannot depend on an earlier act.",
+      ],
+      [
+        delay !== undefined && !canWait(norm, form, delay),
+        "A delay waits on a fact of its act's :when, and names a required nonnegative integer field of every act that sets that fact.",
+      ],
+    ]),
+    () =>
+      Option.firstSomeOf(
+        form.relations.map((relation) =>
+          brokenRelationRule(norm, form, relation),
+        ),
+      ),
   );
 }
 
-/** Whether a field's bounds are ordered and, where they count code points or items, nonnegative integers. */
-function isBounded(field: Field): boolean {
-  const { low, high, counts } = boundsOf(field);
+/** Whether a field's bounds are ordered and, where they count code points or items, nonnegative integers. A field without bounds has them in order. */
+function hasOrderedBounds(field: Field): boolean {
+  const { low, high, counted } = boundsOf(field);
   const ordered = low === undefined || high === undefined || low <= high;
-  const counted = [low, high]
+  const whole = [low, high]
     .flatMap((bound) => bound ?? [])
     .every((bound) => Number.isInteger(bound) && bound >= 0);
-  return ordered && (counted || !counts);
+  return ordered && (whole || !counted);
 }
 
-/** A field's lower and upper bound, and whether they count something: a string's code points or a list's items. */
+/** A field's lower and upper bound, and whether they are counted: a string's code points or a list's items. */
 function boundsOf(field: Field): {
   readonly low?: number;
   readonly high?: number;
-  readonly counts: boolean;
+  readonly counted: boolean;
 } {
   switch (field.type) {
     case "string":
-      return { low: field.minLength, high: field.maxLength, counts: true };
+      return { low: field.minLength, high: field.maxLength, counted: true };
     case "integer":
-      return { low: field.minimum, high: field.maximum, counts: false };
+      return { low: field.minimum, high: field.maximum, counted: false };
     case "list":
-      return { low: field.minItems, high: field.maxItems, counts: true };
+      return { low: field.minItems, high: field.maxItems, counted: true };
     default: {
       const exhaustive: never = field;
       return exhaustive;
@@ -148,55 +161,61 @@ function canStart(form: Form): boolean {
   );
 }
 
-/** Whether every form that sets a delay's fact requires the delay's field as a nonnegative integer. */
-function isAnchored(norm: Norm, delay: Delay): boolean {
-  const anchors = norm.forms.filter((form) => form.sets.includes(delay.fact));
+/**
+ * Whether the structure check can always settle `delay` when it reaches it:
+ * the form waits on the delay's fact, so the fact is set, and every form
+ * that sets the fact requires the delay's field as a nonnegative integer.
+ */
+function canWait(norm: Norm, form: Form, delay: Delay): boolean {
   return (
-    anchors.length !== 0 &&
-    anchors.every((anchor) => {
-      const field = fieldOf(anchor, delay.field);
-      return (
-        field?.type === "integer" &&
-        !field.optional &&
-        field.minimum !== undefined &&
-        field.minimum >= 0
-      );
-    })
+    form.when.includes(delay.fact) &&
+    norm.forms
+      .filter((setter) => setter.sets.includes(delay.fact))
+      .every((setter) => {
+        const field = fieldOf(setter, delay.secondsField);
+        return (
+          field?.type === "integer" &&
+          !field.optional &&
+          field.minimum !== undefined &&
+          field.minimum >= 0
+        );
+      })
   );
 }
 
 /**
- * Whether a relation's field and its source field are declared, on every
- * form the source may name, with the types its operator compares: `equals`
- * two fields of one type, `member` a string with a list, `subset` two lists.
+ * The first rule a relation breaks. Its field is declared, and its source's
+ * field is required on every form the source may name, so an earlier act
+ * always states it. The types are those its operator compares: `equals` two
+ * fields of one type, `member` a string with a list, `subset` two lists.
  */
-function checkRelation(
+function brokenRelationRule(
   norm: Norm,
   form: Form,
   { operator, field, source }: Relation,
-): WellFormed {
-  const candidate = fieldOf(form, field)?.type;
-  const sources = formsOf(norm, source.act).map(
-    (target) => fieldOf(target, source.field)?.type,
+): Option.Option<string> {
+  const compared = fieldOf(form, field)?.type;
+  const sources = formsOf(norm, source.act).map((earlier) =>
+    fieldOf(earlier, source.field),
   );
-  if (
-    candidate === undefined ||
-    sources.length === 0 ||
-    sources.includes(undefined)
-  ) {
-    return Either.left("A relation refers to undeclared acts or fields.");
-  }
   const expected = {
-    equals: [candidate, candidate],
+    equals: [compared, compared],
     member: ["string", "list"],
     subset: ["list", "list"],
   }[operator];
-  return candidate === expected[0] &&
-    sources.every((type) => type === expected[1])
-    ? Either.void
-    : Either.left(
-        "An equals relation compares a field with one of its type, a member relation a string with a list, and a subset relation a list with a list.",
-      );
+  return firstBroken([
+    [
+      compared === undefined ||
+        sources.length === 0 ||
+        sources.some((declared) => declared?.optional !== false),
+      "A relation compares a declared field with a required field of every earlier act its source may name.",
+    ],
+    [
+      compared !== expected[0] ||
+        sources.some((declared) => declared?.type !== expected[1]),
+      "An equals relation compares a field with one of its type, a member relation a string with a list, and a subset relation a list with a list.",
+    ],
+  ]);
 }
 
 /** The forms an earlier act may have: the one of its performative, or every form that sets its fact. */
@@ -205,5 +224,13 @@ function formsOf(norm: Norm, earlier: EarlierAct): readonly Form[] {
     earlier.kind === "performative"
       ? form.performative === earlier.performative
       : form.sets.includes(earlier.fact),
+  );
+}
+
+/** The first rule of `applied` that is broken. */
+function firstBroken(applied: readonly Applied[]): Option.Option<string> {
+  return Option.map(
+    Array.findFirst(applied, ([broken]) => broken),
+    ([, rule]) => rule,
   );
 }

@@ -302,7 +302,7 @@ it(
           });
           const read = yield* readInbox(client, start.nextCursor);
           expect(read.entries).toMatchObject([
-            { message: { msgId: first.id } },
+            { message: { msgId: first.msgId } },
           ]);
           const unread = yield* send(server, {
             to: client.name,
@@ -310,8 +310,8 @@ it(
           });
           return {
             client: client.name,
-            opening: opening.id,
-            ids: [first.id, unread.id],
+            opening: opening.msgId,
+            ids: [first.msgId, unread.msgId],
             cursors: [start.nextCursor, read.nextCursor],
           };
         }),

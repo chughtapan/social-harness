@@ -19,7 +19,7 @@ names no recipient, because its only peer is the server agent.
 
 The server agent can name only a client that has sent it a message. A name
 that is not an agent name fails as an invalid argument, and any other name
-fails with `unknown-agent`. These failures create no message.
+fails with `unknown-client`. These failures create no message.
 
 ## Sending a message
 
@@ -30,7 +30,8 @@ An earlier message supplies no recipient for a call that omits one.
 The daemon validates the input, resolves the recipient and has the server
 agent's firewall check the message. A successful send means the daemon has
 ordered the message and saved it for both members of the conversation. It
-returns `id`, the message id. Every call sends a new message, including a
+returns `msgId`, the message id, which a reply to the message gives as
+`replyToMsgId`. Every call sends a new message, including a
 call with the same input as an earlier one.
 
 ### Failed sends
@@ -40,8 +41,8 @@ written for the model to act on:
 
 | `reason` | Reader | Meaning |
 | --- | --- | --- |
-| `unknown-agent` | Server agent | The client it named has not written to it. `name` is the name it gave. |
-| `rule-violation`, `unresolved-evidence`, `check-unavailable` | Server agent | Its firewall refused its message, for this [reason](../firewall.md#refused-messages). `checkId` is the check and `feedback` what does not fit the norm. |
+| `unknown-client` | Server agent | The client it named has not written to it. `name` is the name it gave. |
+| `violation`, `unsure`, `unavailable` | Server agent | Its firewall refused its message, for this [reason](../firewall.md#refused-messages). `checkId` is the check and `feedback` what does not fit the norm. |
 | `refused` | Client | The server agent's firewall refused its message. `feedback` is what does not fit the norm. |
 | `unavailable` | Client | The server could not check its message. The same send may succeed later. |
 | `content-invalid` | Either | The text is longer than 32,768 bytes as JSON text. |
@@ -78,5 +79,5 @@ message that was stored stays stored.
 A tool call that fails returns a result marked as an error (`isError: true`).
 Its text is the failure's message, written for the model to act on. Its
 structured content gives the failure's fields, among them its `reason`.
-Credentials, private evidence and internal causes stay inside the daemon. A
+Credentials, the provider's answers and internal causes stay inside the daemon. A
 check id grants no approval, management or system-role authority.

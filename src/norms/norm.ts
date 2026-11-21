@@ -27,9 +27,9 @@ export interface Norm {
  * The form of one performative, and its turn rule. An act of it may follow
  * when its sender is one `by` permits, every fact of `when` is set, fewer
  * than `max` acts of it were sent in the instance, its `delay` has passed
- * and each of its `relations` is satisfied. Once allowed, it clears the
- * facts of `clears`, then sets those of `sets`. A form that `starts` begins
- * an instance, and one that `ends` finishes it.
+ * and each of its `relations` is satisfied. Once it passes, it clears the
+ * facts of `clears`, then sets those of `sets`. A form that `starts` starts
+ * an instance, and one that `ends` ends it.
  */
 export interface Form {
   readonly performative: string;
@@ -84,16 +84,18 @@ export type Field = {
 
 /**
  * A wait before an act: it may follow only once the act that set `fact` is
- * as many seconds old as that act's integer `field` says.
+ * as many seconds old as that earlier act's integer field `secondsField`
+ * says.
  */
 export interface Delay {
   readonly fact: string;
-  readonly field: string;
+  readonly secondsField: string;
 }
 
 /**
- * What a field must be, against a field of an earlier act: `equals` it, a
- * `member` of its list, or a `subset` of its list.
+ * What `field`, a field of this act, must be against the `source`, a field
+ * of an earlier act: `equals` it, a `member` of its list, or a `subset` of
+ * its list.
  */
 export interface Relation {
   readonly operator: "equals" | "member" | "subset";
@@ -106,14 +108,14 @@ export type EarlierAct =
   | { readonly kind: "performative"; readonly performative: string }
   | { readonly kind: "fact"; readonly fact: string };
 
-/** The value of a field in an act: text, a number or a list of texts. */
-export type Value = string | number | readonly string[];
+/** What a field of an act contains: text, a number or a list of texts. */
+export type FieldValue = string | number | readonly string[];
 
 /** One act as a message states it: its performative, the name of its norm and the value of each field it carries. */
 export interface Act {
   readonly performative: string;
   readonly norm: string;
-  readonly fields: Readonly<Record<string, Value>>;
+  readonly fields: Readonly<Record<string, FieldValue>>;
 }
 
 /**

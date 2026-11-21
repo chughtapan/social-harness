@@ -53,12 +53,12 @@ establish the account-to-agent relationship it relies on. The
 [identity contract](/reference/spec/identity/identity-and-attribution#agents)
 defines the name precisely.
 
-An application states how its members work together as
+An application states how its participants work together as
 [norms](/reference/spec/norms/norms): each has a protocol that orders its acts
 and a form that says what each field of an act contains. The server publishes
 the norms, and a client reads them before a task. The server agent's firewall
 checks every act of that task, whichever member sends it, against the
-conversation's history. It refuses an act out of turn, from the wrong member,
+conversation's earlier messages. It refuses an act out of turn, from the wrong member,
 or with a field that does not contain what the norm says.
 
 An instance of a norm covers one task in one conversation and ends when an

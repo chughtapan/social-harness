@@ -12,17 +12,17 @@ import {
   type Act,
   type Delay,
   type Field,
+  type FieldValue,
   type Form,
   isName,
   type Norm,
   type Relation,
   type Role,
   type Senders,
-  type Value,
 } from "./norm.js";
 
 /** What the frontend read, or why the text is not that, in words that do not echo the text. */
-type Read<Value> = Either.Either<Value, string>;
+type Read<A> = Either.Either<A, string>;
 
 /** One value of parenthesized data: a symbol, a quoted string or a list. */
 type SExpression =
@@ -119,7 +119,7 @@ function readParameters(
   parameters: readonly SExpression[],
 ): Read<Act> {
   return Either.gen(function* () {
-    const fields = new Map<string, Value>();
+    const fields = new Map<string, FieldValue>();
     for (let index = 0; index < parameters.length; index += 2) {
       const key = parameters[index];
       const value = parameters[index + 1];
@@ -148,7 +148,7 @@ function readParameters(
   });
 }
 
-function readValue(node: SExpression): Read<Value> {
+function readValue(node: SExpression): Read<FieldValue> {
   if (node.kind === "string") {
     return Either.right(node.value);
   }
@@ -231,14 +231,14 @@ function readSenders(form: Declaration): Read<Senders> {
 /** The wait `:after fact :delay field :unit seconds` states. The three attributes come together. */
 function readDelay(form: Declaration): Read<Delay | undefined> {
   const fact = symbol(form.attributes.get(":after"));
-  const field = symbol(form.attributes.get(":delay"));
+  const secondsField = symbol(form.attributes.get(":delay"));
   const unit = symbol(form.attributes.get(":unit"));
-  if (fact === undefined && field === undefined && unit === undefined) {
+  if (fact === undefined && secondsField === undefined && unit === undefined) {
     return Either.right(undefined);
   }
-  return fact === undefined || field === undefined || unit !== "seconds"
+  return fact === undefined || secondsField === undefined || unit !== "seconds"
     ? Either.left("A delay supplies :after, :delay and :unit seconds.")
-    : Either.right({ fact, field });
+    : Either.right({ fact, secondsField });
 }
 
 function readField(form: Declaration): Read<Field> {

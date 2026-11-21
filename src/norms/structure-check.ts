@@ -9,27 +9,26 @@
 import { Either } from "effect";
 import {
   type Act,
-  type Delay,
   type EarlierAct,
   type Field,
+  type FieldValue,
   type Form,
   judgedFields,
   type Norm,
   type Relation,
   type Role,
-  type Value,
 } from "./norm.js";
 
 /**
- * A message as the structure check reads it: its id, the id of the message
- * it replies to, which member sent it and its text. `checkedAt` is the time
- * it was checked, in milliseconds. An earlier message that was never checked
- * has none and is replayed as no act, and the message under check takes the
- * time given beside it.
+ * A message as the structure check reads it: its message id, the id of the
+ * message it replies to, which member sent it and its text. `checkedAt` is
+ * the time it was checked, in milliseconds. An earlier message that was
+ * never checked has none and is replayed as no act, and the message under
+ * check takes the time given beside it.
  */
 export interface Sent {
-  readonly id: string;
-  readonly replyTo?: string;
+  readonly msgId: string;
+  readonly replyToMsgId?: string;
   readonly sender: Role;
   readonly text: string;
   readonly checkedAt?: number;
@@ -55,7 +54,6 @@ export interface TextRule {
 export type Finding =
   | {
       readonly kind: "refused";
-      readonly reason: Problem["reason"];
       readonly ruleId: string;
       readonly feedback: string;
     }
@@ -73,12 +71,11 @@ export type Finding =
  */
 interface Problem {
   readonly stage: "form" | "protocol";
-  readonly reason: "rule-violation" | "unresolved-evidence";
   readonly feedback: string;
 }
 
 /** What one step gives, or the problem that refuses the message there. */
-type Step<Value> = Either.Either<Value, Problem>;
+type Step<A> = Either.Either<A, Problem>;
 
 /** An act that fits its form: the act, the norm it is checked under and the form that norm declares for it. */
 interface Fitted {
@@ -96,7 +93,7 @@ interface Fitted {
  */
 type FitText = (
   text: string,
-  instance?: Norm,
+  instanceNorm?: Norm,
 ) => { readonly norm?: Norm; readonly fitted: Step<Fitted> };
 
 /** An act of the instance, with the message that states it and the time that message was checked. */
@@ -136,10 +133,10 @@ export function structureCheck(
   norms: readonly Norm[],
   readAct: (text: string) => Either.Either<Act, string>,
 ): (sent: Sent, earlier: readonly Sent[], now: number) => Finding {
-  const fit: FitText = (text, instance) => {
+  const fit: FitText = (text, instanceNorm) => {
     const read = Either.mapLeft(readAct(text), formProblem);
     const named = Either.getOrUndefined(read)?.norm;
-    const norm = instance ?? norms.find(({ name }) => name === named);
+    const norm = instanceNorm ?? norms.find(({ name }) => name === named);
     return { norm, fitted: Either.flatMap(read, (act) => fitForm(act, norm)) };
   };
   return (sent, earlier, now) => {
@@ -166,7 +163,6 @@ export function structureCheck(
 function refusal(problem: Problem, norm?: Norm): Finding {
   return {
     kind: "refused",
-    reason: problem.reason,
     ruleId: `${norm?.name ?? "norm"}-${problem.stage}`,
     feedback: problem.feedback,
   };
@@ -221,7 +217,7 @@ function replay(fit: FitText, earlier: readonly Sent[]): Progress {
       progress = applyAct(progress, { ...act, ...message, checkedAt });
     }
     progress = joinThread(progress, message);
-    stored.set(message.id, act?.act.performative);
+    stored.set(message.msgId, act?.act.performative);
   }
   return progress;
 }
@@ -248,7 +244,7 @@ function checkMessage(
 /**
  * Why the conversation's progress does not permit the fitted act of `sent`. A
  * continuation that replies outside the instance, comes before its delay or
- * breaks a relation gets the one refusal of an act that may not follow.
+ * breaks a relation gets the one refusal of an act out of turn.
  */
 function checkProtocol(
   progress: Progress,
@@ -256,7 +252,7 @@ function checkProtocol(
   sent: Sent & { readonly checkedAt: number },
 ): Either.Either<void, Problem> {
   const { act, norm, form } = fitted;
-  const invalid = mayNotFollow(progress, norm, sent, act);
+  const outOfTurn = turnProblem(progress, norm, sent, act);
   const notTheirs = protocolProblem(
     `${act.performative} is not the ${sent.sender}'s to send in ${norm.name}.`,
   );
@@ -267,82 +263,81 @@ function checkProtocol(
       const starting = permitsSender(form, sent)
         ? Either.void
         : Either.left(notTheirs);
-      return yield* form.starts ? starting : Either.left(invalid);
+      return yield* form.starts ? starting : Either.left(outOfTurn);
     }
     if (form.starts) {
-      return yield* Either.left(invalid);
+      return yield* Either.left(outOfTurn);
     }
-    const chain = replyChain(instance, sent.replyTo);
+    const chain = replyChain(instance, sent.replyToMsgId);
     if (chain.size === 0) {
-      return yield* Either.left(invalid);
+      return yield* Either.left(outOfTurn);
     }
-    const anchor =
+    const setter =
       form.by.kind === "recipient"
         ? instance.facts.get(form.by.fact)
         : undefined;
     if (
       form.by.kind === "recipient" &&
-      (anchor === undefined || !chain.has(anchor.id))
+      (setter === undefined || !chain.has(setter.msgId))
     ) {
-      return yield* Either.left(invalid);
+      return yield* Either.left(outOfTurn);
     }
-    if (!permitsSender(form, sent, anchor)) {
+    if (!permitsSender(form, sent, setter)) {
       return yield* Either.left(notTheirs);
     }
-    if (!isEnabled(form, instance)) {
-      return yield* Either.left(invalid);
-    }
-    if (form.delay !== undefined) {
-      yield* checkDelay(instance, form.delay, sent.checkedAt, invalid);
-    }
-    return yield* checkRelations(instance, fitted, chain, invalid);
+    return isEnabled(form, instance) &&
+      !isDelayed(instance, form, sent.checkedAt) &&
+      satisfiesRelations(instance, fitted, chain)
+      ? undefined
+      : yield* Either.left(outOfTurn);
   });
 }
 
 /**
  * Whether the form lets the sender of `sent` send its act: by its role, or
- * as the recipient of the message that set the form's fact. A conversation
- * has two members, so that recipient is the member who did not send it.
+ * as the recipient of `setter`, the message that set the form's fact. A
+ * conversation has two members, so that recipient is the member who did not
+ * send it.
  */
-function permitsSender({ by }: Form, { sender }: Sent, anchor?: SentAct) {
+function permitsSender({ by }: Form, { sender }: Sent, setter?: SentAct) {
   return by.kind === "recipient"
-    ? anchor !== undefined && anchor.sender !== sender
+    ? setter !== undefined && setter.sender !== sender
     : by.roles.includes(sender);
 }
 
 /** A message that replies into the instance's thread belongs to it, whether or not it advanced the instance, so a later reply may name it. */
 function joinThread(
   progress: Progress,
-  { id, replyTo }: Pick<Sent, "id" | "replyTo">,
+  { msgId, replyToMsgId }: Pick<Sent, "msgId" | "replyToMsgId">,
 ) {
   const instance = progress.instance;
   if (instance === undefined) {
     return progress;
   }
   const belongs =
-    instance.acts[0]?.id === id ||
-    (replyTo !== undefined && instance.thread.has(replyTo));
+    instance.acts[0]?.msgId === msgId ||
+    (replyToMsgId !== undefined && instance.thread.has(replyToMsgId));
   return belongs
     ? {
         ...progress,
         instance: {
           ...instance,
-          thread: new Map([...instance.thread, [id, replyTo]]),
+          thread: new Map([...instance.thread, [msgId, replyToMsgId]]),
         },
       }
     : progress;
 }
 
-/** The refusal of an act that may not follow, naming the act its reply reference points at when that is known. */
-function mayNotFollow(
+/** The problem of an act out of turn, naming the act its reply reference points at when that message is one. */
+function turnProblem(
   progress: Progress,
   norm: Norm,
-  { replyTo }: Sent,
+  { replyToMsgId }: Sent,
   act: Act,
 ) {
-  const preceding =
-    replyTo === undefined ? undefined : progress.stored.get(replyTo);
-  const after = preceding === undefined ? "" : ` after ${preceding}`;
+  const earlier =
+    replyToMsgId === undefined ? undefined : progress.stored.get(replyToMsgId);
+  const after = earlier === undefined ? "" : ` after ${earlier}`;
   return protocolProblem(
     `${act.performative} is not valid${after} for ${norm.name}.`,
   );
@@ -352,56 +347,22 @@ function mayNotFollow(
 function checkReference(
   progress: Progress,
   form: Form,
-  { replyTo }: Sent,
+  { replyToMsgId }: Sent,
 ): Either.Either<void, Problem> {
-  if (replyTo === undefined) {
+  if (replyToMsgId === undefined) {
     return form.starts
       ? Either.void
       : Either.left(
           protocolProblem("replyToMsgId is required for a continuation act."),
         );
   }
-  return progress.stored.has(replyTo)
+  return progress.stored.has(replyToMsgId)
     ? Either.void
     : Either.left(
         protocolProblem(
-          "replyToMsgId does not identify a preceding message in this conversation.",
+          "replyToMsgId does not identify an earlier message in this conversation.",
         ),
       );
-}
-
-/** Whether an act's delay has passed at `now`. A delay whose fact is not set, or was set by an act without the delay's field, settles nothing. */
-function checkDelay(
-  instance: Instance,
-  delay: Delay,
-  now: number,
-  invalid: Problem,
-): Either.Either<void, Problem> {
-  const permittedAt = delayedUntil(instance, delay);
-  if (permittedAt === undefined) {
-    return Either.left(
-      unresolved("The declared delay has no retained numeric anchor."),
-    );
-  }
-  return now < permittedAt ? Either.left(invalid) : Either.void;
-}
-
-/** Whether every relation of the act's form is satisfied by the earlier acts the reply chain contains. */
-function checkRelations(
-  instance: Instance,
-  { form, act }: Fitted,
-  chain: ReadonlySet<string>,
-  invalid: Problem,
-): Either.Either<void, Problem> {
-  return Either.gen(function* () {
-    for (const { field, operator, source } of form.relations) {
-      const expected = yield* sourceValue(instance, source, chain, invalid);
-      const actual = act.fields[field];
-      if (actual === undefined || !isSatisfied(operator, actual, expected)) {
-        return yield* Either.left(invalid);
-      }
-    }
-  });
 }
 
 /** A conversation's progress once `sent`, an act that passed, has its effects: it ends the instance, or starts one when none is in progress and then clears and sets facts. */
@@ -442,9 +403,9 @@ function isEnabled(form: Form, instance: Instance) {
 }
 
 /** The messages a reply reference leads back through, within the instance's thread. */
-function replyChain(instance: Instance, reference?: string) {
+function replyChain(instance: Instance, replyToMsgId?: string) {
   const chain = new Set<string>();
-  let current = reference;
+  let current = replyToMsgId;
   while (
     current !== undefined &&
     !chain.has(current) &&
@@ -456,20 +417,52 @@ function replyChain(instance: Instance, reference?: string) {
   return chain;
 }
 
-/** The time a delay has passed: the check of the act that set its fact, plus the seconds that act's field gives. */
-function delayedUntil(instance: Instance, delay: Delay) {
-  const anchor = instance.facts.get(delay.fact);
-  const seconds = anchor?.act.fields[delay.field];
-  return anchor !== undefined && typeof seconds === "number"
-    ? anchor.checkedAt + seconds * 1000
-    : undefined;
+/**
+ * Whether the form's delay has yet to pass at `now`: the act that set the
+ * delay's fact was checked fewer seconds ago than its field says. A
+ * well-formed norm always gives that act and that number.
+ */
+function isDelayed(instance: Instance, { delay }: Form, now: number) {
+  if (delay === undefined) {
+    return false;
+  }
+  const setter = instance.facts.get(delay.fact);
+  const seconds = setter?.act.fields[delay.secondsField];
+  return (
+    setter === undefined ||
+    typeof seconds !== "number" ||
+    now < setter.checkedAt + seconds * 1000
+  );
+}
+
+/**
+ * Whether the act satisfies every relation of its form: it states the
+ * relation's field, the reply chain contains the earlier act the source
+ * names, and the two fields compare as the operator requires.
+ */
+function satisfiesRelations(
+  instance: Instance,
+  { form, act }: Fitted,
+  chain: ReadonlySet<string>,
+) {
+  return form.relations.every(({ field, operator, source }) => {
+    const actual = act.fields[field];
+    const expected = earlierAct(instance, source.act, chain)?.act.fields[
+      source.field
+    ];
+    return (
+      actual !== undefined &&
+      expected !== undefined &&
+      isSatisfied(operator, actual, expected)
+    );
+  });
 }
 
 /** Whether `actual` is what a relation's operator requires against `expected`. */
 function isSatisfied(
   operator: Relation["operator"],
-  actual: Value,
-  expected: Value,
+  actual: FieldValue,
+  expected: FieldValue,
 ) {
   switch (operator) {
     case "equals":
@@ -491,27 +484,6 @@ function isSatisfied(
   }
 }
 
-/** The value a relation compares its field with: the source's field of the earlier act it names, which the reply chain must contain. An optional field the act left out settles nothing. */
-function sourceValue(
-  instance: Instance,
-  source: Relation["source"],
-  chain: ReadonlySet<string>,
-  invalid: Problem,
-): Step<Value> {
-  const fields = earlierAct(instance, source.act, chain)?.act.fields;
-  if (fields === undefined) {
-    return Either.left(invalid);
-  }
-  const value = fields[source.field];
-  return value === undefined
-    ? Either.left(
-        unresolved(
-          "A declared relation needs an earlier field that is missing.",
-        ),
-      )
-    : Either.right(value);
-}
-
 /** The earlier act `earlier` names, when the reply chain contains it: the one that set a fact, or the latest of a performative. */
 function earlierAct(
   instance: Instance,
@@ -519,14 +491,16 @@ function earlierAct(
   chain: ReadonlySet<string>,
 ) {
   if (earlier.kind === "fact") {
-    const anchor = instance.facts.get(earlier.fact);
-    return anchor === undefined || !chain.has(anchor.id) ? undefined : anchor;
+    const setter = instance.facts.get(earlier.fact);
+    return setter === undefined || !chain.has(setter.msgId)
+      ? undefined
+      : setter;
   }
   return [...instance.acts]
     .reverse()
     .find(
       (sent) =>
-        chain.has(sent.id) && sent.act.performative === earlier.performative,
+        chain.has(sent.msgId) && sent.act.performative === earlier.performative,
     );
 }
 
@@ -548,7 +522,7 @@ function fitForm(act: Act, norm?: Norm): Step<Fitted> {
   if (norm.name !== act.norm) {
     return Either.left(
       protocolProblem(
-        `${performative} is not valid for the active norm ${norm.name}.`,
+        `${performative} is not valid for ${norm.name}, the norm in progress.`,
       ),
     );
   }
@@ -584,7 +558,7 @@ function fitForm(act: Act, norm?: Norm): Step<Fitted> {
 }
 
 /** Whether `value` has the type of `field` and lies within its bounds. A string's length counts code points. */
-function accepts(field: Field, value: Value): boolean {
+function accepts(field: Field, value: FieldValue): boolean {
   switch (field.type) {
     case "string":
       return (
@@ -620,15 +594,10 @@ function within(value: number, minimum?: number, maximum?: number) {
 
 /** The problem of a message whose text is no act that fits its form. */
 function formProblem(feedback: string): Problem {
-  return { stage: "form", reason: "rule-violation", feedback };
+  return { stage: "form", feedback };
 }
 
 /** The problem of an act its sender may not send next. */
 function protocolProblem(feedback: string): Problem {
-  return { stage: "protocol", reason: "rule-violation", feedback };
-}
-
-/** The problem of an act whose turn rule the stored conversation cannot settle. */
-function unresolved(feedback: string): Problem {
-  return { stage: "protocol", reason: "unresolved-evidence", feedback };
+  return { stage: "protocol", feedback };
 }

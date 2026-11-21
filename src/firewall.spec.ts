@@ -17,9 +17,12 @@ import {
 } from "effect";
 import { describe, expect } from "vitest";
 import type { Norms, Role, TextRule } from "./norms/index.js";
-import { type Answer, answersTo } from "../tests/support/decision-provider.js";
 import {
-  type DecisionProvider,
+  type Answer,
+  type Answering,
+  answersTo,
+} from "../tests/support/decision-provider.js";
+import {
   DecisionProviderError,
   type DecisionRequest,
   jevDecisionProvider,
@@ -52,7 +55,7 @@ const passing =
 function answering(
   choices: Readonly<Record<string, string | Answer>> = {},
   requests: DecisionRequest[] = [],
-): DecisionProvider {
+): Answering {
   return {
     answer: (request) =>
       Effect.sync(() => {
@@ -68,7 +71,7 @@ const certain = answering({ [privacy.id]: "violation" });
 /** What a test's firewall differs in from that of the server agent Alice, whose norms give every message `privacy` and whose provider is `certain`. */
 interface Setup {
   readonly rules?: readonly TextRule[];
-  readonly provider?: DecisionProvider;
+  readonly provider?: Answering;
   readonly minimumProbability?: number;
   readonly timeoutMilliseconds?: number;
   readonly earlier?: readonly CheckedMessage[];
@@ -105,8 +108,8 @@ function firewallOf(setup: Setup = {}) {
     norms: {
       structureCheck: setup.structureCheck ?? passing(setup.rules ?? [privacy]),
     },
-    judge: {
-      provider: setup.provider ?? certain,
+    provider: {
+      ...(setup.provider ?? certain),
       minimumProbability: setup.minimumProbability ?? 0.5,
       timeoutMilliseconds: setup.timeoutMilliseconds ?? 5_000,
       maximumConcurrentChecks: 4,
@@ -129,7 +132,7 @@ function answer(choice: Choice, probability: number): Answer {
 const percent = fc.integer({ min: 50, max: 100 }).map((whole) => whole / 100);
 
 it.prop(
-  "follows an answer at or above the minimum probability, and takes one below it as unsure: an unsure message is refused as unresolved evidence with the rule's text as feedback, whichever member sent it",
+  "follows an answer at or above the minimum probability, and takes one below it as unsure: a message with an unsure answer is refused as unsure with the rule's text as feedback, whichever member sent it",
   [fc.constantFrom(...senders), choices, percent, percent],
   ([sender, choice, probability, minimumProbability]) =>
     Effect.gen(function* () {
@@ -145,18 +148,16 @@ it.prop(
       });
       const settled = {
         compliant: { kind: "allowed" },
-        violation: refused("rule-violation"),
+        violation: refused("violation"),
       }[choice];
 
       expect(result).toMatchObject(
-        probability < minimumProbability
-          ? refused("unresolved-evidence")
-          : settled,
+        probability < minimumProbability ? refused("unsure") : settled,
       );
     }),
 );
 
-it("refuses a message as unresolved evidence when its choice meets the minimum probability but trails the other option", () =>
+it("refuses a message as unsure when its choice meets the minimum probability but trails the other option", () =>
   Effect.gen(function* () {
     const result = yield* check("server", {
       rules: [proposal],
@@ -168,7 +169,7 @@ it("refuses a message as unresolved evidence when its choice meets the minimum p
       }),
     });
     expect(result).toMatchObject({
-      reason: "unresolved-evidence",
+      reason: "unsure",
       feedback: [proposal.text],
     });
   }));
@@ -188,7 +189,7 @@ it.prop(
       });
       expect(result).toMatchObject({
         kind: "refused",
-        reason: "rule-violation",
+        reason: "violation",
       });
     }),
 );
@@ -199,14 +200,14 @@ it.each(senders)(
     Effect.gen(function* () {
       expect(yield* check(sender)).toMatchObject({
         kind: "refused",
-        reason: "rule-violation",
+        reason: "violation",
         feedback: [privacy.text],
         record: {
           sender,
           client: bob,
           decision: "refused",
-          reason: "rule-violation",
-          decidedBy: [{ ruleId: privacy.id, feedback: privacy.text }],
+          reason: "violation",
+          refusedBy: [{ ruleId: privacy.id, feedback: privacy.text }],
           checkedRuleIds: [privacy.id],
         },
       });
@@ -229,7 +230,7 @@ it.each([
     failure: "chooses an answer the question does not offer",
     provider: answering({ [privacy.id]: "allow-everything" }),
   },
-] satisfies ReadonlyArray<{ failure: string; provider: DecisionProvider }>)(
+] satisfies ReadonlyArray<{ failure: string; provider: Answering }>)(
   "refuses a message of either member as an unavailable check, with no feedback and nothing to save, when the provider $failure",
   ({ provider }) =>
     Effect.gen(function* () {
@@ -237,7 +238,7 @@ it.each([
         const result = yield* check(sender, { provider });
         expect(result).toMatchObject({
           kind: "refused",
-          reason: "check-unavailable",
+          reason: "unavailable",
           feedback: [],
         });
         expect(result).not.toHaveProperty("record");
@@ -285,7 +286,7 @@ it("makes the check of a message that has rules unavailable when the server name
 
     expect(yield* firewall.check("client", yield* fromBob, [])).toMatchObject({
       kind: "refused",
-      reason: "check-unavailable",
+      reason: "unavailable",
     });
   }));
 
@@ -345,7 +346,7 @@ it.prop(
       expect(result).toMatchObject(
         delay < timeoutMilliseconds
           ? { kind: "allowed" }
-          : { reason: "check-unavailable" },
+          : { reason: "unavailable" },
       );
     }),
 );
@@ -439,7 +440,6 @@ describe("Firewall check activity", () => {
 describe("Firewall structure check", () => {
   const refusal = {
     kind: "refused",
-    reason: "rule-violation",
     ruleId: "shape",
     feedback: "Send a greeting first.",
   } as const;
@@ -455,10 +455,10 @@ describe("Firewall structure check", () => {
 
         expect(result).toMatchObject({
           kind: "refused",
-          reason: "rule-violation",
+          reason: "violation",
           feedback: [refusal.feedback],
           record: {
-            decidedBy: [{ ruleId: "shape" }],
+            refusedBy: [{ ruleId: "shape" }],
             checkedRuleIds: ["shape"],
           },
         });
@@ -548,9 +548,11 @@ function checkWithJev(respond: () => ReturnType<typeof globalThis.fetch>) {
   };
   return Effect.gen(function* () {
     const result = yield* check("client", {
-      provider: jevDecisionProvider({
-        apiKey: Redacted.make(secret),
+      provider: jevDecisionProvider(Redacted.make(secret), {
         model,
+        minimumProbability: 0.8,
+        timeoutMilliseconds: 15_000,
+        maximumConcurrentChecks: 4,
       }),
     }).pipe(Effect.provideService(FetchHttpClient.Fetch, fetch));
     return { result, requests };
@@ -626,7 +628,7 @@ describe("Jev", () => {
       Effect.gen(function* () {
         const { result, requests } = yield* checkWithJev(respond);
 
-        expect(result).toMatchObject({ reason: "check-unavailable" });
+        expect(result).toMatchObject({ reason: "unavailable" });
         expect(requests).toHaveLength(sent);
         expect(JSON.stringify(result)).not.toContain(secret);
       }),

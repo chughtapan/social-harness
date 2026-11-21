@@ -51,8 +51,8 @@ class SettingsError extends Data.TaggedError("SettingsError")<{
   readonly message: string;
 }> {}
 
-/** A startup refusal whose message names the setting to change. */
-const refused = (message: string) => new SettingsError({ message });
+/** A startup failure whose message names the setting to change. */
+const settingsError = (message: string) => new SettingsError({ message });
 
 /** The settings file as an operator writes it. */
 const settingsFile = Schema.Struct({
@@ -86,23 +86,23 @@ const normsIn = Effect.fn("normsIn")(function* (directory: string) {
     Effect.mapError(({ message }) => message),
     Effect.flatMap(compileNorms),
     Effect.mapError((reason) =>
-      refused(`The configured norms directory is invalid: ${reason}`),
+      settingsError(`The configured norms directory is invalid: ${reason}`),
     ),
   );
 });
 
 /**
  * The settings as the process uses them: the settings file, with the
- * compiled norms in place of their directory and the judge in place of the
- * decision provider's name. The norms directory resolves against the
- * settings file's own directory, whatever the working directory. The judge
- * is Jev under the named model, with the key in the environment variable
- * `SHARNESS_DECISION_PROVIDER_KEY`.
+ * compiled norms in place of their directory and the decision provider in
+ * place of its setting. The norms directory resolves against the settings
+ * file's own directory, whatever the working directory. The provider is Jev
+ * under the named model and limits, with the key in the environment
+ * variable `SHARNESS_DECISION_PROVIDER_KEY`.
  */
 const loadSettings = Effect.fn("loadSettings")(function* () {
   const settingsPath = yield* Config.string("SHARNESS_CONFIG_FILE").pipe(
     Effect.mapError(() =>
-      refused("Set SHARNESS_CONFIG_FILE to the server settings file"),
+      settingsError("Set SHARNESS_CONFIG_FILE to the server settings file"),
     ),
   );
   const filesystem = yield* FileSystem.FileSystem;
@@ -113,7 +113,7 @@ const loadSettings = Effect.fn("loadSettings")(function* () {
       }),
     ),
     Effect.mapError(() =>
-      refused("The server settings file is unreadable or invalid"),
+      settingsError("The server settings file is unreadable or invalid"),
     ),
   );
   const settingsDirectory = dirname(resolve(settingsPath));
@@ -122,33 +122,30 @@ const loadSettings = Effect.fn("loadSettings")(function* () {
       ? undefined
       : yield* normsIn(resolve(settingsDirectory, file.normsDirectory));
   if (norms?.hasTextRules === true && file.decisionProvider === undefined) {
-    return yield* refused(
+    return yield* settingsError(
       "The configured norms describe string or list fields, which need a decisionProvider to judge them",
     );
   }
-  const named = file.decisionProvider;
-  const judge =
-    named === undefined
+  const setting = file.decisionProvider;
+  const provider =
+    setting === undefined
       ? undefined
-      : {
-          ...Struct.omit(named, "model"),
-          provider: jevDecisionProvider({
-            model: named.model,
-            apiKey: yield* Config.redacted(
-              Config.nonEmptyString("SHARNESS_DECISION_PROVIDER_KEY"),
-            ).pipe(
-              Effect.mapError(() =>
-                refused(
-                  "The settings name a decisionProvider: set SHARNESS_DECISION_PROVIDER_KEY to its key",
-                ),
+      : jevDecisionProvider(
+          yield* Config.redacted(
+            Config.nonEmptyString("SHARNESS_DECISION_PROVIDER_KEY"),
+          ).pipe(
+            Effect.mapError(() =>
+              settingsError(
+                "The settings name a decisionProvider: set SHARNESS_DECISION_PROVIDER_KEY to its key",
               ),
             ),
-          }),
-        };
+          ),
+          setting,
+        );
   return {
     ...Struct.omit(file, "normsDirectory", "decisionProvider"),
     norms,
-    judge,
+    provider,
   };
 });
 
@@ -183,7 +180,7 @@ const listen = Effect.fn("listen")(function* (
   yield* Effect.async<undefined, SettingsError>((resume) => {
     listener.once("error", () => {
       resume(
-        refused(
+        settingsError(
           `The server could not listen on ${host}:${port}. Stop the process that uses the port, or set another port.`,
         ),
       );
@@ -263,7 +260,9 @@ const spanExport = Layer.unwrapEffect(
 const serve = Effect.gen(function* () {
   const url = yield* Config.redacted("SHARNESS_DATABASE_URL").pipe(
     Effect.mapError(() =>
-      refused("Set SHARNESS_DATABASE_URL to the database the server uses"),
+      settingsError(
+        "Set SHARNESS_DATABASE_URL to the database the server uses",
+      ),
     ),
   );
   const settings = yield* loadSettings();
@@ -277,7 +276,7 @@ const serve = Effect.gen(function* () {
     serverAgent.name,
     makeFirewall({
       norms,
-      judge: settings.judge,
+      provider: settings.provider,
       historyLimit: settings.historyLimit,
     }),
   );

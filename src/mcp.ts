@@ -50,7 +50,7 @@ const sentFields = {
   }),
   replyToMsgId: Schema.optional(MsgId).annotations({
     description:
-      "The message id of the message this replies to. Omit it when opening a new instance of a norm.",
+      "The message id of the message this replies to. Omit it on the act that starts an instance of a norm.",
   }),
 };
 
@@ -241,7 +241,7 @@ function registerServerAgentTools(at: Registration) {
     "send_message",
     {
       description:
-        "Send a message to a client. You can write only to a client that has written to you: any other name fails with unknown-agent. Returns id, the message id. A refused message was not sent: its error gives the feedback of the rules it broke and names the check. Use receive_messages to read what clients send.",
+        "Send a message to a client. You can write only to a client that has written to you: any other name fails with unknown-client. Returns msgId, the message's id, which a reply to it gives as replyToMsgId. A refused message was not sent: its error gives the feedback of the rules it broke and names the check. Use receive_messages to read what clients send.",
       input: Schema.Struct({
         to: Schema.propertySignature(AgentName).annotations({
           description:
@@ -287,13 +287,13 @@ function registerServerAgentTools(at: Registration) {
     "read_firewall_decisions",
     {
       description:
-        "Read the records of the hundred latest completed firewall checks since inclusive Unix milliseconds, newest first. Each gives which member sent the message (client or server), the client of its conversation, the decision (allowed or refused) and, for a refused message, the reason and the rules that refused it with their feedback, without message content or private model evidence.",
+        "Read the records of the hundred latest completed firewall checks since inclusive Unix milliseconds, newest first. Each gives which member sent the message (client or server), the client of its conversation, the decision (allowed or refused) and, for a refused message, the reason and the rules that refused it with their feedback, without message content or the decision provider's answers.",
       input: Schema.Struct({ since: Schema.optional(Schema.NonNegativeInt) }),
       output: Schema.Struct({ decisions: Schema.Array(checkRecordSchema) }),
       readOnly: true,
     },
     ({ since }) =>
-      Effect.map(server.decisions(since ?? 0), (decisions) => ({
+      Effect.map(server.records(since ?? 0), (decisions) => ({
         decisions,
       })),
   );
@@ -307,7 +307,7 @@ function registerClientTools(at: Registration, client: AgentName) {
     "send_message",
     {
       description:
-        "Send a message to the server agent. Returns id, the message id. A refused message was not sent: its error gives the feedback of the rules it broke, or says the server is unavailable, when the same message may be sent again later. Read the reply with receive_messages.",
+        "Send a message to the server agent. Returns msgId, the message's id, which a reply to it gives as replyToMsgId. A refused message was not sent: its error gives the feedback of the rules it broke, or says the server is unavailable, when the same message may be sent again later. Read the reply with receive_messages.",
       input: Schema.Struct(sentFields),
       output: SendReceipt,
     },

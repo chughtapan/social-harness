@@ -14,7 +14,7 @@ import {
   type Answer,
   askProvider,
   type Candidate,
-  type Judge,
+  type DecisionProvider,
 } from "./decision-provider.js";
 import { AgentName, type Message } from "./messages.js";
 
@@ -22,9 +22,9 @@ import { AgentName, type Message } from "./messages.js";
  * What one completed check decided, as its caller saves it, without message
  * content: which member sent the message, the client of its conversation, and
  * whether it was `allowed` or `refused`. `checkedAt` is Unix milliseconds. A
- * refused message has the `reason` it was refused: it broke a rule, or left
- * one unsettled. `decidedBy` names each rule that refused it, with its
- * feedback. `checkedRuleIds` lists the rules the check applied.
+ * refused message has the `reason` it was refused: a `violation` of a rule,
+ * or an `unsure` answer to one. `refusedBy` names each rule that refused it,
+ * with its feedback. `checkedRuleIds` lists the rules the check applied.
  */
 // eslint-disable-next-line agent-code-guard/no-exported-brand-constructor -- The firewall owns this grammar, which the server stores and returns from read_firewall_decisions.
 export const checkRecordSchema = Schema.Struct({
@@ -33,10 +33,8 @@ export const checkRecordSchema = Schema.Struct({
   client: AgentName,
   decision: Schema.Literal("allowed", "refused"),
   checkedAt: Schema.NonNegativeInt,
-  reason: Schema.optional(
-    Schema.Literal("rule-violation", "unresolved-evidence"),
-  ),
-  decidedBy: Schema.Array(
+  reason: Schema.optional(Schema.Literal("violation", "unsure")),
+  refusedBy: Schema.Array(
     Schema.Struct({
       ruleId: Schema.NonEmptyString,
       feedback: Schema.optional(Schema.NonEmptyString),
@@ -47,10 +45,8 @@ export const checkRecordSchema = Schema.Struct({
 /** @useDeclaredType */
 export type CheckRecord = typeof checkRecordSchema.Type;
 
-/** Why the firewall refused a message: it broke a rule, left one unsettled, or its check could not run. */
-export type RefusalReason =
-  | NonNullable<CheckRecord["reason"]>
-  | "check-unavailable";
+/** Why the firewall refused a message: it violated a rule, the provider was unsure of one, or its check was unavailable. */
+export type RefusalReason = NonNullable<CheckRecord["reason"]> | "unavailable";
 
 /**
  * A message with the time this firewall checked it, in Unix milliseconds. A
@@ -71,9 +67,9 @@ interface Allowed {
 }
 
 /**
- * A message whose send fails, whichever member sent it: one that breaks a
- * rule or leaves one unsettled, or one whose check could not run, which has
- * no record. `feedback` is what its sender reads.
+ * A message whose send fails, whichever member sent it: one that violates a
+ * rule, one the provider is unsure of, or one whose check was unavailable,
+ * which has no record. `feedback` is what its sender reads.
  */
 interface Refused {
   readonly kind: "refused";
@@ -97,7 +93,7 @@ export interface Firewall {
 }
 
 /** What a check that refuses its message decided: why, the rules that refused it, and the feedback its sender reads. */
-interface Refusal extends Pick<CheckRecord, "decidedBy" | "checkedRuleIds"> {
+interface Refusal extends Pick<CheckRecord, "refusedBy" | "checkedRuleIds"> {
   readonly reason: NonNullable<CheckRecord["reason"]>;
   readonly feedback: readonly string[];
 }
@@ -107,35 +103,29 @@ interface Refusal extends Pick<CheckRecord, "decidedBy" | "checkedRuleIds"> {
  * allows every message and records nothing.
  *
  * A check runs the norms' structure check on its message first, with the
- * earlier messages; that check's refusal refuses the message. The `judge`
- * then answers whether the message breaks each text rule the structure check
- * gave it: complies, violates or unsure. A violation refuses, and an unsure
- * answer refuses as unresolved evidence. A judge that gives no usable
- * answer, and rules without a judge, make the check unavailable.
+ * earlier messages; that check's refusal refuses the message as a
+ * violation. The `provider` then answers whether the message breaks each
+ * text rule the structure check gave it. A violation refuses, and so does
+ * an unsure answer. A provider that gives no usable answer, and rules
+ * without a provider, make the check unavailable.
  */
 export function makeFirewall(applies: {
   readonly norms?: Pick<Norms, "structureCheck">;
-  readonly judge?: Judge;
+  readonly provider?: DecisionProvider;
   /** The most earlier messages the provider reads: 256 when unset. */
   readonly historyLimit?: number;
 }): Firewall {
-  const { norms, judge, historyLimit } = applies;
+  const { norms, provider, historyLimit } = applies;
   if (norms === undefined) {
     return { check: () => Effect.succeed({ kind: "allowed" }) };
   }
   const permits = Effect.unsafeMakeSemaphore(
-    judge?.maximumConcurrentChecks ?? 1,
+    provider?.maximumConcurrentChecks ?? 1,
   );
   const check: Firewall["check"] = (sender, message, earlier) =>
     Effect.gen(function* () {
       const now = yield* Clock.currentTimeMillis;
-      const candidate = {
-        message,
-        sender,
-        now,
-        earlier: earlier.map((stored) => stored.message),
-        historyLimit,
-      };
+      const candidate = { message, sender, now };
       const found = yield* Effect.sync(() =>
         norms.structureCheck(
           sentBy(sender, message),
@@ -144,18 +134,23 @@ export function makeFirewall(applies: {
         ),
       ).pipe(Effect.withSpan("structureCheck"));
       if (found.kind === "refused") {
-        const { reason, ruleId, feedback } = found;
+        const { ruleId, feedback } = found;
         return refuse(candidate, {
-          reason,
+          reason: "violation",
           feedback: [feedback],
-          decidedBy: [{ ruleId }],
+          refusedBy: [{ ruleId }],
           checkedRuleIds: [ruleId],
         });
       }
       return yield* askProvider(
         found.textRules,
-        { ...candidate, instance: found.instance },
-        judge,
+        candidate,
+        {
+          earlier: earlier.map((stored) => stored.message),
+          historyLimit,
+          instance: found.instance,
+        },
+        provider,
       ).pipe(
         Effect.map((answers) => decide(candidate, answers)),
         Effect.catchTag("DecisionProviderError", () =>
@@ -170,12 +165,12 @@ export function makeFirewall(applies: {
 }
 
 /** A message `sender` sent, as the structure check reads it. */
-function sentBy(
-  sender: Role,
-  { msgId, replyToMsgId, text }: Message,
-  checkedAt?: number,
-) {
-  return { id: msgId, replyTo: replyToMsgId, sender, text, checkedAt };
+function sentBy(sender: Role, message: Message, checkedAt?: number) {
+  return {
+    ...Struct.pick(message, "msgId", "replyToMsgId", "text"),
+    sender,
+    checkedAt,
+  };
 }
 
 /**
@@ -197,9 +192,9 @@ function earlierSent(earlier: readonly CheckedMessage[], candidate: Candidate) {
 
 /**
  * What a check decides from the provider's answers. A violation refuses, and
- * an unsure answer refuses the message as unresolved evidence. Otherwise the
- * message is allowed. The feedback of a refusal is the text of each rule
- * that refused it.
+ * so does an unsure answer when no rule is violated. Otherwise the message
+ * is allowed. The feedback of a refusal is the text of each rule that
+ * refused it.
  */
 function decide(
   candidate: Candidate,
@@ -215,14 +210,14 @@ function decide(
     return {
       kind: "allowed",
       record: recordOf(candidate, mintCheckId(), {
-        decidedBy: [],
+        refusedBy: [],
         checkedRuleIds,
       }),
     };
   }
   return refuse(candidate, {
-    reason: violated.length === 0 ? "unresolved-evidence" : "rule-violation",
-    decidedBy: refusing.map(({ rule }) => ({
+    reason: violated.length === 0 ? "unsure" : "violation",
+    refusedBy: refusing.map(({ rule }) => ({
       ruleId: rule.id,
       feedback: rule.text,
     })),
@@ -242,12 +237,12 @@ function refuse(candidate: Candidate, refusal: Refusal): Refused {
   };
 }
 
-/** The refusal of a send whose check could not run. Nothing was decided, so nothing is recorded. */
+/** The refusal of a message whose check was unavailable. No rule refused it, so nothing is recorded. */
 function checkUnavailable(): Refused {
   return {
     kind: "refused",
     checkId: mintCheckId(),
-    reason: "check-unavailable",
+    reason: "unavailable",
     feedback: [],
   };
 }
@@ -256,7 +251,7 @@ function checkUnavailable(): Refused {
 function recordOf(
   { message, sender, now }: Candidate,
   checkId: string,
-  decided: Pick<CheckRecord, "reason" | "decidedBy" | "checkedRuleIds">,
+  decided: Pick<CheckRecord, "reason" | "refusedBy" | "checkedRuleIds">,
 ): CheckRecord {
   return {
     checkId,
@@ -264,7 +259,7 @@ function recordOf(
     client: sender === "client" ? message.author : message.recipient,
     decision: decided.reason === undefined ? "allowed" : "refused",
     checkedAt: now,
-    ...Struct.pick(decided, "reason", "decidedBy", "checkedRuleIds"),
+    ...Struct.pick(decided, "reason", "refusedBy", "checkedRuleIds"),
   };
 }
 

@@ -17,10 +17,13 @@ import {
   Schema,
 } from "effect";
 import { expect } from "vitest";
-import type { DecisionProvider, DecisionRequest } from "./decision-provider.js";
+import type { DecisionRequest } from "./decision-provider.js";
 import type { Firewall } from "./firewall.js";
 import { openTestDatabase } from "../tests/support/database.js";
-import { answersTo } from "../tests/support/decision-provider.js";
+import {
+  type Answering,
+  answersTo,
+} from "../tests/support/decision-provider.js";
 import {
   callTool,
   inboxOf,
@@ -90,13 +93,13 @@ it("gives a client tools that name no recipient and no conversation", () =>
           .properties ?? {},
       ),
     ).toEqual(["text", "replyToMsgId"]);
-    const { id } = yield* send(bob, { text: "hello" });
+    const { msgId } = yield* send(bob, { text: "hello" });
     expect((yield* callTool(bob, "read_conversation")).entries).toEqual([
       {
         message: {
           author: bob.name,
           recipient: "alice",
-          msgId: id,
+          msgId,
           text: "hello",
         },
       },
@@ -121,12 +124,12 @@ it("answers a failed call with the failure's message and its fields", () =>
   Effect.gen(function* () {
     const refusals = [
       {
-        reason: "rule-violation" as const,
+        reason: "violation" as const,
         checkId: "chk_1",
         feedback: ["Send a greeting first."],
       },
       {
-        reason: "unresolved-evidence" as const,
+        reason: "unsure" as const,
         checkId: "chk_2",
         feedback: [],
       },
@@ -144,9 +147,9 @@ it("answers a failed call with the failure's message and its fields", () =>
     const bob = yield* server.signInAs("bob");
     yield* send(bob, { text: "hi" });
     const said: Readonly<Record<string, string>> = {
-      chk_1: "Error: Send a greeting first. Check: chk_1; rule-violation.",
+      chk_1: "Error: Send a greeting first. Check: chk_1; violation.",
       chk_2:
-        "Error: The check could not settle whether the message follows the server's norms. Check: chk_2; unresolved-evidence.",
+        "Error: The decision provider is unsure whether the message follows the server's norms. Check: chk_2; unsure.",
     };
     for (const fields of refusals) {
       expect(
@@ -155,7 +158,7 @@ it("answers a failed call with the failure's message and its fields", () =>
     }
     for (const name of ["nobody", "alice"]) {
       const refusal = {
-        reason: "unknown-agent",
+        reason: "unknown-client",
         name,
         message: `No client named ${name} has written to this agent. Use list_conversations to see the clients that have.`,
       };
@@ -222,7 +225,7 @@ it("interrupts only the aborted call, whose conversation the next send then uses
     yield* Fiber.interrupt(waiting);
     yield* Deferred.await(interrupted);
 
-    expect(yield* send(alice, hello)).toHaveProperty("id");
+    expect(yield* send(alice, hello)).toHaveProperty("msgId");
   }));
 
 /** A norm of one act that either member sends, whose described field gives it the one text rule here. */
@@ -244,7 +247,7 @@ const nothingPrivate =
   "words must contain only what its description says: Nothing private.";
 
 /** A provider that finds a message in violation exactly when it says `private`, whichever member sent it. */
-const privateViolation: DecisionProvider = {
+const privateViolation: Answering = {
   answer: (request) =>
     Effect.succeed(
       answersTo(
@@ -283,13 +286,16 @@ it("stores each send as a new message to the agent it names, with the reply refe
     const second = yield* send(alice, {
       to: bob.name,
       text: "Hello",
-      replyToMsgId: first.id,
+      replyToMsgId: first.msgId,
     });
 
     const [stored, reply] = yield* inboxOf(bob);
-    expect(stored).toMatchObject({ msgId: first.id, recipient: bob.name });
+    expect(stored).toMatchObject({ msgId: first.msgId, recipient: bob.name });
     expect(stored).not.toHaveProperty("replyToMsgId");
-    expect(reply).toMatchObject({ msgId: second.id, replyToMsgId: first.id });
+    expect(reply).toMatchObject({
+      msgId: second.msgId,
+      replyToMsgId: first.msgId,
+    });
   }));
 
 it("checks the messages of one conversation in order while another conversation progresses", () =>
@@ -339,7 +345,7 @@ it("reads the inbox a page of fifty at a time after a cursor, the same page agai
     expect(start.entries).toEqual([]);
     const sent = yield* Effect.forEach(
       Array.from({ length: 57 }),
-      () => Effect.map(send(bob, { text: "Hello" }), ({ id }) => id),
+      () => Effect.map(send(bob, { text: "Hello" }), ({ msgId }) => msgId),
       { concurrency: 1 },
     );
 
@@ -375,15 +381,15 @@ it("fails a send whose described field breaks its description, telling the serve
     expect(
       yield* Effect.flip(send(alice, { to: bob.name, text: say("private") })),
     ).toMatchObject({
-      reason: "rule-violation",
+      reason: "violation",
       feedback: [nothingPrivate],
     });
 
     const refusedBy = {
       client: bob.name,
       decision: "refused",
-      reason: "rule-violation",
-      decidedBy: [{ ruleId: "chat.say.words", feedback: nothingPrivate }],
+      reason: "violation",
+      refusedBy: [{ ruleId: "chat.say.words", feedback: nothingPrivate }],
     };
     expect(
       (yield* callTool(alice, "read_firewall_decisions")).decisions,
@@ -451,7 +457,7 @@ it("checks each act of a norm against the whole conversation, though the provide
       yield* send(alice, {
         to: bob.name,
         text: "(close :norm exchange)",
-        replyToMsgId: opened.id,
+        replyToMsgId: opened.msgId,
       });
     }
 
@@ -569,7 +575,7 @@ const refusingByText = Effect.gen(function* () {
         ? {
             kind: "refused",
             checkId: "chk_refused",
-            reason: "rule-violation",
+            reason: "violation",
             feedback: [],
           }
         : { kind: "allowed" },
@@ -623,7 +629,7 @@ it("returns, for any cursor a read gave, every message that became readable sinc
           if (step.step === "send") {
             const sender = clients[step.author];
             if (step.readable) {
-              expected.push((yield* send(sender, { text: "hello" })).id);
+              expected.push((yield* send(sender, { text: "hello" })).msgId);
             } else {
               yield* Effect.flip(send(sender, { text: "refused" }));
             }
@@ -650,7 +656,10 @@ it("gives messages stored at the same time distinct places in their recipient's 
     const sent = yield* Effect.forEach(
       Arr.makeBy(12, (index) => (index % 2 === 0 ? "bob" : "carol")),
       (author) =>
-        Effect.map(send(clients[author], { text: "hello" }), ({ id }) => id),
+        Effect.map(
+          send(clients[author], { text: "hello" }),
+          ({ msgId }) => msgId,
+        ),
       { concurrency: 12 },
     );
     const read = yield* inbox("0");

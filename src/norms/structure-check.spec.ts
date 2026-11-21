@@ -72,7 +72,7 @@ function attempt(
   const candidate = message(
     taken.author,
     taken.text,
-    { replyTo: Option.getOrUndefined(taken.reply) },
+    { replyToMsgId: Option.getOrUndefined(taken.reply) },
     stepId(history.length),
   );
   const { kind } = check(norm, candidate, history, taken.now);
@@ -84,15 +84,20 @@ function attempt(
 
 let minted = 0;
 
-/** A message of `text` from `author`, under `id` or a new id. */
+/** A message of `text` from `author`, under `msgId` or a new id. */
 function message(
   author: Role,
   text: string,
-  reference: Pick<Sent, "replyTo"> = {},
-  id?: string,
+  reference: Pick<Sent, "replyToMsgId"> = {},
+  msgId?: string,
 ): Sent {
   minted += 1;
-  return { id: id ?? `minted-${minted}`, ...reference, sender: author, text };
+  return {
+    msgId: msgId ?? `minted-${minted}`,
+    ...reference,
+    sender: author,
+    text,
+  };
 }
 
 /** What the structure check of a server that publishes `norm` finds of `candidate` at `now`, after `history`. */
@@ -159,7 +164,7 @@ function replyOf(history: readonly Sent[], taken: Step): Option.Option<string> {
     return Option.some(unknownId);
   }
   return Option.fromNullable(
-    history[taken.reply % Math.max(history.length, 1)]?.id,
+    history[taken.reply % Math.max(history.length, 1)]?.msgId,
   );
 }
 
@@ -322,7 +327,6 @@ it("refuses every text that is not an act of a published norm", () => {
     fc.property(fc.string({ minLength: 1 }), (text) => {
       expect(check(exchange, message(client, text))).toMatchObject({
         kind: "refused",
-        reason: "rule-violation",
         ruleId: "norm-form",
       });
     }),
@@ -376,7 +380,7 @@ it("refuses an act from the member whose role may not send it, to start an insta
     check(
       exchange,
       message(client, actText("close", "exchange"), {
-        replyTo: open.id,
+        replyToMsgId: open.msgId,
       }),
       [{ ...open, checkedAt: 1 }],
     ),
@@ -393,7 +397,9 @@ it.each([
 
     const result = check(
       exchange,
-      message(server, actText("close", "exchange"), { replyTo: open.id }),
+      message(server, actText("close", "exchange"), {
+        replyToMsgId: open.msgId,
+      }),
       [{ ...open, ...checked }],
     );
 
@@ -440,7 +446,7 @@ it.each([
 
     const result = check(
       exchange,
-      message(server, text, { replyTo: open.id }),
+      message(server, text, { replyToMsgId: open.msgId }),
       [{ ...open, checkedAt: 1 }],
     );
 
@@ -634,7 +640,7 @@ it("requires a list to be a subset of an earlier list, and a string to be one of
             author,
             text,
             now: 1,
-            reply: Option.fromNullable(history.at(-1)?.id),
+            reply: Option.fromNullable(history.at(-1)?.msgId),
           });
 
         send(client, actText("offer", "picking", { slots: offered }));

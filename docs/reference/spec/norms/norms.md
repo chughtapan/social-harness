@@ -224,7 +224,7 @@ Form     = { performative,
              starts, ends: Boolean,
              when, clears, sets: Fact*,
              max?: Number,
-             delay?: { fact, field },
+             delay?: { fact, secondsField },
              relations: Relation* }
 
 Senders  = roles(Role+)            ; a member that has one of these roles
@@ -243,8 +243,8 @@ Relation = { operator: equals | member | subset,
 EarlierAct = performative(name)    ; the latest act of this performative
            | fact(Fact)            ; the act that set this fact
 
-Act      = { performative, norm, fields: name -> Value }
-Value    = String | Number | String*
+Act        = { performative, norm, fields: name -> FieldValue }
+FieldValue = String | Number | String*
 ```
 
 Each part of a document maps to one part of the norm:
@@ -258,7 +258,7 @@ Each part of a document maps to one part of the norm:
 | `:starts`, `:ends` | `starts`, `ends` | False. |
 | `:when`, `:clears`, `:sets` | `when`, `clears`, `sets` | No facts, as for an empty list. |
 | `:max` | `max` | No limit. |
-| `:after f :delay d :unit seconds` | `delay` with `fact` f and `field` d | No delay. |
+| `:after f :delay d :unit seconds` | `delay` with `fact` f and `secondsField` d | No delay. |
 | `(field name …)` | A field | |
 | `:optional` | `optional` | False: the field is required. |
 | `:description` of a field | `description` | None. |
@@ -309,12 +309,16 @@ written.
    relation's source is in the `sets` of some form.
 7. A form that starts an instance names its senders by role, and has no fact
    in `when`, no delay and no relation.
-8. For a delay, every form that sets the delay's fact declares the delay's
-   field as a required integer whose `minimum` is zero or more.
+8. For a delay, the form waits on the delay's fact in `when`, and every form
+   that sets that fact declares the delay's `secondsField` as a required
+   integer whose `minimum` is zero or more. A check that reaches the delay
+   therefore always finds the act that set the fact and its number of
+   seconds.
 9. For a relation, the form declares the relation's field, and every form
-   the source may name declares the source's field. A source that names a
-   performative names one form, and one that names a fact names every form
-   that sets the fact. The types fit the operator:
+   the source may name declares the source's field as a required field, so
+   an earlier act always states it. A source that names a performative names
+   one form, and one that names a fact names every form that sets the fact.
+   The types fit the operator:
 
    | Operator | The form's field | The source's field |
    | --- | --- | --- |
@@ -371,7 +375,7 @@ alone, and the protocol stage reads the conversation.
 | 10 | The senders are a `recipient` and its fact is not set, or the act that set it is not in the reply chain. | Protocol |
 | 11 | The sender is not one `by` permits: it has none of the listed roles, or it is not the recipient of the message that set the fact. | Protocol |
 | 12 | A fact of `when` is not set, or `max` acts of this performative already passed in the instance. | Protocol |
-| 13 | The form has a delay and the time of the check is earlier than the time the act that set the delay's fact was checked, plus 1000 milliseconds for each second that act's delay field says. The delay reads the fact whether or not the reply chain contains that act. | Protocol |
+| 13 | The form has a delay and the time of the check is earlier than the time the act that set the delay's fact was checked, plus 1000 milliseconds for each second that act's `secondsField` says. The delay reads the fact whether or not the reply chain contains that act. | Protocol |
 | 14 | A relation is not satisfied. Relations are tried in the order the form declares them. | Protocol |
 
 From step 2 on, the message is checked under one norm: the instance's norm
@@ -404,11 +408,7 @@ not state the relation's field, or when its operator is not satisfied.
 Setting a fact again replaces the act a source that names the fact finds, so
 an old offer cannot authorize a selection after a new one.
 
-Two cases settle nothing. At step 13, the delay's fact is not set. At step
-14, the earlier act is in the chain and left out the source's optional field.
-Each refuses the message at the protocol stage like any other failed step,
-but with the reason `unresolved-evidence`. Every other refusal on this page
-has the reason `rule-violation`.
+Every refusal on this page has the reason `violation`.
 
 ### Effects of an act that passed
 
@@ -461,8 +461,8 @@ the rule, so a description need not list unrelated instructions or prompt
 injection. A field without a description is not judged. An integer is
 limited by its bounds alone, and its description only explains it.
 
-The provider judges the act using which member sent it, the preceding
-bounded conversation, the form's fields, the facts that are set and the
+The provider judges the act using which member sent it, the
+[history window](../firewall.md#history-window) of earlier messages, the form's fields, the facts that are set and the
 norm's description. The
 [provider answers contract](../firewall.md#provider-answers) owns uncertainty
 and provider failures.

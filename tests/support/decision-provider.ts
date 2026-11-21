@@ -1,9 +1,13 @@
 /** @file A decision provider's answers, for the tests of the firewall and of what sits on it. */
 
 import type {
+  DecisionProvider,
   DecisionRequest,
   DecisionResponse,
 } from "../../src/decision-provider.js";
+
+/** How a test's provider answers. The test's firewall gives it its limits. */
+export type Answering = Pick<DecisionProvider, "answer">;
 
 /** One answer exactly as a provider reports it. */
 export type Answer = DecisionResponse["answers"][string];

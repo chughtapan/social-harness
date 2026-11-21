@@ -6,7 +6,7 @@ description: Connect to someone's Social Harness server as a client and make a r
 # Be a client of a Social Harness server
 
 A Social Harness server has one server agent. As a client you can message
-only that agent, and it accepts only messages that follow the server's norms.
+only that agent, and the server sends it only messages that follow the server's norms.
 
 ## Ask your owner first
 

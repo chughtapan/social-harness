@@ -2,7 +2,7 @@
 title: Message firewall
 description: How the server agent's firewall enforces the norms the server publishes on every message.
 read_when:
-  - You need to know what a firewall decision permits or refuses
+  - You need to know what a firewall decision allows or refuses
   - You need to know what the sender of a refused message reads
 ---
 
@@ -43,15 +43,15 @@ A check allows its message or refuses it, whichever member sent it, and a
 refused message's send fails. The answers to an act's text rules combine in
 priority order:
 
-1. A settled rule violation refuses.
-2. An unsure answer refuses as unresolved evidence.
+1. A violation refuses, with the reason `violation`.
+2. An unsure answer refuses, with the reason `unsure`.
 3. Otherwise, allow.
 
 Every text rule of the act needs an answer, and a compliant answer cannot
-erase another rule's violation. A check without a valid answer for every rule is
-unavailable: it decides nothing, its message's send fails, and it leaves no
-record. A cancelled check produces no decision. A check cannot alter its
-message.
+erase another rule's violation. A check without a valid answer for every
+rule is unavailable: its message is refused with the reason `unavailable`,
+and it leaves no record, because no rule refused the message. A cancelled
+check produces no decision. A check cannot alter its message.
 
 ### Provider answers
 
@@ -69,9 +69,9 @@ than the other answer's.
 
 | Answer | Decision |
 | --- | --- |
-| Settled violation | Refused, with the rule as feedback |
-| Settled compliant | Allowed |
-| Unsure | Refused as unresolved evidence, with the rule as feedback, so its sender can revise it |
+| Violation | Refused, with the rule as feedback |
+| Compliant | Allowed |
+| Unsure | Refused as unsure, with the rule as feedback, so its sender can revise it |
 
 Invalid output or provider failure makes the check unavailable. Accepting a
 description promises no accuracy of its checks in any language.
@@ -96,12 +96,12 @@ depends on who sent it:
 
 | Sender | Reads |
 | --- | --- |
-| Server agent | The reason (`rule-violation`, `unresolved-evidence` or `check-unavailable`), the check id and the feedback. The check's [record](#decision-records) names the rules that refused it. |
+| Server agent | The reason (`violation`, `unsure` or `unavailable`), the check id and the feedback. The check's [record](#decision-records) names the rules that refused it. |
 | Client | The feedback. When the check was unavailable, only that the server is unavailable and to try again later. |
 
 A client's failure says nothing else: no check id and no word of which
-kind of refusal it was. Neither failure carries
-private evidence, credentials or raw provider output.
+kind of refusal it was. Neither failure carries credentials or the
+provider's answers.
 [Failed sends](./host/messaging.md#failed-sends) gives the fields of each
 failure. Every member reads the norm documents whole with `read_norms`, so
 feedback tells a client nothing it could not read there.
@@ -157,7 +157,7 @@ Each completed check leaves one record. An unavailable or cancelled check
 leaves none, and neither does a send that fails before its check, such as one
 to an unknown client. `read_firewall_decisions` returns the hundred latest
 records since the time `since`, in Unix milliseconds, newest first. A record
-has no message content, message id or private evidence.
+has no message content, message id or provider answer.
 
 | Field | Meaning |
 | --- | --- |
@@ -165,12 +165,12 @@ has no message content, message id or private evidence.
 | `sender` | Which member sent the message: `client` or `server`. |
 | `client` | The client of the message's conversation. A client's refused first message leaves a record and no conversation. |
 | `decision` | `allowed` or `refused`. |
-| `reason` | Why a refused message was refused: `rule-violation` or `unresolved-evidence`. An allowed message has none. |
+| `reason` | Why a refused message was refused: `violation` or `unsure`. An allowed message has none. |
 | `checkedAt` | When the check ran, in Unix milliseconds. |
 | `checkedRuleIds` | The rules the check applied. |
-| `decidedBy` | The rules that refused the message, each with its `feedback`. An allowed message has none. A text rule is its norm, performative and field: `office-hours.request.topic`. A structure check's rule is the name of the norm the message was checked under, then the stage that refused, `form` or `protocol`: `office-hours-protocol`. Its feedback is not saved. |
+| `refusedBy` | The rules that refused the message, each with its `feedback`. An allowed message has none. A text rule is its norm, performative and field: `office-hours.request.topic`. A structure check's rule is the name of the norm the message was checked under, then the stage that refused, `form` or `protocol`: `office-hours-protocol`. Its feedback is not saved. |
 
-| Reason | Rules in `decidedBy` |
+| Reason | Rules in `refusedBy` |
 | --- | --- |
-| `rule-violation` | Violated rules. |
-| `unresolved-evidence` | Rules with an unsure answer, or the rule of a structure check that could not settle the message. |
+| `violation` | The violated text rules, or the structure check's rule. |
+| `unsure` | The text rules with an unsure answer. |

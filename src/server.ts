@@ -50,9 +50,9 @@ export const ConversationPage = Schema.Struct({
 });
 type ConversationPage = typeof ConversationPage.Type;
 
-/** What a send returns: the id its message was stored under. */
+/** What a send returns: the message id its message was stored under. */
 // eslint-disable-next-line agent-code-guard/no-exported-brand-constructor -- The send_message tool returns this as it stands, and needs its schema to publish it.
-export const SendReceipt = Schema.Struct({ id: MsgId });
+export const SendReceipt = Schema.Struct({ msgId: MsgId });
 
 /** A failed operation: what a model reads of it in `message`, and its reason with the failure's other fields, which a host reads. */
 export interface Failure {
@@ -99,14 +99,14 @@ export interface Server {
   /** The client of every conversation, in name order. */
   readonly clients: Effect.Effect<readonly AgentName[]>;
   /** The records of the hundred latest checks since a time, newest first. */
-  readonly decisions: (since: number) => Effect.Effect<readonly CheckRecord[]>;
+  readonly records: (since: number) => Effect.Effect<readonly CheckRecord[]>;
 }
 
 const refusalText: Readonly<Record<RefusalReason, string>> = {
-  "rule-violation": "The message breaks a rule of the server's norms.",
-  "unresolved-evidence":
-    "The check could not settle whether the message follows the server's norms.",
-  "check-unavailable": "The check could not complete.",
+  violation: "The message breaks a rule of the server's norms.",
+  unsure:
+    "The decision provider is unsure whether the message follows the server's norms.",
+  unavailable: "The check was unavailable.",
 };
 
 /**
@@ -143,9 +143,7 @@ class RefusalToClient extends Data.TaggedError("RefusalToClient")<{
 }> {
   override get message(): string {
     const said =
-      this.feedback.length === 0
-        ? ["The message was not accepted."]
-        : this.feedback;
+      this.feedback.length === 0 ? ["The message was refused."] : this.feedback;
     return said.map((text) => `Error: ${text}`).join(" ");
   }
 }
@@ -161,7 +159,7 @@ class UnavailableToClient extends Data.TaggedError("UnavailableToClient")<{
 
 /** The server agent named a client that has sent it no message, so the two have no conversation. */
 class AddressError extends Data.TaggedError("AddressError")<{
-  readonly reason: "unknown-agent";
+  readonly reason: "unknown-client";
   readonly name: string;
 }> {
   override get message(): string {
@@ -202,7 +200,7 @@ export const openServer = Effect.fn("openServer")(function* (
       const earlier = yield* database.conversation(client);
       if (fromServer && earlier.length === 0) {
         return yield* new AddressError({
-          reason: "unknown-agent",
+          reason: "unknown-client",
           name: client,
         });
       }
@@ -225,7 +223,7 @@ export const openServer = Effect.fn("openServer")(function* (
       }
       yield* database.store(message, decision.record);
       yield* PubSub.publish(readable, message.recipient);
-      return { id: message.msgId };
+      return { msgId: message.msgId };
     },
     Effect.scoped,
     logFailedSend,
@@ -289,7 +287,7 @@ export const openServer = Effect.fn("openServer")(function* (
         (yield* database.conversation(client, 0, 1)).length === 0
       ) {
         return yield* new AddressError({
-          reason: "unknown-agent",
+          reason: "unknown-client",
           name: client,
         });
       }
@@ -304,7 +302,7 @@ export const openServer = Effect.fn("openServer")(function* (
     conversation,
     conversationWith,
     clients: database.clients,
-    decisions: database.decisions,
+    records: database.records,
   };
   return server;
 });
@@ -329,7 +327,7 @@ function refusalOf(
  * checked.
  */
 function asClientReads(refusal: FirewallRefusal) {
-  return refusal.reason === "check-unavailable"
+  return refusal.reason === "unavailable"
     ? new UnavailableToClient({ reason: "unavailable" })
     : new RefusalToClient({ reason: "refused", feedback: refusal.feedback });
 }
@@ -344,7 +342,7 @@ function pageOf(stored: readonly StoredMessage[], limit: number) {
   };
 }
 
-/** Holds `client`'s conversation, whose lock is one of `locks`, until the scope closes. */
+/** Locks `client`'s conversation, whose lock is one of `locks`, until the scope closes. */
 function lockConversation(
   locks: Map<AgentName, Effect.Semaphore>,
   client: AgentName,

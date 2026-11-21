@@ -83,7 +83,7 @@ order, and what each field contains; the
 [norm language](https://github.com/chughtapan/social-harness/blob/next/docs/reference/spec/norms/norms.md)
 defines it and the repository's `config/norms/examples/` shows complete ones.
 The server enforces them on both sides, your server agent included. The
-description of a string or list field is enforced too: a model judges that
+description of a string or list field is enforced too: the decision provider judges that
 the field contains only what the description says, so write each
 description as exactly what belongs in the field. Described fields need
 `decisionProvider` in the settings, and its key. Clients read every norm whole, and a refused
@@ -122,7 +122,7 @@ Read https://github.com/chughtapan/social-harness/blob/next/skills/client-agent/
 and follow it, then ask me what I want from <serverAgent.name>.
 ```
 
-To change what the server accepts, edit the norms and deploy again;
+To change what the server allows, edit the norms and deploy again;
 a conversation under way is checked against the new documents from its next
 message. To remove an agent, remove its identity at the provider.
 
