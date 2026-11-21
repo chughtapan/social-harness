@@ -20,8 +20,7 @@ session or checking its hash does not load its instructions.
 Load only applicable skills, then follow their targeted references.
 Do not ask the user to invoke skills for you.
 
-Every `CLAUDE.md` is a symlink to the `AGENTS.md` beside it.
-`plugins/*/AGENTS.md` add package specifics. Scoped
+Every `CLAUDE.md` is a symlink to the `AGENTS.md` beside it. Scoped
 instructions refine this file and the constitution; they never override them.
 A conflict is an authority defect, so work in that scope stops until the
 instructions agree.
@@ -199,8 +198,8 @@ Effect idiom, typed errors, exhaustive switches, and cast bans are enforced by
 the `agent-code-guard` eslint rules. Read their output rather than a summary
 of it here.
 
-The root `safer-architecture.config.json` is hand-maintained; the plugins use the
-checker's defaults. `pnpm arch:check` runs safer-architecture-lsp against each.
+The root `safer-architecture.config.json` is hand-maintained. `pnpm arch:check`
+runs safer-architecture-lsp against it.
 
 ## Verify
 

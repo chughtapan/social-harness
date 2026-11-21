@@ -71,11 +71,7 @@
     },
     {
       "rule": "shared-kernel-cohesion",
-      "reason": "encoding.ts and identity.ts are each one module by choice, and a schema module's exports have different users by nature"
-    },
-    {
-      "rule": "no-package-mesh",
-      "reason": "Six folders in declared layers; the layer and domain rules enforce their direction"
+      "reason": "firewall.ts is one module by choice: its policy, check and provider contracts each have a different user"
     },
     {
       "rule": "folder-readme-required",
