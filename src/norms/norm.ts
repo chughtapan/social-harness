@@ -5,8 +5,8 @@
  */
 
 import { Either, Schema, Struct } from "effect";
-import type { Message } from "../messages.js";
 import { TextRule } from "../firewall.js";
+import { type Message, wellFormedString } from "../messages.js";
 
 const name = Schema.String.pipe(
   Schema.pattern(/^[a-zA-Z][a-zA-Z0-9-]{0,63}$/u),
@@ -416,12 +416,7 @@ function valueExpression(value: Act["fields"][string]): SExpression {
 }
 
 function structural(detail: string, field?: string): NormProblem {
-  return {
-    stage: "structural",
-    reason: "rule-violation",
-    detail,
-    ...(field === undefined ? {} : { field }),
-  };
+  return { stage: "structural", reason: "rule-violation", detail, field };
 }
 
 /** Adds one token to the innermost open list, and gives why the token cannot stand where it does. */
@@ -462,7 +457,7 @@ function acceptToken(
   if (value === undefined) {
     return "Use JSON escaping inside quoted strings.";
   }
-  if (typeof value !== "string" || /[\uD800-\uDFFF]/u.test(value)) {
+  if (!Schema.is(wellFormedString)(value)) {
     return "Expected a well-formed Unicode string.";
   }
   parent.push({ kind: "string", value });

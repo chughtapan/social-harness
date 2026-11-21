@@ -2,18 +2,11 @@
 
 import { Effect, Either, FastCheck as fc, Option, Schema } from "effect";
 import { randomBytes } from "node:crypto";
-import { afterAll, beforeAll, expect, it, vi } from "vitest";
+import { expect, it } from "vitest";
 import type { EarlierMessage } from "../firewall.js";
 import { AgentName, Message, MsgId } from "../messages.js";
 import { compileNorm } from "./compiler.js";
 import { structureCheck } from "./structure-check.js";
-
-beforeAll(() => {
-  vi.useFakeTimers({ toFake: ["Date"] });
-});
-afterAll(() => {
-  vi.useRealTimers();
-});
 
 const alice = AgentName.make("alice");
 const bob = AgentName.make("bob");
@@ -117,8 +110,7 @@ function check(
   history: readonly EarlierMessage[] = [],
   now = 0,
 ) {
-  vi.setSystemTime(now);
-  return Effect.runSync(structureCheck([norm])(candidate, history));
+  return Effect.runSync(structureCheck([norm])(candidate, history, now));
 }
 
 /** The message id of step `index` of a walk. */
@@ -454,7 +446,7 @@ it.each([
       kind: "refused",
       ruleId: `exchange-${stage}`,
     });
-    expect(result.kind === "refused" && result.reply).toBe(
+    expect(result.kind === "refused" && result.replyTo?.(result.feedback)).toBe(
       `(reject :ontology exchange :reason ${JSON.stringify(
         result.kind === "refused" && result.feedback,
       )})`,

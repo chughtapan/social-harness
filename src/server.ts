@@ -119,6 +119,8 @@ export const prepareTables = Effect.fn("prepareDatabase")(
   ),
 );
 
+const savedGuidance = Schema.NullOr(Schema.parseJson(LocalGuidance));
+
 const storedRows = Schema.Array(
   Schema.Struct({
     sequence: Schema.Number,
@@ -128,7 +130,7 @@ const storedRows = Schema.Array(
     text: Schema.String,
     replyTo: Schema.NullOr(MsgId),
     allowed: Schema.Boolean,
-    guidance: Schema.NullOr(Schema.parseJson(LocalGuidance)),
+    guidance: savedGuidance,
     checkedAt: Schema.NullOr(Schema.NumberFromString),
   }),
 );
@@ -172,12 +174,12 @@ function tablesOf(sql: SqlClient.SqlClient, serverAgent: AgentName) {
               author: row.fromServer ? serverAgent : row.client,
               recipient: row.fromServer ? row.client : serverAgent,
               msgId: row.msgId,
-              ...(row.replyTo === null ? {} : { replyToMsgId: row.replyTo }),
+              replyToMsgId: row.replyTo ?? undefined,
               text: row.text,
             },
             allowed: row.allowed,
-            ...(row.guidance === null ? {} : { guidance: row.guidance }),
-            ...(row.checkedAt === null ? {} : { checkedAt: row.checkedAt }),
+            guidance: row.guidance ?? undefined,
+            checkedAt: row.checkedAt ?? undefined,
           }),
         ),
       ),
@@ -252,12 +254,7 @@ function tablesOf(sql: SqlClient.SqlClient, serverAgent: AgentName) {
                 text: message.text,
                 reply_to: message.replyToMsgId ?? null,
                 allowed,
-                guidance:
-                  guidance === undefined
-                    ? null
-                    : yield* Schema.encode(Schema.parseJson(LocalGuidance))(
-                        guidance,
-                      ),
+                guidance: yield* Schema.encode(savedGuidance)(guidance ?? null),
                 checked_at: checked.record?.time ?? null,
               })}`;
               if (checked.record !== undefined) {
@@ -289,7 +286,7 @@ const PAGE_SIZE = 50;
 /** One message as a host reads it, with the guidance the firewall gave the server agent with one it received. */
 const InboxEntry = Schema.Struct({
   message: Message,
-  guidance: Schema.optionalWith(LocalGuidance, { exact: true }),
+  guidance: Schema.optional(LocalGuidance),
 });
 type InboxEntry = typeof InboxEntry.Type;
 
@@ -364,6 +361,14 @@ const sentFields = {
 
 const SendResult = Schema.Struct({ id: MsgId });
 
+const normDocuments = Schema.Array(
+  Schema.Struct({
+    name: Schema.String,
+    description: Schema.String,
+    document: Schema.String,
+  }),
+);
+
 const historyPage = Schema.Struct({
   records: Schema.Array(InboxEntry).pipe(Schema.maxItems(PAGE_SIZE)),
   nextCursor: Schema.optional(Cursor),
@@ -403,11 +408,7 @@ export const serverFactory = Effect.fn("serverFactory")(function* (
     readonly name: AgentName;
     readonly firewall: Firewall;
     /** The norm documents the server agent holds, which every agent reads with `read_norms`. */
-    readonly norms?: ReadonlyArray<{
-      readonly name: string;
-      readonly description: string;
-      readonly document: string;
-    }>;
+    readonly norms?: typeof normDocuments.Type;
   },
 ) {
   const { firewall, norms } = server;
@@ -581,7 +582,7 @@ export const serverFactory = Effect.fn("serverFactory")(function* (
     };
   });
 
-  /** A waiting read subscribes before it reads, so an entry that becomes readable after the read is not missed. */
+  /** A read subscribes before it reads, so a wait does not miss an entry that becomes readable after the read. */
   const receive = Effect.fn("receive")(function* (
     reader: AgentName,
     { cursor, wait }: ReceiveRequest,
@@ -670,13 +671,17 @@ export const serverFactory = Effect.fn("serverFactory")(function* (
   /** The server agent's page of its conversation with `client`, which must have a message. */
   const historyWith = (client: AgentName, cursor?: string) =>
     Effect.gen(function* () {
-      if ((yield* tables.conversation(client, 0, 1)).length === 0) {
+      const page = yield* history(server.name, client, cursor);
+      if (
+        page.records.length === 0 &&
+        (yield* tables.conversation(client, 0, 1)).length === 0
+      ) {
         return yield* new AddressError({
           reason: "unknown-agent",
           name: client,
         });
       }
-      return yield* history(server.name, client, cursor);
+      return page;
     });
 
   /**
@@ -792,18 +797,10 @@ export const serverFactory = Effect.fn("serverFactory")(function* (
               : "List the norms the server agent holds, each with its complete document: the roles, when each act may be sent and the fields it takes. The server agent checks your messages against them."
           } ${ACT_SYNTAX}`,
           input: noArguments,
-          output: Schema.Struct({
-            norms: Schema.Array(
-              Schema.Struct({
-                name: Schema.String,
-                description: Schema.String,
-                document: Schema.String,
-              }),
-            ),
-          }),
+          output: Schema.Struct({ norms: normDocuments }),
           readOnly: true,
         },
-        () => Effect.succeed({ norms: [...norms] }),
+        () => Effect.succeed({ norms }),
       );
     }
   };
@@ -929,10 +926,7 @@ function readBy(reader: AgentName) {
     if (message.author === reader) {
       return [{ message }];
     }
-    if (!allowed) {
-      return [];
-    }
-    return [{ message, ...(guidance === undefined ? {} : { guidance }) }];
+    return allowed ? [{ message, guidance }] : [];
   };
 }
 

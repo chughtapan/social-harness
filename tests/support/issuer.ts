@@ -16,21 +16,19 @@ import { createServer } from "node:http";
 export const requiredScope = "use:mcp";
 
 /**
- * An OpenID issuer on `127.0.0.1`, at `port` or a free one, with a key of its
+ * An OpenID issuer on a free port of `127.0.0.1`, with a key of its
  * own, and a signer of access tokens for its subjects. A token selects its
  * subject's agent on a server whose resource is `audience`, for an hour and
  * with `requiredScope` unless `claims` say otherwise. The scope closes the
  * listener.
  */
-export const issuerFixture = Effect.fn("issuerFixture")(function* (
-  port?: number,
-) {
+export const issuerFixture = Effect.fn("issuerFixture")(function* () {
   const keys = yield* Effect.tryPromise(() => generateKeyPair("RS256"));
   const publicKey = yield* Effect.tryPromise(() => exportJWK(keys.publicKey));
   const kid = yield* Effect.tryPromise(() => calculateJwkThumbprint(publicKey));
   const server = yield* NodeHttpServer.make(createServer, {
     host: "127.0.0.1",
-    port: port ?? 0,
+    port: 0,
   });
   if (server.address._tag !== "TcpAddress") {
     return yield* Effect.dieMessage("Expected issuer TCP listener");

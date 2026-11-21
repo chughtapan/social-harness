@@ -235,7 +235,7 @@ const policy = (
   action?: "deny" | "reply",
 ): MessagePolicy => ({
   provider,
-  rules: [{ ...privacy, ...(action === undefined ? {} : { action }) }],
+  rules: [{ ...privacy, action }],
   settings: { minimumProbability: 0.8, timeoutMilliseconds: 5_000 },
 });
 
@@ -270,7 +270,7 @@ const aliceAndBob = (options?: Parameters<typeof inProcessServer>[0]) =>
 /** Whether `agent` sent or received each message on the first page of its history with `client`, or with the server agent. */
 const historyOf = (agent: SignedIn, client?: string) =>
   Effect.map(
-    callTool(agent, "read_conversation", client ? { with: client } : {}),
+    callTool(agent, "read_conversation", { with: client }),
     ({ records }) =>
       records.map((record) =>
         record.message.author === agent.name ? "sent" : "received",
@@ -336,7 +336,7 @@ it("reads the inbox a page of fifty at a time after a cursor, the same page agai
   Effect.gen(function* () {
     const { alice, bob } = yield* aliceAndBob();
     const receive = (cursor?: string) =>
-      callTool(alice, "receive_messages", cursor ? { cursor } : {});
+      callTool(alice, "receive_messages", { cursor });
     const start = yield* receive();
     expect(start.entries).toEqual([]);
     const sent = yield* Effect.forEach(
@@ -607,7 +607,7 @@ const withholdingByText = Effect.gen(function* () {
   /** The ids of the messages Alice may read after `cursor`, in read order, with the cursor to read on from. */
   const inbox = (cursor?: string) =>
     Effect.map(
-      callTool(alice, "receive_messages", cursor ? { cursor } : {}),
+      callTool(alice, "receive_messages", { cursor }),
       ({ entries, nextCursor }) => ({
         ids: entries.map(({ message }) => message.msgId),
         nextCursor,

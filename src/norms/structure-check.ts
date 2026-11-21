@@ -4,7 +4,7 @@
  * says whether a further message is an act that may follow.
  */
 
-import { Clock, Effect, Either, Struct } from "effect";
+import { Effect, Either, Struct } from "effect";
 import type { Message } from "../messages.js";
 import {
   type EarlierMessage,
@@ -36,7 +36,7 @@ interface CheckedMessage {
  * of every message that belongs to it.
  */
 interface ProtocolView {
-  readonly referenceActs?: ReadonlyMap<string, string | undefined>;
+  readonly referenceActs: ReadonlyMap<string, string | undefined>;
   readonly instance?: {
     readonly norm: Norm;
     readonly initiator: string;
@@ -72,16 +72,13 @@ interface FittedAct extends HeldAct {
  * passes.
  */
 export function structureCheck(installed: readonly Norm[]): StructureCheck {
-  return Effect.fn("structureCheck")(function* (message, earlier) {
-    return installed.length === 0
-      ? { kind: "passed", textRules: [] }
-      : checkMessage(
-          installed,
-          message,
-          earlier,
-          yield* Clock.currentTimeMillis,
-        );
-  });
+  return (message, earlier, now) =>
+    Effect.sync(
+      (): Result =>
+        installed.length === 0
+          ? { kind: "passed", textRules: [] }
+          : checkMessage(installed, message, earlier, now),
+    ).pipe(Effect.withSpan("structureCheck"));
 }
 
 /** What the structure check says of `message` at `now`, after the `earlier` messages of its conversation. */
@@ -115,21 +112,19 @@ function refusal(
   problem: NormProblem,
   selected?: Norm,
 ): Result {
-  const reply = refusalReply(view.instance?.norm)?.(problem.detail);
   return {
     kind: "refused",
     reason: problem.reason,
     ruleId: `${view.instance?.norm.name ?? "norm"}-${problem.stage}`,
     feedback: problem.detail,
     detail: {
-      ...(selected === undefined
-        ? {}
-        : { norm: selected.name, digest: selected.digest }),
+      norm: selected?.name,
+      digest: selected?.digest,
       stage: problem.stage,
       explanation: problem.detail,
-      ...(problem.field === undefined ? {} : { field: problem.field }),
+      field: problem.field,
     },
-    ...(reply === undefined ? {} : { reply }),
+    replyTo: refusalReply(view.instance?.norm),
   };
 }
 
@@ -139,7 +134,6 @@ function refusal(
  */
 function pass(view: ProtocolView, { act, norm, form }: FittedAct): Result {
   const named = { norm: norm.name, digest: norm.digest };
-  const replyTo = refusalReply(norm);
   return {
     kind: "passed",
     textRules: norm.textRules
@@ -156,7 +150,7 @@ function pass(view: ProtocolView, { act, norm, form }: FittedAct): Result {
       form: form.fields,
     },
     detail: { ...named, act: act.name, stage: "semantic" },
-    ...(replyTo === undefined ? {} : { replyTo }),
+    replyTo: refusalReply(norm),
   };
 }
 
@@ -182,7 +176,8 @@ function projectProtocol(
   installed: readonly Norm[],
   earlier: readonly EarlierMessage[],
 ): ProtocolView {
-  let view: ProtocolView = {};
+  const referenceActs = new Map<string, string | undefined>();
+  let view: ProtocolView = { referenceActs };
   const seen = new Set<string>();
   for (const entry of earlier) {
     const { message } = entry;
@@ -196,16 +191,10 @@ function projectProtocol(
       view = advance(view, act);
     }
     view = retainInteractionReference(view, message);
-    view = {
-      ...view,
-      referenceActs: new Map([
-        ...(view.referenceActs ?? []),
-        [
-          message.msgId,
-          act?.act.name ?? view.referenceActs?.get(message.msgId),
-        ],
-      ]),
-    };
+    referenceActs.set(
+      message.msgId,
+      act?.act.name ?? referenceActs.get(message.msgId),
+    );
   }
   return view;
 }
@@ -365,7 +354,7 @@ function invalidTransition(
   const preceding =
     message.replyToMsgId === undefined
       ? undefined
-      : view.referenceActs?.get(message.replyToMsgId);
+      : view.referenceActs.get(message.replyToMsgId);
   const after = preceding === undefined ? "" : ` after ${preceding}`;
   return violation(`${act.name} is not valid${after} for ${norm.name}.`);
 }
@@ -389,7 +378,7 @@ function checkReference(
         );
   }
   const known =
-    (view.referenceActs?.has(replyToMsgId) ?? false) ||
+    view.referenceActs.has(replyToMsgId) ||
     instance?.references.has(replyToMsgId);
   if (!known) {
     return Either.left(
@@ -621,12 +610,7 @@ function referencedAct(
 }
 
 function violation(detail: string, field?: string): NormProblem {
-  return {
-    stage: "protocol",
-    reason: "rule-violation",
-    detail,
-    ...(field === undefined ? {} : { field }),
-  };
+  return { stage: "protocol", reason: "rule-violation", detail, field };
 }
 
 function unavailable(detail: string): NormProblem {

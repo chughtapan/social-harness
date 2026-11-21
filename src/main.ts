@@ -40,13 +40,9 @@ import { createRemoteJWKSet, jwtVerify } from "jose";
 // eslint-disable-next-line agent-code-guard/prefer-effect-platform -- The MCP SDK's Node handler serves on a node:http server.
 import { createServer } from "node:http";
 import { dirname, resolve } from "node:path";
-import {
-  loadMessagePolicy,
-  makeFirewall,
-  type MessagePolicy,
-} from "./firewall.js";
+import { loadMessagePolicy, makeFirewall } from "./firewall.js";
 import { AgentName } from "./messages.js";
-import { type HeldNorms, loadNorms } from "./norms/index.js";
+import { loadNorms } from "./norms/index.js";
 import { packageVersion, serverFactory } from "./server.js";
 
 /**
@@ -121,20 +117,9 @@ const settingsFile = Schema.Struct({
 });
 
 /**
- * What the process holds after reading the settings file and the files it
- * names: the message policy with its provider and the held norms, in place
- * of their paths.
- */
-type Settings = Omit<
-  typeof settingsFile.Type,
-  "messagePolicyFile" | "normsDirectory"
-> & {
-  readonly messagePolicy?: MessagePolicy;
-  readonly norms?: HeldNorms;
-};
-
-/**
- * The paths the settings file names resolve against its own directory,
+ * The settings: what the process holds after reading the settings file and
+ * the files it names, with the message policy and the held norms in place of
+ * their paths. Those paths resolve against the settings file's own directory,
  * whatever the working directory.
  */
 const loadSettings = Effect.fn("loadSettings")(function* () {
@@ -175,12 +160,11 @@ const loadSettings = Effect.fn("loadSettings")(function* () {
       "The configured norms have English rules, which need a messagePolicyFile with a decisionProvider to check them",
     );
   }
-  const settings: Settings = {
+  return {
     ...Struct.omit(file, "messagePolicyFile", "normsDirectory"),
     messagePolicy,
     norms,
   };
-  return settings;
 });
 
 /**
@@ -194,7 +178,7 @@ const loadSettings = Effect.fn("loadSettings")(function* () {
  * connections.
  */
 const listen = Effect.fn("listen")(function* (
-  { host, port, authentication }: Settings,
+  { host, port, authentication }: typeof settingsFile.Type,
   factory: McpServerFactory,
 ) {
   const { issuer, resource, scope } = authentication;
@@ -297,10 +281,6 @@ const exitUnsuccessfully = (line: string) =>
     ),
   );
 
-/** Ends a start that failed for a reason its message states. */
-const explained = ({ message }: { readonly message: string }) =>
-  exitUnsuccessfully(message);
-
 /**
  * Installs a process-global stderr logger for OpenTelemetry warnings and failures.
  * The logger remains installed after export closes.
@@ -381,12 +361,13 @@ NodeRuntime.runMain(
     }
     return exitUnsuccessfully(HELP_MESSAGE);
   }).pipe(
-    Effect.catchTags({
-      SettingsError: explained,
-      NormsConfigurationError: explained,
-      MessagePolicyConfigurationError: explained,
-      DatabasePreparationError: explained,
-    }),
+    Effect.catchTag(
+      "SettingsError",
+      "NormsConfigurationError",
+      "MessagePolicyConfigurationError",
+      "DatabasePreparationError",
+      ({ message }) => exitUnsuccessfully(message),
+    ),
     Effect.catchAll(() => exitUnsuccessfully(UNEXPLAINED_FAILURE)),
   ),
 );

@@ -37,11 +37,6 @@ export const openTestDatabase = Effect.fn("openTestDatabase")(function* () {
   return { schema, url, sql };
 }, Effect.orDie);
 
-/** A test's database. A fixture given one serves it again, as a restart does. */
-export type TestDatabase = Effect.Effect.Success<
-  ReturnType<typeof openTestDatabase>
->;
-
 /**
  * Creates a login of `database`'s tables that can read and write rows but can
  * not create objects, as the login a server serves
@@ -52,7 +47,7 @@ export const restrictedLogin = Effect.fn("restrictedLogin")(function* ({
   schema,
   url,
   sql,
-}: TestDatabase) {
+}: Effect.Effect.Success<ReturnType<typeof openTestDatabase>>) {
   const role = `runtime_${schema}`;
   const password = randomBytes(24).toString("hex");
   yield* sql`CREATE ROLE ${sql(role)} LOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE NOINHERIT PASSWORD ${sql.literal("'" + password + "'")}`;

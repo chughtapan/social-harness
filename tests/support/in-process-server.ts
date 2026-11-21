@@ -27,14 +27,12 @@ const issuer = "urn:social-harness:test";
 /** The URL the SDK client addresses; no listener answers it. */
 const endpoint = new URL("http://127.0.0.1/mcp");
 
-/** What a provider reads of the message it judges and the history before it. */
+/** What a provider reads of the message it judges. */
 export const decisionState = Schema.decodeUnknownSync(
   Schema.parseJson(
     Schema.Struct({
       direction: Schema.Literal("incoming", "outgoing"),
       candidate: Schema.Struct({ text: Schema.String }),
-      history: Schema.Array(Schema.Struct({ text: Schema.String })),
-      earlierHistoryOmitted: Schema.Boolean,
     }),
   ),
 );

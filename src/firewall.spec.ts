@@ -610,7 +610,7 @@ describe("Firewall replies", () => {
       Effect.gen(function* () {
         const result = yield* check("incoming", {
           rules: [{ ...privacy, action }],
-          ...(given === undefined ? {} : { notice: given }),
+          notice: given,
         });
 
         const reply = "reply" in result ? result.reply : undefined;
@@ -660,7 +660,9 @@ describe("Firewall structure check", () => {
           notice,
           structureCheck: () =>
             Effect.succeed(
-              reply === undefined ? refusal : { ...refusal, reply },
+              reply === undefined
+                ? refusal
+                : { ...refusal, replyTo: () => reply },
             ),
         };
 

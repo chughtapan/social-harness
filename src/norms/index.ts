@@ -45,7 +45,11 @@ export const loadNorms = Effect.fn("loadNorms")(function* (directory: string) {
         { concurrency: 1 },
       ),
     ),
-    Effect.catchTags({ BadArgument: unreadable, SystemError: unreadable }),
+    Effect.catchTag(
+      "BadArgument",
+      "SystemError",
+      ({ message }) => new NormsConfigurationError({ reason: message }),
+    ),
   );
   return yield* holdNorms(documents);
 });
@@ -72,8 +76,4 @@ export function holdNorms(
       }),
     }),
   );
-}
-
-function unreadable({ message }: { readonly message: string }) {
-  return Effect.fail(new NormsConfigurationError({ reason: message }));
 }

@@ -21,6 +21,7 @@ import {
   Schedule,
   Schema,
   Stream,
+  Struct,
 } from "effect";
 import { createHash, randomBytes } from "node:crypto";
 import { AgentName, type Message } from "./messages.js";
@@ -136,24 +137,26 @@ export interface StructureDetail {
 
 /**
  * Judges whether a message may follow the earlier messages of its
- * conversation, before the text rules do. A refusal gives its explanation as
- * `feedback`, the rule the decision names, its diagnostics as `detail` and
- * the `reply` the sender of a withheld message receives. A pass gives the
- * text rules that also apply to this message, the `protocol` context the
- * decision provider reads, the `detail` a refusal by a text rule carries, and
- * `replyTo`, which phrases the reply that carries such a refusal's feedback.
+ * conversation at the time `now`, before the text rules do. A refusal gives
+ * its explanation as `feedback`, the rule the decision names and its
+ * diagnostics as `detail`. A pass gives the text rules that also apply to
+ * this message, the `protocol` context the decision provider reads and the
+ * `detail` a refusal by a text rule carries. Either gives `replyTo`, which
+ * phrases the reply that carries a refusal's feedback to the sender of a
+ * withheld message.
  */
 export type StructureCheck = (
   message: Message,
   earlier: readonly EarlierMessage[],
+  now: number,
 ) => Effect.Effect<
   | {
       readonly kind: "refused";
-      readonly reason: "rule-violation" | "unresolved-evidence";
+      readonly reason: Refusal["reason"];
       readonly ruleId: string;
       readonly feedback: string;
       readonly detail?: StructureDetail;
-      readonly reply?: string;
+      readonly replyTo?: (feedback: string) => string;
     }
   | {
       readonly kind: "passed";
@@ -243,7 +246,7 @@ interface Checked {
 
 /** What a check that does not allow its message concluded, and the text that answers a withheld message. */
 interface Refusal extends Pick<CheckRecord, "decidedBy" | "checkedRuleIds"> {
-  readonly reason: FirewallRefusalReason;
+  readonly reason: "rule-violation" | "unresolved-evidence";
   readonly rule?: string;
   readonly feedback: readonly string[];
   readonly detail?: StructureDetail;
@@ -287,17 +290,14 @@ export function makeFirewall(installation: Installation): Firewall {
     earlier: readonly EarlierMessage[],
     direction: Direction,
     refuse: Refuse<Unallowed>,
-  ): Effect.Effect<Allowed | Unallowed> =>
+  ): Effect.Effect<Allowed | Refused | Unallowed> =>
     Effect.gen(function* () {
+      const now = yield* Clock.currentTimeMillis;
+      const checked = { message, direction, now };
       const structure = yield* (
-        installation.structureCheck?.(message, earlier) ??
+        installation.structureCheck?.(message, earlier, now) ??
           Effect.succeed(undefined)
       );
-      const checked = {
-        message,
-        direction,
-        now: yield* Clock.currentTimeMillis,
-      };
       if (structure?.kind === "refused") {
         return refuse(checked, refusedByStructure(structure, notice));
       }
@@ -308,27 +308,28 @@ export function makeFirewall(installation: Installation): Firewall {
         earlier,
         installation.historyLimit ?? DEFAULT_HISTORY_LIMIT,
       );
-      const answers = yield* askProvider(policy, rules, {
-        ...checked,
-        window,
-        protocol: structure?.protocol,
-      }).pipe(
-        Effect.catchTag("DecisionProviderError", () =>
-          Effect.succeed(undefined),
-        ),
-        markCheckActivity(direction),
-        Effect.withSpan("assessMessage"),
-        permits.withPermits(1),
-      );
       const judged = {
-        answers,
         gap: window.gap,
         checkedRuleIds: rules.map((rule) => rule.id),
         detail: structure?.detail,
         replyTo: structure?.replyTo,
         notice,
       };
-      return conclude(checked, judged, refuse);
+      return yield* askProvider(policy, rules, {
+        ...checked,
+        window,
+        protocol: structure?.protocol,
+      }).pipe(
+        Effect.map((answers) =>
+          conclude(checked, { ...judged, answers }, refuse),
+        ),
+        Effect.catchTag("DecisionProviderError", () =>
+          Effect.succeed(unavailable(structure?.detail)),
+        ),
+        markCheckActivity(direction),
+        Effect.withSpan("assessMessage"),
+        permits.withPermits(1),
+      );
     });
   return {
     checkOutgoing: (message, earlier) =>
@@ -346,8 +347,8 @@ type StructureRefusal = Extract<
 
 /**
  * The refusal a structure check decided, under that check's rule. A withheld
- * message is answered with the check's own reply, else, when it broke a rule,
- * with the notice and the check's explanation.
+ * message is answered as the check phrases its explanation, else, when it
+ * broke a rule, with the notice and that explanation.
  */
 function refusedByStructure(
   structure: StructureRefusal,
@@ -362,7 +363,7 @@ function refusedByStructure(
     feedback: [feedback],
     detail: structure.detail,
     reply:
-      structure.reply ??
+      structure.replyTo?.(feedback) ??
       (reason === "rule-violation" && notice !== undefined
         ? `${notice} ${feedback}`
         : undefined),
@@ -373,14 +374,14 @@ function refusedByStructure(
 type Answer = Effect.Effect.Success<ReturnType<typeof askProvider>>[number];
 
 /**
- * What a check concludes from the provider's answers, or from having none.
- * `gap` says the history was cut at the byte limit; `detail` and `replyTo`
- * are what the structure check gave of the message it passed.
+ * What a check concludes from the provider's answers. `gap` says the history
+ * was cut at the byte limit; `detail` and `replyTo` are what the structure
+ * check gave of the message it passed.
  */
 function conclude<Unallowed>(
   checked: Checked,
   judged: {
-    readonly answers?: readonly Answer[];
+    readonly answers: readonly Answer[];
     readonly gap: boolean;
     readonly checkedRuleIds: readonly string[];
     readonly detail?: StructureDetail;
@@ -390,7 +391,11 @@ function conclude<Unallowed>(
   refuse: Refuse<Unallowed>,
 ): Allowed | Unallowed {
   const { checkedRuleIds, detail } = judged;
-  const { reason, deciding } = verdict(checked.direction, judged);
+  const { reason, deciding } = verdict(
+    checked.direction,
+    judged.answers,
+    judged.gap,
+  );
   if (reason === "eligible") {
     return allowed(checked, deciding, checkedRuleIds);
   }
@@ -414,25 +419,19 @@ function conclude<Unallowed>(
 }
 
 /**
- * What the answers decide and which of them decided it. No answers make the
- * check unavailable. A violation refuses. An unsure answer holds an outgoing
- * draft, and a history cut at the byte limit holds either way. Otherwise the
- * message is eligible, and the unsure answers give an incoming one its
- * guidance.
+ * What the answers decide and which of them decided it. A violation refuses.
+ * An unsure answer holds an outgoing draft, and a history cut at the byte
+ * limit holds either way. Otherwise the message is eligible, and the unsure
+ * answers give an incoming one its guidance.
  */
 function verdict(
   direction: Direction,
-  {
-    answers,
-    gap,
-  }: { readonly answers?: readonly Answer[]; readonly gap: boolean },
+  answers: readonly Answer[],
+  gap: boolean,
 ): {
-  readonly reason: CheckRecord["reason"];
+  readonly reason: "eligible" | Refusal["reason"];
   readonly deciding: readonly Answer[];
 } {
-  if (answers === undefined) {
-    return { reason: "check-unavailable", deciding: [] };
-  }
   const violated = answers.filter((answer) => answer.violates);
   if (violated.length !== 0) {
     return { reason: "rule-violation", deciding: violated };
@@ -496,15 +495,12 @@ function allowed(
 }
 
 /**
- * What a refusal is for a message a peer wrote: the message is withheld,
- * unless its check could not run, which fails its sender's send. A reply's
- * record is that of a message this agent sends to the withheld message's
- * author, which this firewall allows without checking its own words.
+ * What a refusal is for a message a peer wrote: the message is withheld. A
+ * reply's record is that of a message this agent sends to the withheld
+ * message's author, which this firewall allows without checking its own
+ * words.
  */
-function withheld(checked: Checked, refusal: Refusal): Refused | Withheld {
-  if (refusal.reason === "check-unavailable") {
-    return refused(checked, refusal);
-  }
+function withheld(checked: Checked, refusal: Refusal): Withheld {
   return {
     kind: "withheld",
     record: recordOf(checked, mintCheckId(), "withheld", refusal),
@@ -528,52 +524,43 @@ function withheld(checked: Checked, refusal: Refusal): Refused | Withheld {
   };
 }
 
-/**
- * The refusal that fails a send. A check that could not run gives no record
- * of it.
- */
+/** What a refusal is for a message the agent sends: its send fails. */
 function refused(checked: Checked, refusal: Refusal): Refused {
   const checkId = mintCheckId();
-  const { reason, rule, feedback, detail } = refusal;
   return {
     kind: "refused",
     checkId,
-    reason,
-    rule,
-    feedback,
-    detail,
-    ...(reason === "check-unavailable"
-      ? {}
-      : { record: recordOf(checked, checkId, "refused", refusal) }),
+    ...Struct.pick(refusal, "reason", "rule", "feedback", "detail"),
+    record: recordOf(checked, checkId, "refused", refusal),
   };
 }
 
-/** The record of the decision a check applied to its message. */
+/** The refusal of a send whose check could not run. Nothing was decided, so nothing is recorded. */
+function unavailable(detail?: StructureDetail): Refused {
+  return {
+    kind: "refused",
+    checkId: mintCheckId(),
+    reason: "check-unavailable",
+    feedback: [],
+    detail,
+  };
+}
+
+/** The record of the decision a check applied to its message, with the other agent of that message as its peer. */
 function recordOf(
   { message, direction, now }: Checked,
   checkId: string,
   decision: CheckRecord["decision"],
-  {
-    reason,
-    decidedBy,
-    checkedRuleIds,
-  }: Pick<CheckRecord, "reason" | "decidedBy" | "checkedRuleIds">,
+  concluded: Pick<CheckRecord, "reason" | "decidedBy" | "checkedRuleIds">,
 ): CheckRecord {
   return {
     checkId,
     direction,
     decision,
     time: now,
-    peer: peerOf(message, direction),
-    reason,
-    decidedBy,
-    checkedRuleIds,
+    peer: direction === "outgoing" ? message.recipient : message.author,
+    ...Struct.pick(concluded, "reason", "decidedBy", "checkedRuleIds"),
   };
-}
-
-/** The other agent of a message the agent sends or receives. */
-function peerOf(message: Message, direction: Direction) {
-  return direction === "outgoing" ? message.recipient : message.author;
 }
 
 /** A check id correlates a check without granting lookup authority. */
