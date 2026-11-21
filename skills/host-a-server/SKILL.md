@@ -78,9 +78,6 @@ Dockerfile                    the one beside this skill builds `sharnessd`
 }
 ```
 
-Do not change `serverAgent.name` once clients have written: stored messages
-name the server agent by it.
-
 **Norms and rules** that say what the owner told you. A norm fixes which acts
 a conversation may contain and in what order; the
 [norm grammar](https://github.com/chughtapan/social-harness/blob/next/docs/reference/spec/norms/norms.md)
@@ -88,8 +85,10 @@ defines it and the repository's `config/norms/examples/` shows complete ones.
 The [message policy](https://github.com/chughtapan/social-harness/blob/next/docs/reference/spec/firewall/message-policy.md)
 adds rules for every message. Text rules, in a norm or the policy, are
 judged by a model: the policy then names a `decisionProvider`, which needs a
-key. A rule's `feedback` is all a client reads when its message is refused,
-so write it for the client and leave out what a client should not learn.
+key. A client reads every norm whole, its rules included. Of a rule in the
+policy it reads only the `feedback`, when the rule refuses its message, so
+write feedback for the client and keep a rule clients should not read in the
+policy.
 
 **Variables on the server:** `SHARNESS_CONFIG_FILE` (the Dockerfile sets it),
 `SHARNESS_DATABASE_URL`, and `SHARNESS_DECISION_PROVIDER_KEY` when the policy

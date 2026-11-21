@@ -180,9 +180,7 @@ export function readAct(message: Message): Either.Either<Act, NormProblem> {
     Either.flatMap(([form, ...extra]) => {
       if (form?.kind !== "list" || extra.length !== 0) {
         return Either.left(
-          structural(
-            "Reply does not contain exactly one parenthesized speech act.",
-          ),
+          structural("The message is not exactly one parenthesized act."),
         );
       }
       const [head, ...parameters] = form.values;
@@ -342,7 +340,7 @@ function readParameters(
     const norm = fields.get("ontology");
     if (typeof norm !== "string") {
       return yield* Either.left(
-        structural(":ontology must name an installed norm.", "ontology"),
+        structural(":ontology must name a held norm.", "ontology"),
       );
     }
     fields.delete("ontology");

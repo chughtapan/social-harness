@@ -15,7 +15,7 @@ The [constitution](../constitution.md#the-constitution) governs them. The
 | The one word for each thing | [Vocabulary](./vocabulary.md) |
 | Host communication | [Messaging](./host/messaging.md), [receiving](./host/receiving.md) |
 | Agent daemon | [Daemon](./daemon.md) |
-| Local permission | [Message policy](./firewall/message-policy.md) |
+| Message firewall | [Message policy](./firewall/message-policy.md) |
 | Agreed norms | [Norms](./norms/norms.md) |
 | Agents, names and attribution | [Identity](./identity/identity-and-attribution.md) |
 | Server agent, clients, ordering and trust | [Modes](./modes.md) |

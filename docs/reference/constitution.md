@@ -131,6 +131,9 @@ client-to-server and server-to-client messages.
   disconnection and daemon restart.
 - Progress requires the daemon and its database. An owner's sign-in also
   requires the identity provider.
+- When the message policy names a decision provider, that provider reads each
+  checked message with the earlier messages of its conversation, and a send
+  requires its answer.
 - No Byzantine storage or order-proof guarantee is claimed. Messaging between
   daemons and dynamic conversation membership are not claimed.
 

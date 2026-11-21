@@ -165,13 +165,13 @@ A governed message consists entirely of one parenthesized act:
 (request :ontology example :item "Research proposal")
 ```
 
-A response, using the actual request message identifier:
+A response, which names the request's message id as `replyToMsgId`:
 
 ```lisp
 (inform :ontology example :status ready)
 ```
 
-Supply the referenced message ID separately as `replyToMsgId` in the send input.
+Supply the referenced message id separately as `replyToMsgId` in the send input.
 Opening acts may omit it; continuations require it. No reference is inferred.
 
 Parameter names must be distinct. Metadata values are strings or symbols.
@@ -192,15 +192,15 @@ does not fit stays in the conversation without advancing the instance: one
 sent before the norm documents changed, or while the server agent had no
 message policy.
 
-A refused act's send fails with an explanation of the failed structural, role
-or transition check. A transition explanation names the act the submitted
-message replies to when that reference is known. The server agent's failure
-also holds diagnostics: the stage that refused the act (`structural`,
-`protocol`, or `semantic` when a text rule refused an act that fits), the
-norm, its digest and the field when they are known. A client reads the
-explanation alone. A refusal does not select a replacement act or
-reference, expose internal conditions, or instruct the agent to restart an
-instance.
+A refused act's send fails with feedback that says what does not fit: the
+form, the sender's role or the transition. Feedback about a transition names
+the act the submitted message replies to when that reference is known. The
+server agent's failure also holds diagnostics: the norm, its digest, the act
+and the field when they are known, and the stage, which is `structural` or
+`protocol` when the structure check refused and `semantic` when the act fits
+and its text rules refused it or could not be judged. A client reads the
+feedback alone. A refusal does not select a replacement act or reference, or
+instruct the agent to restart an instance.
 
 No implicit rewind, reopening or cancellation occurs.
 

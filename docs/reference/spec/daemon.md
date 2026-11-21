@@ -100,5 +100,6 @@ The firewall checks new messages. History returns the content
 already saved for the agent, without another firewall check.
 
 A failed send returns its [tool error](./host/messaging.md#failed-sends). The
-daemon logs it with the agent that sent it and the whole failure, including
-the firewall's refusal that a client does not read.
+daemon logs it with the agent that sent it and the failure's message as the
+server agent would read it: a firewall refusal's check, reason and rule are
+logged also when a client sent the message.

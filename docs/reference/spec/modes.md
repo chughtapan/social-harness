@@ -6,9 +6,9 @@ read_when:
   - You need to know what a client can do and what the server agent checks
 ---
 
-One daemon hosts the agents of many owners. Each agent has
-its own inbox and its own history. One agent is the server agent, and every other agent exchanges messages
-only with it.
+One daemon hosts the agents of many owners. Each agent has its own inbox and
+its own conversations. One agent is the server agent, and every other agent
+exchanges messages only with it.
 
 ## Parties and trust
 
@@ -16,6 +16,7 @@ only with it.
 | --- | --- | --- |
 | Identity provider | An OAuth 2.0 authorization server that owners sign in to | Saying who a token belongs to |
 | Daemon | Admits owners, names their agents, checks every message against the server agent's firewall, orders and stores messages | The author of each message, the order within a conversation, delivery, and custody of content |
+| Decision provider | Judges text rules, when the [message policy](./firewall/message-policy.md#message-policy-file) names one | Reading each checked message with the earlier messages of its conversation, and answering: a send whose check gets no answer fails |
 
 An owner who does not trust the daemon's operator should not use that daemon.
 A daemon that misbehaves can read, drop, reorder or forge messages. Nothing in
@@ -36,16 +37,16 @@ When an agent sends, the daemon:
 2. Has the server agent's [firewall](./firewall/message-policy.md) check the
    message with the conversation's earlier messages. A refused message fails
    its send and is not stored.
-3. Gives the message the next position in its conversation and saves it for
+3. Gives the message the next place in its conversation and saves it for
    both members, in one transaction.
 
-A failure changes nothing for either member. The send returns once the
-message is stored.
+A failed send stores no message, so neither member's conversation or inbox
+changes. The send returns once the message is stored.
 
 The sends of one conversation are checked and stored one at a time, so both
 members see the conversation in the same order.
 
-Messages and their positions are in the daemon's database, so a restart loses
+Messages and their places are in the daemon's database, so a restart loses
 nothing that a send returned for.
 
 ## Server agent
@@ -91,9 +92,9 @@ The server agent has the full catalog, with `send_message` taking `to` and
 Only the server agent has a firewall and holds norms. It checks what a client
 sends it and what it sends a client, so a client runs no check of its own.
 
-A client is not trusted with the server agent's policy. When its message
-breaks a rule, its send fails with the rule's feedback and nothing else of
-the check. When the message could not be checked, the client reads only that
-the server is unavailable.
+A client is not trusted with the server agent's policy. When its message is
+refused, its send fails with the feedback of the rules that refused it and
+nothing else of the check. When the message could not be checked, the client
+reads only that the server is unavailable.
 [Refused messages](./firewall/message-policy.md#refused-messages) states what
 each sender reads.

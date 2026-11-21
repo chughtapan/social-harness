@@ -208,7 +208,7 @@ function readHeldAct(
       ? Either.left({
           stage: "structural",
           reason: "rule-violation",
-          detail: "ontology must name an installed norm.",
+          detail: "ontology must name a held norm.",
           field: "ontology",
         })
       : Either.right({ act, norm });

@@ -530,7 +530,7 @@ function validateForm(
   }
   if (form.starts && !opens(norm, form)) {
     return Either.left(
-      "An opening act permits the initiator and cannot depend on an earlier interaction.",
+      "An opening act permits the initiator and cannot depend on an earlier instance.",
     );
   }
   if (form.delay !== undefined && !anchored(norm, form.delay)) {

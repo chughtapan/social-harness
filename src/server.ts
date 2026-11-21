@@ -120,7 +120,8 @@ class FirewallRefusal extends Data.TaggedError("FirewallRefusal")<{
 /**
  * A client's send that the server agent's firewall refused, as the client
  * reads it. A client is not trusted with the check behind a refusal: it reads
- * the feedback rules give a sender, and no check, rule, reason or
+ * the feedback rules give a sender, which for a structure check says what in
+ * the act does not fit the norm, and no check id, rule id, reason or
  * diagnostics.
  */
 class ClientRefusal extends Data.TaggedError("ClientRefusal")<{
@@ -174,8 +175,8 @@ export const openServer = Effect.fn("openServer")(function* (
    * A check reads the conversation's earlier messages, so the conversation's
    * lock is held from that read until the message is stored, while other
    * conversations do not wait. No transaction is open while a check runs. A
-   * refused message is not stored. A failure is logged whole before a client
-   * reads its part of it.
+   * refused message is not stored. A failure is logged as the server agent
+   * would read it, before a client reads its part of it.
    */
   const send = Effect.fn("send")(
     function* (

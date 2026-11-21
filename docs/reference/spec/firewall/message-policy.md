@@ -52,9 +52,9 @@ message.
 
 ### Provider answers
 
-Text rules describe when they apply and the conduct they require. A
-[norm rule](../norms/norms.md#text-rules)'s `:act` and a policy rule's
-`applies` only select which rules judge a message.
+Text rules describe when they apply and the conduct they require. A text
+rule's [`:act`](../norms/norms.md#text-rules) in a norm and its `applies` in
+a policy file only select which rules judge a message.
 
 For each rule, the decision provider answers one question about the message:
 does it break the rule? The answer is `compliant` or `violation`, with a
@@ -85,16 +85,21 @@ says depends on who sent it:
 
 | Sender | Reads |
 | --- | --- |
-| Server agent | The reason (`rule-violation`, `unresolved-evidence` or `check-unavailable`), the check id and the feedback of the deciding rules. A refusal under a norm adds the [structure check's diagnostics](../norms/norms.md#state-refusal-and-recovery). |
+| Server agent | The reason (`rule-violation`, `unresolved-evidence` or `check-unavailable`), the check id and the feedback of the deciding rules. A message read as an act of a norm adds the [structure check's diagnostics](../norms/norms.md#state-refusal-and-recovery). |
 | Client | The feedback of the deciding rules, or that the message was not accepted when they give none. When the check was unavailable, only that the server is unavailable and to try again later. |
 
-A client's failure names no check, rule, reason or diagnostics. Neither
-failure carries private evidence, credentials or raw provider output.
-[Failed sends](../host/messaging.md#failed-sends) gives the fields of each
-failure.
+The feedback of a text rule is the text its author wrote for senders. The
+feedback of a structure check says what in the act does not fit the norm,
+whose document the client can read. A client's failure holds nothing else: no
+check id, no rule id, no word of which kind of refusal it was and no
+diagnostics. Neither failure carries private evidence, credentials or raw
+provider output. [Failed sends](../host/messaging.md#failed-sends) gives the
+fields of each failure.
 
-Feedback is the only part of a rule a client reads. Write it for the sender
-of a refused message, and leave out what a client should not learn.
+A client reads every norm document whole, its text rules included, with
+`read_norms`. Of a rule in the policy file it reads only the feedback. Write
+feedback for the sender of a refused message, and keep a rule a client should
+not read in the policy file.
 
 ## Evidence
 
@@ -102,6 +107,10 @@ A check receives its message, the rules and the earlier messages of the
 conversation once. It applies to that message and those earlier messages as
 captured, without a second check when later messages arrive. An allowed
 message is stored with the recipient, text and message id that were checked.
+
+The decision provider is a service outside the daemon. Each check that has a
+text rule to judge sends it the message, the names of both agents, the rules
+and the history window below.
 
 ### Available history
 
@@ -125,8 +134,8 @@ The settings file's `messagePolicyFile` names a JSON file.
 | Property | Requirement/default |
 | --- | --- |
 | `rules` | Optional: a `TextRule` array, default `[]`. |
-| `decisionProvider` | Required with `rules` and for held norms with text rules: `{model}`. |
-| `settings` | Defaults: `minimumProbability` 0.8, below which an answer is unsure; 15 s per request. |
+| `decisionProvider` | Required with `rules` and for held norms with text rules: `{model}`, the Jev model that judges them. Its key is the `SHARNESS_DECISION_PROVIDER_KEY` environment variable. |
+| `settings` | Optional `{minimumProbability, timeoutMilliseconds}`, given together. `minimumProbability`, from 0.5 to 1 and 0.8 by default, is the probability below which an answer is unsure. `timeoutMilliseconds`, 15000 by default, limits all of one check's requests to the provider together. |
 | `maximumConcurrentChecks` | Optional: how many requests to the provider run at once, from 1 to 32, default 4. |
 
 | Rule field | Requirement |
@@ -143,27 +152,28 @@ holds add their [text rules](../norms/norms.md#text-rules) after the file's
 rules, so a daemon whose norms have rules needs `decisionProvider` even when
 the file has no `rules`.
 
-Without `decisionProvider`, no provider or key is used. A provider's rate
-limit makes a check unavailable.
+Without `decisionProvider`, no provider or key is used. A check asks the
+provider again twice after a failure that may pass, such as a rate limit, and
+is unavailable when no attempt answers within the time limit.
 
 ## Decision records
 
 Each completed check leaves one record. An unavailable or cancelled check
 leaves none, and neither does a send that fails before its check, such as one
-to an unknown client. `read_firewall_decisions` returns the server agent's
-records as saved, newest first, without message content, message ids or
-private evidence.
+to an unknown client. `read_firewall_decisions` returns the hundred latest
+records since the time `since`, in Unix milliseconds, newest first. A record
+holds no message content, message id or private evidence.
 
 | Field | Meaning |
 | --- | --- |
 | `checkId` | Identifies the check. |
 | `direction` | `incoming` for a message a client sent, `outgoing` for one the server agent sent. |
 | `decision` | `allowed` or `refused`. |
-| `reason` | `eligible`, `rule-violation` or `unresolved-evidence`. |
+| `reason` | `eligible` for an allowed message, `rule-violation` or `unresolved-evidence` for a refused one. |
 | `time` | When the check ran, in Unix milliseconds. |
 | `peer` | The client of the message: the recipient of an outgoing message and the author of an incoming one. A refused first message leaves a record that names its author and no conversation. |
 | `checkedRuleIds` | The rules the check judged. A rule that does not apply to the message's direction is not listed. |
-| `decidedBy` | The deciding rules in policy order, each with the `feedback` its rule declares. A structure check's rule is named for its norm and the stage that refused, `structural` or `protocol`, and its explanation is not saved. |
+| `decidedBy` | The deciding rules in policy order, each with the `feedback` its rule declares. A structure check's rule is the stage that refused, `structural` or `protocol`, after the name of the norm of the instance in progress, or after `norm` when there is none: `office-hours-protocol`. Its feedback is not saved. |
 
 | Reason | Deciding rules |
 | --- | --- |

@@ -46,7 +46,7 @@ of thing.
 | **decision provider** | The service that answers whether a message breaks a text rule. |
 | **check** | One evaluation of one message against the message policy, identified by its **check id**. |
 | **decision** | What the firewall tells the daemon to do with a message, whichever agent sent it: it is **allowed** or **refused**. |
-| **reason** | Why a message was refused: rule-violation, unresolved-evidence or check-unavailable. |
+| **reason** | Why a check decided as it did: eligible, rule-violation or unresolved-evidence. A message whose check could not run is refused as check-unavailable. |
 | **feedback** | The text a rule gives the sender of a message it refuses. |
 | **evidence** | The conversation history a check may read. |
 
@@ -61,6 +61,7 @@ of thing.
 | **protocol** | A norm's turn rules: who may send which act next. Its roles are **initiator** and **participant**. |
 | **instance** | One run of a norm's protocol in a conversation. |
 | **held norms** | The norms an agent's firewall applies. |
+| **structure check** | The part of a firewall that holds each message to the held norms' forms and protocols, before the text rules judge it. |
 
 ## Daemon
 

@@ -43,7 +43,7 @@ const sentFields = {
   }),
   replyToMsgId: Schema.optional(MsgId).annotations({
     description:
-      "The ID of the message this replies to. Omit when starting a new norm interaction.",
+      "The message id of the message this replies to. Omit it when opening a new instance of a norm.",
   }),
 };
 
@@ -235,8 +235,8 @@ function registerSharedTools(
       {
         description: `${
           caller === server.name
-            ? "List the installed norms and their complete documents: the roles, when each act may be sent and the fields it takes."
-            : "List the norms the server agent holds, each with its complete document: the roles, when each act may be sent and the fields it takes. The server agent checks your messages against them."
+            ? "List the norms your firewall holds, each with its complete document: the roles, when each act may be sent and the fields it takes."
+            : "List the norms the server agent holds, each with its complete document: the roles, when each act may be sent and the fields it takes. The server agent accepts only messages that follow them."
         } ${ACT_SYNTAX}`,
         input: noArguments,
         output: Schema.Struct({ norms: normDocuments }),
@@ -255,7 +255,7 @@ function registerServerAgentTools(at: Registration) {
     "send_message",
     {
       description:
-        "Send a message to a client. You can write only to a client that has written to you: any other name fails with unknown-agent. Returns id, the message id. A refusal names the argument or rule to correct. Use receive_messages to read what clients send.",
+        "Send a message to a client. You can write only to a client that has written to you: any other name fails with unknown-agent. Returns id, the message id. A refused message was not sent: its error gives the feedback of the rules it broke and names the check. Use receive_messages to read what clients send.",
       input: Schema.Struct({
         to: Schema.propertySignature(AgentName).annotations({
           description:
@@ -321,7 +321,7 @@ function registerClientTools(at: Registration, client: AgentName) {
     "send_message",
     {
       description:
-        "Send a message to the server agent. Returns the message id. A refusal says what to correct. Read its reply with receive_messages.",
+        "Send a message to the server agent. Returns id, the message id. A refused message was not sent: its error gives the feedback of the rules it broke, or says the server is unavailable, when the same message may be sent again later. Read the reply with receive_messages.",
       input: Schema.Struct(sentFields),
       output: SendResult,
     },

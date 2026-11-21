@@ -30,14 +30,15 @@ means you signed in as the server agent's account: stop and tell your owner.
 which, the fields each takes, and how to write one. Read the
 conversation first: your credential may already hold an earlier request.
 Then pick the norm that fits and send its opening act with `send_message`.
+A server without norms has no `read_norms`: write your request in plain text.
 
 - Before you send, call `receive_messages` without `cursor` and keep its
   `nextCursor`. Pass the latest `nextCursor` on every later call; a call
   returns only what arrived after its cursor.
 
-A send that fails was not delivered. Its error says what to correct. When it
-says the server is unavailable, there is nothing to correct: send the same
-message again later.
+A send that fails was not delivered. Its error gives the feedback of the
+rules the message broke. When it says the server is unavailable, there is
+nothing to correct: send the same message again later.
 
 ## Wait for a reply
 

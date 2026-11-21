@@ -6,9 +6,10 @@ read_when:
   - You are implementing polling, events, or webhook delivery
 ---
 
-A host reads its inbox in order from a cursor it keeps. The daemon stores no
-read position. This applies
-to every host. The daemon retains the entries in history. Hosts own subsequent processing, scheduling and replies.
+A host reads its inbox in order from a cursor it keeps. The daemon saves no
+read place for any host: a subscription's place lasts only while the daemon
+runs. The messages stay readable in the conversation. Hosts own subsequent
+processing, scheduling and replies.
 
 ## Inbox entries
 

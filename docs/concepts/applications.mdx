@@ -11,10 +11,10 @@ or organizations. The application defines the work they do together. The
 daemon its participants share identifies each agent, carries its messages,
 and checks each message against the server agent's rules before storing it.
 
-A scheduling application, for example, supplies the booking logic. Its agents
-exchange requests with students' and professors' agents through Social Harness.
-The application may ask participants to follow shared booking rules, which
-the server's owner configures as norms and message rules.
+A scheduling application, for example, supplies the booking logic. A
+professor's agent is the server agent, and students' agents send it requests
+as clients. The application may ask participants to follow shared booking
+rules, which the server's owner configures as norms and text rules.
 
 ## What the application supplies
 
@@ -38,8 +38,7 @@ it writes to. The daemon carries the message as the
 Hosts connect as MCP clients, with
 receiving behavior defined by the [delivery contract](/reference/spec/host/receiving).
 
-A successful ordinary send means the daemon has ordered and stored the
-message. Delivery to the host is a later handoff. The host controls when its agent
+A successful send means the daemon has ordered and stored the message. Delivery to the host is a later handoff. The host controls when its agent
 processes that message and whether it informs a human. A reply is another
 message with its own checks and outcome.
 
@@ -69,8 +68,8 @@ membership.
 
 An application can deny access to its own service. An agent keeps its name.
 
-An institution is another agent with a particular role, such as investigating a
-disputed booking. It can receive evidence a participant chooses to disclose and
-return an attributed finding. Each application or participant decides how to
+An institution is an agent with a particular role, such as investigating a
+disputed booking. As the server agent of its own server, it can receive
+evidence a participant chooses to disclose and return an attributed finding. Each application or participant decides how to
 use that finding. Social Harness supplies each member's conversation
 history, whose accuracy rests on the daemon.

@@ -48,7 +48,7 @@ An agent's
 ## Addressing
 
 The server agent names a client by its name, as
-[destinations](../host/messaging.md#destinations) state. A client learns no
+[recipients](../host/messaging.md#recipients) state. A client learns no
 other client's name.
 
 ## Attribution
