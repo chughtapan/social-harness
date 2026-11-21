@@ -19,7 +19,7 @@ import {
 } from "effect";
 import { expect } from "vitest";
 import type { DecisionProvider, DecisionRequest } from "./decision-provider.js";
-import type { Firewall, MessagePolicy } from "./firewall.js";
+import type { Firewall } from "./firewall.js";
 import { openTestDatabase } from "../tests/support/database.js";
 import { answersTo } from "../tests/support/decision-provider.js";
 import {
@@ -41,11 +41,11 @@ const candidateText = (request: DecisionRequest) =>
   )(request.state).candidate.text;
 
 /** A firewall that allows every message a client sends and decides each of the server agent's with `decide`. */
-const decidingOutgoing = (
+const decidingServerMessages = (
   decide: () => ReturnType<Firewall["check"]>,
 ): Firewall => ({
-  check: (direction) =>
-    direction === "outgoing" ? decide() : Effect.succeed({ kind: "allowed" }),
+  check: (sender) =>
+    sender === "server" ? decide() : Effect.succeed({ kind: "allowed" }),
 });
 
 it("gives the server agent its tools, and a status result that names the agent", () =>
@@ -137,7 +137,7 @@ it("answers a failed call with the failure's message and its fields", () =>
     ];
     const pending = [...refusals];
     const server = yield* inProcessServer({
-      firewall: decidingOutgoing(() =>
+      firewall: decidingServerMessages(() =>
         Effect.map(Effect.fromNullable(pending.shift()), (next) => ({
           kind: "refused" as const,
           ...Struct.omit(next, "reason", "refusal"),
@@ -152,7 +152,7 @@ it("answers a failed call with the failure's message and its fields", () =>
       chk_1:
         "Error: Send a greeting first. Check: chk_1, rule shape; rule-violation.",
       chk_2:
-        "Error: The policy check could not settle whether the message is allowed. Check: chk_2; unresolved-evidence.",
+        "Error: The check could not settle whether the message follows the server's norms. Check: chk_2; unresolved-evidence.",
     };
     for (const fields of refusals) {
       expect(
@@ -179,7 +179,7 @@ it("answers a failed call with the failure's message and its fields", () =>
 it("answers a call that dies without the defect's text", () =>
   Effect.gen(function* () {
     const server = yield* inProcessServer({
-      firewall: decidingOutgoing(() =>
+      firewall: decidingServerMessages(() =>
         Effect.dieMessage("PRIVATE relation does not exist"),
       ),
     });
@@ -205,7 +205,7 @@ it("interrupts only the aborted call, whose conversation the next send then uses
     const interrupted = yield* Deferred.make<undefined>();
     let first = true;
     const server = yield* inProcessServer({
-      firewall: decidingOutgoing(() =>
+      firewall: decidingServerMessages(() =>
         Effect.suspend(() => {
           if (!first) {
             return Effect.succeed({ kind: "allowed" as const });
@@ -231,34 +231,32 @@ it("interrupts only the aborted call, whose conversation the next send then uses
     expect(yield* send(alice, hello)).toHaveProperty("id");
   }));
 
-/** The one rule of every policy here. */
-const privacy = {
-  id: "privacy",
-  applies: "both" as const,
-  text: "Protect the owner's private information.",
-  feedback: "Keep private information private.",
-};
+/** A norm of one act that either member sends, whose described field gives it the one text rule here. */
+const chat = Either.getOrThrow(
+  holdNorms([
+    `(norm chat)
+(content say :by (client server) :starts true :ends true
+  (field words :type string :description "Nothing private."))
+`,
+  ]),
+);
 
-/** A message policy of the rule `privacy`, judged by `provider`. */
-const policy = (provider: DecisionProvider): MessagePolicy => ({
-  provider,
-  rules: [privacy],
-  settings: { minimumProbability: 0.8, timeoutMilliseconds: 5_000 },
-});
+/** The act `say` with `words`. */
+const say = (words: string) =>
+  `(say :ontology chat :words ${JSON.stringify(words)})`;
 
-/** A provider that finds every message compliant. */
-const compliant: DecisionProvider = {
-  decide: (request) => Effect.succeed(answersTo(request)),
-};
+/** What the sender of a `say` that breaks the field's description reads. */
+const nothingPrivate =
+  "words must hold what its description says and nothing else: Nothing private.";
 
-/** A provider that finds a message in violation exactly when its text is `private`, whichever agent sent it. */
+/** A provider that finds a message in violation exactly when it says `private`, whichever member sent it. */
 const privateViolation: DecisionProvider = {
   decide: (request) =>
     Effect.succeed(
       answersTo(
         request,
         {},
-        candidateText(request) === "private" ? "violation" : "compliant",
+        candidateText(request) === say("private") ? "violation" : "compliant",
       ),
     ),
 };
@@ -306,35 +304,36 @@ it("checks the messages of one conversation in order while another conversation 
     const release = yield* Deferred.make<undefined>();
     const assessed: string[] = [];
     const { server, alice, bob } = yield* aliceAndBob({
-      policy: policy({
+      norms: chat,
+      provider: {
         decide: (request) =>
           Effect.gen(function* () {
             const text = candidateText(request);
             assessed.push(text);
-            if (text === "First") {
+            if (text === say("First")) {
               yield* Deferred.succeed(entered, undefined);
               yield* Deferred.await(release);
             }
             return answersTo(request);
           }),
-      }),
+      },
     });
     const carol = yield* server.signInAs("carol");
     const authors = Effect.map(inboxOf(alice), (messages) =>
       messages.map((message) => message.author),
     );
 
-    const first = yield* Effect.forkScoped(send(bob, { text: "First" }));
+    const first = yield* Effect.forkScoped(send(bob, { text: say("First") }));
     yield* Deferred.await(entered);
-    const second = yield* Effect.forkScoped(send(bob, { text: "Second" }));
-    yield* send(carol, { text: "Independent" });
+    const second = yield* Effect.forkScoped(send(bob, { text: say("Second") }));
+    yield* send(carol, { text: say("Independent") });
 
     expect(yield* authors).toEqual([carol.name]);
-    expect(assessed).toEqual(["First", "Independent"]);
+    expect(assessed).toEqual([say("First"), say("Independent")]);
     yield* Deferred.succeed(release, undefined);
     yield* Fiber.joinAll([first, second]);
     expect(yield* authors).toEqual([carol.name, bob.name, bob.name]);
-    expect(assessed).toEqual(["First", "Independent", "Second"]);
+    expect(assessed).toEqual([say("First"), say("Independent"), say("Second")]);
   }));
 
 it("reads the inbox a page of fifty at a time after a cursor, the same page again for the same cursor, and nothing earlier without one", () =>
@@ -366,33 +365,39 @@ it("reads the inbox a page of fifty at a time after a cursor, the same page agai
     });
   }));
 
-it("fails a send that breaks a rule, telling the server agent the whole refusal and a client only the rule's feedback, and keeps the decision but not the message", () =>
+it("fails a send whose described field breaks its description, telling the server agent the whole refusal and a client only the feedback, and keeps the decision but not the message", () =>
   Effect.gen(function* () {
     const { alice, bob } = yield* aliceAndBob({
-      policy: policy(privateViolation),
+      norms: chat,
+      provider: privateViolation,
     });
-    yield* send(bob, { text: "hello" });
+    yield* send(bob, { text: say("hello") });
 
-    expect(yield* Effect.flip(send(bob, { text: "private" }))).toEqual({
+    expect(yield* Effect.flip(send(bob, { text: say("private") }))).toEqual({
       reason: "refused",
-      feedback: [privacy.feedback],
-      message: `Error: ${privacy.feedback}`,
+      feedback: [nothingPrivate],
+      message: `Error: ${nothingPrivate}`,
     });
     expect(
-      yield* Effect.flip(send(alice, { to: bob.name, text: "private" })),
+      yield* Effect.flip(send(alice, { to: bob.name, text: say("private") })),
     ).toMatchObject({
       reason: "firewall-refused",
       refusal: "rule-violation",
-      feedback: [privacy.feedback],
+      feedback: [nothingPrivate],
     });
 
-    const refusedBy = { decision: "refused", reason: "rule-violation" };
+    const refusedBy = {
+      client: bob.name,
+      decision: "refused",
+      reason: "rule-violation",
+      decidedBy: [{ ruleId: "chat.say.words", feedback: nothingPrivate }],
+    };
     expect(
       (yield* callTool(alice, "read_firewall_decisions")).decisions,
     ).toMatchObject([
-      { direction: "outgoing", peer: bob.name, ...refusedBy },
-      { direction: "incoming", peer: bob.name, ...refusedBy },
-      { direction: "incoming", peer: bob.name, decision: "allowed" },
+      { sender: "server", ...refusedBy },
+      { sender: "client", ...refusedBy },
+      { sender: "client", client: bob.name, decision: "allowed" },
     ]);
     expect(yield* historyOf(bob)).toEqual(["sent"]);
     expect(yield* inboxOf(bob)).toEqual([]);
@@ -401,10 +406,11 @@ it("fails a send that breaks a rule, telling the server agent the whole refusal 
 it("tells a client only that the server is unavailable, and stores nothing, when the check of its message could not run", () =>
   Effect.gen(function* () {
     const { alice, bob } = yield* aliceAndBob({
-      policy: policy({ decide: () => Effect.succeed({ answers: {} }) }),
+      norms: chat,
+      provider: { decide: () => Effect.succeed({ answers: {} }) },
     });
 
-    expect(yield* send(bob, { text: "Hello" }).pipe(Effect.flip)).toEqual({
+    expect(yield* send(bob, { text: say("Hello") }).pipe(Effect.flip)).toEqual({
       reason: "unavailable",
       message: "The server is unavailable. Try again later.",
     });
@@ -415,22 +421,19 @@ it("tells a client only that the server is unavailable, and stores nothing, when
     expect(yield* historyOf(bob)).toEqual([]);
   }));
 
-/** `open` starts an instance and `close`, from the other agent, ends it. */
+/** The client's `open` starts an instance and the server's `close` ends it. */
 const exchange = Either.getOrThrow(
   holdNorms([
-    `(norm exchange :initiator Sender :participant Receiver)
-(content open :by Sender :starts true :initiates opened)
-(content close :by Receiver :when opened :ends true)
+    `(norm exchange)
+(content open :by client :starts true :initiates opened)
+(content close :by server :when opened :ends true)
 `,
   ]),
 );
 
-it("refuses what an agent that holds norms does not accept, plain text and an act out of turn alike, telling the client only what to correct, and the conversation goes on", () =>
+it("refuses what a server that holds norms does not accept, plain text and an act out of turn alike, telling the client only what to correct, and the conversation goes on", () =>
   Effect.gen(function* () {
-    const { alice, bob } = yield* aliceAndBob({
-      norms: exchange,
-      policy: policy(compliant),
-    });
+    const { alice, bob } = yield* aliceAndBob({ norms: exchange });
 
     for (const text of ["Hello, can you help?", "(close :ontology exchange)"]) {
       const refusal = yield* send(bob, { text }).pipe(Effect.flip);
@@ -448,7 +451,6 @@ it("checks each act of a norm against the whole conversation, though the provide
     const { alice, bob } = yield* aliceAndBob({
       historyLimit: 1,
       norms: exchange,
-      policy: policy(compliant),
     });
 
     for (let instance = 0; instance < 3; instance += 1) {

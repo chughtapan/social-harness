@@ -5,6 +5,7 @@ import { Data, Effect, Either, Order } from "effect";
 import { join } from "node:path";
 import type { StructureCheck } from "../firewall.js";
 import { compileNorm } from "./compiler.js";
+import { describedFields } from "./norm.js";
 import { structureCheck } from "./structure-check.js";
 
 /** A norms directory the server cannot use, and why. */
@@ -17,9 +18,9 @@ export class NormsConfigurationError extends Data.TaggedError(
 }
 
 /**
- * The norms an agent's firewall applies: the structure check that holds each
- * message to them, each norm's document as an agent reads it, and whether any
- * has text rules, which need a decision provider.
+ * The norms a server holds: the structure check that holds each message to
+ * them, each norm's document as an agent reads it, and whether any describes
+ * a string field, which gives it a text rule that needs a decision provider.
  */
 export interface HeldNorms {
   readonly structureCheck: StructureCheck;
@@ -72,7 +73,9 @@ export function holdNorms(
           description: norm.description,
           document: norm.source,
         })),
-        hasTextRules: norms.some((norm) => norm.textRules.length > 0),
+        hasTextRules: norms.some((norm) =>
+          norm.forms.some((form) => describedFields(form).length > 0),
+        ),
       }),
     }),
   );

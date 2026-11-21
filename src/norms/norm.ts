@@ -1,16 +1,13 @@
 /**
- * @file A norm as compiled: its acts' forms, turn rules and text rules. A
- * message is read as one act, written as parenthesized data, and the act is
+ * @file A norm as compiled: the form and the turn rules of each of its acts.
+ * A message is read as one act, written as parenthesized data, and the act is
  * fitted to the form its norm declares for it.
  */
 
-import { Either, Schema, Struct } from "effect";
-import { TextRule } from "../firewall.js";
+import { Either, Schema } from "effect";
 import { type Message, wellFormedString } from "../messages.js";
 
-const name = Schema.String.pipe(
-  Schema.pattern(/^[a-zA-Z][a-zA-Z0-9-]{0,63}$/u),
-);
+const name = Schema.String.pipe(Schema.pattern(/^[a-z][a-z0-9-]{0,63}$/u));
 const names = Schema.Array(name);
 const actReference = Schema.Union(name, Schema.Struct({ fact: name }));
 
@@ -18,7 +15,7 @@ const bound = Schema.optionalWith(Schema.Number.pipe(Schema.finite()), {
   exact: true,
 });
 
-/** What every field carries. A description explains a field; it does not constrain its value. */
+/** What every field carries. A description says what the field holds, and a decision provider judges the text of a string field against it. */
 const described = {
   name,
   optional: Schema.Boolean,
@@ -77,7 +74,7 @@ const sourceSchema = Schema.Union(
 const formSchema = Schema.Struct({
   act: name,
   by: Schema.Union(
-    names,
+    Schema.Array(Schema.Literal("client", "server")),
     Schema.Struct({ recipient: Schema.Struct({ fact: name }) }),
   ),
   fields: Schema.Array(fieldSchema),
@@ -98,30 +95,36 @@ const formSchema = Schema.Struct({
 });
 
 /**
- * The form of one performative: its fields, who may send it, and the facts it
- * needs, sets and clears.
+ * The form of one performative: its fields, which members may send it, and
+ * the facts it needs, sets and clears. `by` lists roles, or names a fact
+ * whose message's recipient is the one member that may send the act.
  */
 export type MessageForm = typeof formSchema.Type;
 
 /**
  * One norm as compiled. `digest` is the SHA-256 of `source`, the norm document
- * it was compiled from. A text rule's `act` names the one performative it
- * governs; a rule without it governs every act of the norm.
+ * it was compiled from.
  */
 const normSchema = Schema.Struct({
   name,
   digest: Schema.String.pipe(Schema.pattern(/^[a-f0-9]{64}$/u)),
   source: Schema.String,
   description: Schema.String,
-  roles: Schema.Struct({ initiator: name, participant: name }),
   forms: Schema.Array(formSchema),
-  textRules: Schema.Array(
-    Schema.Struct({
-      ...Struct.pick(TextRule.fields, "id", "text", "feedback"),
-      act: Schema.optional(name),
-    }),
-  ),
 });
+
+/**
+ * The fields of `form` whose text a decision provider judges: the string
+ * fields that have a description. A field of another type is held by its
+ * bounds or choices alone.
+ */
+export function describedFields(form: MessageForm) {
+  return form.fields.flatMap((field) =>
+    field.type === "string" && field.description !== undefined
+      ? [{ name: field.name, description: field.description }]
+      : [],
+  );
+}
 
 /** A compiled norm: data messages are checked against, with no code of its own. */
 export type Norm = typeof normSchema.Type;
@@ -165,13 +168,10 @@ interface SExpressionError {
 }
 
 /**
- * Whether `text` may name a norm, an act or a field: a lowercase letter, then
- * lowercase letters, digits or hyphens, 64 characters at most. Roles and facts
- * may also use capitals.
+ * Whether `text` may name a norm, an act, a field or a fact: a lowercase
+ * letter, then lowercase letters, digits or hyphens, 64 characters at most.
  */
-export function isLowercaseName(text: string): boolean {
-  return /^[a-z][a-z0-9-]{0,63}$/u.test(text);
-}
+export const isName = Schema.is(name);
 
 /** Reads a message as one act: the whole text is one parenthesized act. */
 export function readAct(message: Message): Either.Either<Act, NormProblem> {
@@ -185,7 +185,7 @@ export function readAct(message: Message): Either.Either<Act, NormProblem> {
       }
       const [head, ...parameters] = form.values;
       return head?.kind !== "symbol" ||
-        !isLowercaseName(head.value) ||
+        !isName(head.value) ||
         parameters.length % 2 !== 0
         ? Either.left(
             structural(
@@ -320,7 +320,7 @@ function readParameters(
       if (
         key?.kind !== "symbol" ||
         !key.value.startsWith(":") ||
-        !isLowercaseName(key.value.slice(1)) ||
+        !isName(key.value.slice(1)) ||
         value === undefined
       ) {
         return yield* Either.left(

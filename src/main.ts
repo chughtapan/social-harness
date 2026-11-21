@@ -1,8 +1,9 @@
 #!/usr/bin/env node
 /**
- * @file The `sharnessd` executable: it reads the settings file, builds the
- * server agent's firewall, opens the server, and serves its MCP tools over
- * HTTP to the owners the authentication admits. `--help` prints the
+ * @file The `sharnessd` executable: it reads the settings file, loads the
+ * norms the server publishes, opens the server behind the firewall that
+ * holds every message to them, and serves its MCP tools over HTTP to the
+ * owners the authentication admits. `--help` prints the
  * usage, no argument serves until the process is stopped, and any other
  * arguments print the usage to standard error. A startup failure prints one
  * line and exits unsuccessfully.
@@ -32,7 +33,11 @@ import {
 import { createServer } from "node:http";
 import { dirname, resolve } from "node:path";
 import { type Admission, admission, authentication } from "./authentication.js";
-import { loadMessagePolicy, makeFirewall } from "./firewall.js";
+import {
+  decisionProviderSetting,
+  jevDecisionProvider,
+} from "./decision-provider.js";
+import { makeFirewall } from "./firewall.js";
 import { mcpServerFactory, packageVersion } from "./mcp.js";
 import { AgentName } from "./messages.js";
 import { loadNorms } from "./norms/index.js";
@@ -57,18 +62,20 @@ const settingsFile = Schema.Struct({
     name: AgentName,
     subject: Schema.NonEmptyString,
   }),
-  messagePolicyFile: Schema.optional(Schema.NonEmptyString),
   normsDirectory: Schema.optional(Schema.NonEmptyString),
+  decisionProvider: Schema.optional(decisionProviderSetting),
   maximumHistoryRecords: Schema.optional(
     Schema.Int.pipe(Schema.between(1, 1024)),
   ),
 });
 
 /**
- * The settings: what the process holds after reading the settings file and
- * the files it names, with the message policy and the held norms in place of
- * their paths. Those paths resolve against the settings file's own directory,
- * whatever the working directory.
+ * The settings: what the process holds after reading the settings file, with
+ * the held norms in place of their directory and the judge in place of the
+ * decision provider's name. The norms directory resolves against the
+ * settings file's own directory, whatever the working directory. The judge
+ * is Jev under the named model, with the key the environment variable
+ * `SHARNESS_DECISION_PROVIDER_KEY` holds.
  */
 const loadSettings = Effect.fn("loadSettings")(function* () {
   const settingsPath = yield* Config.string("SHARNESS_CONFIG_FILE").pipe(
@@ -92,26 +99,34 @@ const loadSettings = Effect.fn("loadSettings")(function* () {
     file.normsDirectory === undefined
       ? undefined
       : yield* loadNorms(resolve(settingsDirectory, file.normsDirectory));
-  if (norms !== undefined && file.messagePolicyFile === undefined) {
+  if (norms?.hasTextRules === true && file.decisionProvider === undefined) {
     return yield* refused(
-      "The configured norms need a messagePolicyFile: the message policy checks them",
+      "The configured norms describe string fields, which need a decisionProvider to judge them",
     );
   }
-  const messagePolicy =
-    file.messagePolicyFile === undefined
+  const named = file.decisionProvider;
+  const judge =
+    named === undefined
       ? undefined
-      : yield* loadMessagePolicy(
-          resolve(settingsDirectory, file.messagePolicyFile),
-        );
-  if (norms?.hasTextRules === true && messagePolicy?.provider === undefined) {
-    return yield* refused(
-      "The configured norms have text rules, which need a messagePolicyFile with a decisionProvider to check them",
-    );
-  }
+      : {
+          ...Struct.omit(named, "model"),
+          provider: jevDecisionProvider({
+            model: named.model,
+            apiKey: yield* Config.redacted(
+              Config.nonEmptyString("SHARNESS_DECISION_PROVIDER_KEY"),
+            ).pipe(
+              Effect.mapError(() =>
+                refused(
+                  "The settings name a decisionProvider: set SHARNESS_DECISION_PROVIDER_KEY to its key",
+                ),
+              ),
+            ),
+          }),
+        };
   return {
-    ...Struct.omit(file, "messagePolicyFile", "normsDirectory"),
-    messagePolicy,
+    ...Struct.omit(file, "normsDirectory", "decisionProvider"),
     norms,
+    judge,
   };
 });
 
@@ -239,9 +254,9 @@ const serve = Effect.gen(function* () {
     url,
     serverAgent.name,
     makeFirewall({
-      policy: settings.messagePolicy,
-      historyLimit: settings.maximumHistoryRecords,
       structureCheck: norms?.structureCheck,
+      judge: settings.judge,
+      historyLimit: settings.maximumHistoryRecords,
     }),
   );
   const factory = yield* mcpServerFactory(server, {
@@ -275,7 +290,6 @@ NodeRuntime.runMain(
       "SettingsError",
       "IssuerError",
       "NormsConfigurationError",
-      "MessagePolicyConfigurationError",
       "DatabasePreparationError",
       ({ message }) => exitUnsuccessfully(message),
     ),

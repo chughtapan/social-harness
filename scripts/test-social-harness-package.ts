@@ -1,4 +1,4 @@
-/** @file Packs the package, installs the tarball in a scratch project, and checks that the installed `sharnessd` prints its usage and that the shipped message policy is the repository's. */
+/** @file Packs the package, installs the tarball in a scratch project, and checks that the installed `sharnessd` prints its usage and that a shipped example norm is the repository's. */
 import { Command, FileSystem } from "@effect/platform";
 import { NodeContext, NodeRuntime } from "@effect/platform-node";
 import { Console, Data, Effect, Schema } from "effect";
@@ -6,7 +6,7 @@ import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const root = dirname(dirname(fileURLToPath(import.meta.url)));
-const policy = join("config", "firewall", "message-policy.json");
+const norm = join("config", "norms", "examples", "office-hours.lisp");
 
 /** A check of the packed package that did not hold. */
 class PackCheckError extends Data.TaggedError("PackCheckError")<{
@@ -71,13 +71,13 @@ const check = Effect.gen(function* () {
       message: `expected the installed sharnessd --help to print its usage, got:\n${usage}`,
     });
   }
-  const installed = join(consumer, "node_modules", name, policy);
+  const installed = join(consumer, "node_modules", name, norm);
   if (
     (yield* fs.readFileString(installed)) !==
-    (yield* fs.readFileString(join(root, policy)))
+    (yield* fs.readFileString(join(root, norm)))
   ) {
     return yield* new PackCheckError({
-      message: "the packed message policy differs from the repository's",
+      message: "the packed example norm differs from the repository's",
     });
   }
   yield* Console.log("social-harness package consumer check passed");

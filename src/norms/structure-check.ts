@@ -1,45 +1,45 @@
 /**
- * @file The structure check of a firewall whose agent holds norms. It replays
- * a conversation's earlier messages to find the instance in progress, then
- * says whether a further message is an act that may follow.
+ * @file The structure check of a server that holds norms. It replays a
+ * conversation's earlier messages to find the instance in progress, then
+ * says whether a further message is an act its sender may send next.
  */
 
-import { Effect, Either, Struct } from "effect";
-import type { Message } from "../messages.js";
-import {
-  type CheckedMessage,
-  type StructureCheck,
-  TextRule,
-} from "../firewall.js";
+import { Effect, Either } from "effect";
+import type { CheckedMessage, StructureCheck } from "../firewall.js";
+import type { Message, Role } from "../messages.js";
 import {
   type Act,
   checkStructure,
+  describedFields,
   type MessageForm,
   type Norm,
   type NormProblem,
   readAct,
 } from "./norm.js";
 
-/** One earlier act that fits the protocol: its message, the time of the firewall's check of it and the act its text states. */
-interface ReplayedAct {
+/** A message as the structure check judges it: which member sent it, and the time of the firewall's check of it. */
+interface Sent {
   readonly message: Message;
+  readonly role: Role;
   readonly at: number;
+}
+
+/** One earlier act that fits the protocol, with the act its text states. */
+interface ReplayedAct extends Sent {
   readonly act: Act;
 }
 
 /**
- * What one firewall's checks say of a conversation. `referenceActs`
- * gives the performative of each message a reply may name. `instance` is the
- * instance in progress: its norm, who holds each role, the message that
- * set each current fact, how often each act was sent, and the reply reference
- * of every message that belongs to it.
+ * What the firewall's checks say of a conversation. `referenceActs` gives
+ * the performative of each message a reply may name. `instance` is the
+ * instance in progress: its norm, the message that set each current fact,
+ * how often each act was sent, and the reply reference of every message that
+ * belongs to it.
  */
 interface ProtocolView {
   readonly referenceActs: ReadonlyMap<string, string | undefined>;
   readonly instance?: {
     readonly norm: Norm;
-    readonly initiator: string;
-    readonly participant: string;
     readonly facts: ReadonlyMap<string, ReplayedAct>;
     readonly counts: ReadonlyMap<string, number>;
     readonly acts: readonly ReplayedAct[];
@@ -62,35 +62,37 @@ interface FittedAct extends HeldAct {
 }
 
 /**
- * The structure check of a firewall whose agent holds `installed`. It replays
- * the earlier messages to find the instance in progress,
- * then reads the message as an act of that instance or, when none is, of the
- * norm it names. An act that fits passes with its norm's text rules for
- * it. Any other message is refused under a rule named for the norm of the
- * instance in progress and the stage that failed. Without norms every message
- * passes.
+ * The structure check of a server that holds `installed`. It replays the
+ * earlier messages to find the instance in progress, then reads the message
+ * as an act of that instance or, when none is, of the norm it names. An act
+ * that fits passes with a text rule for each described string field it states. Any
+ * other message is refused under a rule named for the norm of the instance
+ * in progress and the stage that failed. Without norms every message passes.
  */
 export function structureCheck(installed: readonly Norm[]): StructureCheck {
-  return (message, earlier, now) =>
+  return (sender, message, earlier, now) =>
     Effect.sync(
       (): Result =>
         installed.length === 0
           ? { kind: "passed", textRules: [] }
-          : checkMessage(installed, message, earlier, now),
+          : checkMessage(
+              installed,
+              { message, role: sender, at: now },
+              earlier,
+            ),
     ).pipe(Effect.withSpan("structureCheck"));
 }
 
-/** What the structure check says of `message` at `now`, after the `earlier` messages of its conversation. */
+/** What the structure check says of `sent`, after the `earlier` messages of its conversation. */
 function checkMessage(
   installed: readonly Norm[],
-  message: Message,
+  sent: Sent,
   earlier: readonly CheckedMessage[],
-  now: number,
 ): Result {
-  const view = projectProtocol(installed, earlier);
-  const held = readHeldAct(view, installed, message);
+  const view = projectProtocol(installed, earlier, sent);
+  const held = readHeldAct(view, installed, sent.message);
   return Either.match(
-    Either.flatMap(held, (read) => fitAct(view, read, message, now)),
+    Either.flatMap(held, (read) => fitAct(view, read, sent)),
     {
       onLeft: (problem) =>
         refusal(view, problem, Either.getOrUndefined(held)?.norm),
@@ -127,19 +129,24 @@ function refusal(
 }
 
 /**
- * The pass of an act that fits: the text rules its norm gives the act and
- * every act, and what the decision provider reads of the instance.
+ * The pass of an act that fits: a text rule for each described field the act
+ * states, which holds the field's text to its description, and what the
+ * decision provider reads of the instance.
  */
 function pass(view: ProtocolView, { act, norm, form }: FittedAct): Result {
   const named = { norm: norm.name, digest: norm.digest };
   return {
     kind: "passed",
-    textRules: norm.textRules
-      .filter((rule) => rule.act === undefined || rule.act === act.name)
-      .map(
-        (rule) =>
-          new TextRule({ ...Struct.omit(rule, "act"), applies: "both" }),
-      ),
+    textRules: describedFields(form).flatMap(({ name, description }) =>
+      Object.hasOwn(act.fields, name)
+        ? [
+            {
+              id: `${norm.name}.${act.name}.${name}`,
+              text: `${name} must hold what its description says and nothing else: ${description}`,
+            },
+          ]
+        : [],
+    ),
     protocol: {
       ...named,
       act: act.name,
@@ -154,42 +161,40 @@ function pass(view: ProtocolView, { act, norm, form }: FittedAct): Result {
 /**
  * Replays a conversation's earlier messages in order under the held norms.
  * Only a message the firewall checked that reads as an act and fits the
- * protocol at the time of its check advances the instance.
+ * protocol at the time of its check advances the instance. A conversation
+ * has two members, so an earlier message has the role of `next`, the message
+ * under check, when the same agent wrote it, and the other role otherwise.
  */
 function projectProtocol(
   installed: readonly Norm[],
   earlier: readonly CheckedMessage[],
+  next: Sent,
 ): ProtocolView {
+  const other = next.role === "client" ? "server" : "client";
   const referenceActs = new Map<string, string | undefined>();
   let view: ProtocolView = { referenceActs };
-  for (const entry of earlier) {
-    const act = replayed(view, installed, entry);
+  for (const { message, checkedAt } of earlier) {
+    const role = message.author === next.message.author ? next.role : other;
+    const act =
+      checkedAt === undefined
+        ? undefined
+        : replayed(view, installed, { message, role, at: checkedAt });
     if (act !== undefined) {
       view = advance(view, act);
     }
-    view = retainInteractionReference(view, entry.message);
-    referenceActs.set(entry.message.msgId, act?.act.name);
+    view = retainInteractionReference(view, message);
+    referenceActs.set(message.msgId, act?.act.name);
   }
   return view;
 }
 
-/**
- * The act of an earlier message, as the view permitted it at the time of the
- * firewall's check, or nothing when the firewall did not check the message or
- * the message is no such act.
- */
-function replayed(
-  view: ProtocolView,
-  installed: readonly Norm[],
-  { message, checkedAt }: CheckedMessage,
-) {
-  return checkedAt === undefined
-    ? undefined
-    : readHeldAct(view, installed, message).pipe(
-        Either.flatMap((held) => fitAct(view, held, message, checkedAt)),
-        Either.map((fitted) => ({ ...fitted, message, at: checkedAt })),
-        Either.getOrUndefined,
-      );
+/** The act of an earlier message, as the view permitted it at the time of the firewall's check, or nothing when the message is no such act. */
+function replayed(view: ProtocolView, installed: readonly Norm[], sent: Sent) {
+  return readHeldAct(view, installed, sent.message).pipe(
+    Either.flatMap((held) => fitAct(view, held, sent)),
+    Either.map((fitted) => ({ ...fitted, ...sent })),
+    Either.getOrUndefined,
+  );
 }
 
 /**
@@ -215,43 +220,46 @@ function readHeldAct(
   });
 }
 
-/** The act of `message` with its form, once its structure fits its norm and the view permits it at `now`. */
+/** The act of `sent` with its form, once its structure fits its norm and the view permits it at the time of its check. */
 function fitAct(
   view: ProtocolView,
   held: HeldAct,
-  message: Message,
-  now: number,
+  sent: Sent,
 ): Checked<FittedAct> {
   return Either.flatMap(checkStructure(held.norm, held.act), (form) => {
     const fitted = { ...held, form };
-    return Either.map(checkProtocol(view, fitted, message, now), () => fitted);
+    return Either.map(checkProtocol(view, fitted, sent), () => fitted);
   });
 }
 
 /**
- * Why the view does not permit the fitted act, which `message` states, next.
- * A continuation that replies outside the instance, comes before its delay
- * or breaks a relation gets the one refusal of an act that may not follow.
+ * Why the view does not permit the fitted act, which `sent` states, next. A
+ * continuation that replies outside the instance, comes before its delay or
+ * breaks a relation gets the one refusal of an act that may not follow.
  */
 function checkProtocol(
   view: ProtocolView,
   fitted: FittedAct,
-  message: Message,
-  now: number,
+  sent: Sent,
 ): Either.Either<void, NormProblem> {
   const { act, norm, form } = fitted;
+  const { message, role } = sent;
   const invalid = invalidTransition(view, norm, message, act);
+  const notTheirs = violation(
+    `${act.name} is not the ${role}'s to send in ${norm.name}.`,
+  );
   return Either.gen(function* () {
     yield* checkReference(view, form, message);
     const instance = view.instance;
     if (instance === undefined) {
-      return yield* form.starts ? Either.void : Either.left(invalid);
+      const opening = senderPermitted(form, sent)
+        ? Either.void
+        : Either.left(notTheirs);
+      return yield* form.starts ? opening : Either.left(invalid);
     }
     if (form.starts) {
       return yield* Either.left(invalid);
     }
-    const author = message.author;
-    const role = roleOf(instance, author);
     const ancestry = referenceAncestry(instance, message.replyToMsgId);
     if (ancestry.size === 0) {
       return yield* Either.left(invalid);
@@ -266,34 +274,27 @@ function checkProtocol(
     ) {
       return yield* Either.left(invalid);
     }
-    if (!senderPermitted(form, author, role, anchor)) {
-      return yield* Either.left(
-        violation(
-          `${act.name} is not permitted for ${norm.name} role ${role ?? "unassigned"}.`,
-        ),
-      );
+    if (!senderPermitted(form, sent, anchor)) {
+      return yield* Either.left(notTheirs);
     }
     if (!enabled(form, instance)) {
       return yield* Either.left(invalid);
     }
     if (form.delay !== undefined) {
-      yield* checkDelay(instance, form.delay, now, invalid);
+      yield* checkDelay(instance, form.delay, sent.at, invalid);
     }
     return yield* checkRelations(instance, fitted, ancestry, invalid);
   });
 }
 
+/** Whether the form lets the sender of `sent` send its act: by its role, or as the recipient of the message that set the form's fact. */
 function senderPermitted(
   form: MessageForm,
-  author: string,
-  role?: string,
+  { message, role }: Sent,
   anchor?: ReplayedAct,
 ) {
-  if (role === undefined) {
-    return false;
-  }
   return "recipient" in form.by
-    ? anchor?.message.recipient === author
+    ? anchor?.message.recipient === message.author
     : form.by.includes(role);
 }
 
@@ -405,8 +406,6 @@ function advance(
   }
   const prior: Instance = view.instance ?? {
     norm,
-    initiator: entry.message.author,
-    participant: entry.message.recipient,
     facts: new Map(),
     counts: new Map(),
     acts: [],
@@ -425,15 +424,6 @@ function advance(
     ...view,
     instance: { ...prior, facts, counts, acts: [...prior.acts, entry] },
   };
-}
-
-function roleOf(instance: Instance, author: string) {
-  if (author === instance.initiator) {
-    return instance.norm.roles.initiator;
-  }
-  return author === instance.participant
-    ? instance.norm.roles.participant
-    : undefined;
 }
 
 function enabled(form: MessageForm, instance: Instance) {

@@ -85,10 +85,10 @@ export interface Server {
 }
 
 const refusalText: Readonly<Record<FirewallRefusalReason, string>> = {
-  "rule-violation": "It breaks a rule of the agent's message policy.",
+  "rule-violation": "The message breaks a rule of the server's norms.",
   "unresolved-evidence":
-    "The policy check could not settle whether the message is allowed.",
-  "check-unavailable": "The policy check could not complete.",
+    "The check could not settle whether the message follows the server's norms.",
+  "check-unavailable": "The check could not complete.",
 };
 
 /**
@@ -200,7 +200,7 @@ export const openServer = Effect.fn("openServer")(function* (
         replyToMsgId: sent.replyToMsgId,
       });
       const decision = yield* firewall.check(
-        outgoing ? "outgoing" : "incoming",
+        outgoing ? "server" : "client",
         message,
         earlier,
       );

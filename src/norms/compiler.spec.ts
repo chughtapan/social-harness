@@ -48,9 +48,7 @@ type Fields =
   typeof fields extends fc.Arbitrary<infer Generated> ? Generated : never;
 
 /** Text spliced into the declaration each key names. */
-type Splices = Partial<
-  Record<"norm" | "open" | "field" | "close" | "rule", string>
->;
+type Splices = Partial<Record<"norm" | "open" | "field" | "close", string>>;
 
 /**
  * A document of one norm: `open` starts an instance with the given fields and
@@ -62,12 +60,11 @@ function document(declared: Fields, extra: Splices = {}) {
       `  (field ${name} ${fieldTypes[type]}${optional ? " :optional true" : ""}${extra.field ?? ""})`,
   );
   return [
-    `(norm sample :initiator Asker :participant Answerer${extra.norm ?? ""})`,
-    `(content open :by Asker :starts true :initiates begun${extra.open ?? ""}`,
+    `(norm sample${extra.norm ?? ""})`,
+    `(content open :by client :starts true :initiates begun${extra.open ?? ""}`,
     ...lines,
     ")",
-    `(content close :by (Asker Answerer) :when begun :ends true${extra.close ?? ""})`,
-    `(rule${extra.rule ?? " :act open"} "Ask one question.")`,
+    `(content close :by (client server) :when begun :ends true${extra.close ?? ""})`,
   ].join("\n");
 }
 
@@ -105,9 +102,6 @@ vitestIt(
             optional,
           })),
         ).toEqual(declared);
-        expect(norm.textRules).toMatchObject([
-          { id: "sample-rule-1", act: "open" },
-        ]);
       }),
     );
   },
@@ -116,7 +110,7 @@ vitestIt(
 /** A document whose `open` has one field. */
 const sample = document([{ name: "topic", type: "string", optional: false }]);
 
-vitestIt.each<keyof Splices>(["norm", "open", "field", "close", "rule"])(
+vitestIt.each<keyof Splices>(["norm", "open", "field", "close"])(
   "refuses a document whose %s declaration has an attribute it does not take",
   (declaration) => {
     expect(
@@ -130,7 +124,7 @@ vitestIt.each<keyof Splices>(["norm", "open", "field", "close", "rule"])(
 );
 
 vitestIt.each([
-  ["a sender role", "(Asker Answerer)", "(Asker Absent)"],
+  ["a sender that is neither role", "(client server)", "(client absent)"],
   ["a fact it clears", ":ends true)", ":ends true :terminates absent)"],
   [
     "a fact it waits on",
@@ -147,7 +141,6 @@ vitestIt.each([
     ":ends true)",
     ":ends true (relation equals absent (previous open absent)))",
   ],
-  ["an act a rule governs", ":act open", ":act absent"],
 ])(
   "refuses a document that names %s it does not declare",
   (...[, declared, undeclared]) => {
@@ -163,24 +156,24 @@ vitestIt(
       compileNorm(
         [
           "; a comment before the header",
-          '(norm quoted :initiator Asker :participant Answerer :description "a \\"b\\" (c); d\\n")',
-          "(content ask :by Asker :starts true :ends true) ; a trailing comment",
-          '(rule "Say (please); then \\\\ ask.")',
+          '(norm quoted :description "a \\"b\\" (c); d\\n")',
+          "(content ask :by client :starts true :ends true ; a trailing comment",
+          '  (field words :type string :description "Say (please); then \\\\ ask."))',
         ].join("\n"),
       ),
     );
 
     expect(norm.description).toBe('a "b" (c); d\n');
-    expect(norm.textRules).toMatchObject([
-      { text: "Say (please); then \\ ask." },
+    expect(norm.forms).toMatchObject([
+      { fields: [{ description: "Say (please); then \\ ask." }] },
     ]);
   },
 );
 
 /** A document of the norm `name`, whose one act opens and ends an instance. */
 const documentOf = (name: string) =>
-  `(norm ${name} :initiator Asker :participant Answerer)
-(content ask :by Asker :starts true :ends true)
+  `(norm ${name})
+(content ask :by client :starts true :ends true)
 `;
 
 /** A directory holding `files`, by name. */
@@ -219,7 +212,7 @@ it("refuses a directory that holds a document that does not compile or two docum
   Effect.forEach(
     [
       { "a.lisp": documentOf("ask"), "b.lisp": documentOf("ask") },
-      { "a.lisp": documentOf("ask").replace(":by Asker", ":by Absent") },
+      { "a.lisp": documentOf("ask").replace(":by client", ":by absent") },
       { "a.lisp": `${documentOf("ask")}(` },
     ],
     (files: Readonly<Record<string, string>>) =>

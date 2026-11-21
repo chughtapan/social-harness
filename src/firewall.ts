@@ -1,56 +1,43 @@
 /**
- * @file One agent's message firewall. A message-policy file gives text rules;
- * a check has a decision provider judge whether a message breaks each rule
- * that applies to it, and decides what the agent may send or read and what
- * its caller saves.
+ * @file The server agent's firewall. It checks every message of a
+ * conversation when it is sent, whichever member sends it: the structure
+ * check holds the message to the norms the server publishes, a decision
+ * provider judges the text rules those norms give it, and the check decides
+ * whether the message is sent and what its caller saves.
  */
 
-import { FileSystem } from "@effect/platform";
-import { Clock, Config, Data, Effect, Exit, Schema, Struct } from "effect";
+import { Clock, Effect, Exit, Schema, Struct } from "effect";
 import { randomBytes } from "node:crypto";
-import {
-  type Answer,
-  askProvider,
-  type DecisionProvider,
-  type Direction,
-  jevDecisionProvider,
-} from "./decision-provider.js";
-import { AgentName, type Message } from "./messages.js";
-
-const identifier = Schema.NonEmptyTrimmedString;
+import { type Answer, askProvider, type Judge } from "./decision-provider.js";
+import { AgentName, type Message, type Role } from "./messages.js";
 
 /** Why the firewall refused a message: it broke a rule, left one unsettled, or its check could not run. */
 export type FirewallRefusalReason = Refusal["reason"] | "check-unavailable";
 
 /**
- * One text rule: the prose a decision provider judges and the feedback it
- * gives the sender of a message it refuses. Validation requires nonempty
- * text without restricting its language. The message policy specification
- * defines who owns each rule and how edits are validated.
+ * One text rule: a requirement in prose that a decision provider judges a
+ * message against. The sender of a message it refuses reads the same text as
+ * feedback, so a rule says what the message must do.
  */
-export class TextRule extends Schema.Class<TextRule>("TextRule")({
-  id: identifier,
-  feedback: Schema.optional(Schema.NonEmptyString),
-  text: Schema.NonEmptyString,
-  applies: Schema.Literal("incoming", "outgoing", "both"),
-}) {}
+export interface TextRule {
+  readonly id: string;
+  readonly text: string;
+}
 
 /**
  * What one completed check concluded, as its caller saves it, without message
- * content: whether the message the agent sent or received was `allowed` or
- * `refused`, and its peer. `time` is Unix milliseconds.
+ * content: which member sent the message, the client of its conversation, and
+ * whether it was `allowed` or `refused`. `time` is Unix milliseconds.
  * `decidedBy` names each rule that decided a refused message, with its
- * feedback.
- * `checkedRuleIds` lists the rules the check judged: a rule that does not
- * apply to the message's direction is not listed.
+ * feedback. `checkedRuleIds` lists the rules the check judged.
  */
 // eslint-disable-next-line agent-code-guard/no-exported-brand-constructor -- The firewall owns this grammar, which the server stores and returns from read_firewall_decisions.
 export const checkRecordSchema = Schema.Struct({
   checkId: Schema.NonEmptyString,
-  direction: Schema.Literal("incoming", "outgoing"),
+  sender: Schema.Literal("client", "server"),
+  client: AgentName,
   decision: Schema.Literal("allowed", "refused"),
   time: Schema.NonNegativeInt,
-  peer: AgentName,
   reason: Schema.Literal("eligible", "rule-violation", "unresolved-evidence"),
   decidedBy: Schema.Array(
     Schema.Struct({
@@ -65,7 +52,7 @@ export type CheckRecord = typeof checkRecordSchema.Type;
 
 /**
  * A message with the time this firewall checked it, in epoch milliseconds.
- * A message sent while the agent had no message policy has no check.
+ * A message sent while the server held no norms has no check.
  */
 export interface CheckedMessage {
   readonly message: Message;
@@ -73,11 +60,12 @@ export interface CheckedMessage {
 }
 
 /**
- * What a refusal says of the structure check behind it, as a host reads it in
- * a failed send: the norm the message was read as an act of, with the digest
- * of its document, the act, and the stage that refused it. A message the
- * structure check passed and a text rule refused has the stage `semantic`.
- * `explanation` and `field` are those of a problem the structure check found.
+ * What a refusal says of the structure check behind it, as the server agent
+ * reads it in a failed send: the norm the message was read as an act of, with
+ * the digest of its document, the act, and the stage that refused it. A
+ * message the structure check passed and a text rule refused has the stage
+ * `semantic`. `explanation` and `field` are those of a problem the structure
+ * check found.
  */
 export interface StructureDetail {
   readonly norm?: string;
@@ -89,14 +77,15 @@ export interface StructureDetail {
 }
 
 /**
- * Judges whether a message may follow the earlier messages of its
- * conversation at the time `now`, before the text rules do. A refusal gives
- * its explanation as `feedback`, the rule the decision names and its
- * diagnostics as `detail`. A pass gives the text rules that also apply to
- * this message, the `protocol` context the decision provider reads and the
+ * Judges whether a message `sender` sends may follow the earlier messages of
+ * its conversation at the time `now`, before the text rules do. A refusal
+ * gives its explanation as `feedback`, the rule the decision names and its
+ * diagnostics as `detail`. A pass gives the text rules that judge this
+ * message, the `protocol` context the decision provider reads and the
  * `detail` a refusal by a text rule carries.
  */
 export type StructureCheck = (
+  sender: Role,
   message: Message,
   earlier: readonly CheckedMessage[],
   now: number,
@@ -117,8 +106,8 @@ export type StructureCheck = (
 >;
 
 /**
- * A message the agent may send or read. `record` is what the caller saves of
- * the decision; an agent without a message policy has none.
+ * A message that may be sent. `record` is what the caller saves of the
+ * decision; a server that holds no norms has none.
  */
 interface Allowed {
   readonly kind: "allowed";
@@ -126,7 +115,7 @@ interface Allowed {
 }
 
 /**
- * A message whose send fails, whichever agent sent it: one that breaks a
+ * A message whose send fails, whichever member sent it: one that breaks a
  * rule or leaves one unsettled, or one whose check could not run, which has
  * no record. `rule` and `detail` are those of a structure check.
  */
@@ -140,23 +129,23 @@ interface Refused {
   readonly record?: CheckRecord;
 }
 
-/** One agent's message firewall. */
+/** The server agent's firewall. */
 export interface Firewall {
   /**
-   * Checks a message the agent sends (`outgoing`) or one a peer wrote to it
-   * (`incoming`), after the `earlier` messages of its conversation in order.
+   * Checks a message `sender` sends, after the `earlier` messages of its
+   * conversation in order.
    */
   readonly check: (
-    direction: Direction,
+    sender: Role,
     message: Message,
     earlier: readonly CheckedMessage[],
   ) => Effect.Effect<Allowed | Refused>;
 }
 
-/** One check's subject: the message, whether its agent sends or receives it, and the time of the check. */
+/** One check's subject: the message, which member sends it, and the time of the check. */
 interface Checked {
   readonly message: Message;
-  readonly direction: Direction;
+  readonly sender: Role;
   readonly now: number;
 }
 
@@ -169,41 +158,36 @@ interface Refusal extends Pick<CheckRecord, "decidedBy" | "checkedRuleIds"> {
 }
 
 /**
- * The firewall that applies a message policy, and allows every message
- * without one. At most `maximumConcurrentChecks` requests to the provider run
- * at once, four when the policy sets none.
+ * The firewall of a server whose norms `structureCheck` holds messages to. A
+ * server without norms allows every message and records nothing.
  *
  * A check has the structure check judge its message first, with the earlier
- * messages; that check's refusal refuses the message. The text rules that
- * apply to the message's direction then judge it: the owner's rules and those
- * the structure check gives it. Each answer complies, violates or is unsure.
- * A violation refuses, and an unsure answer refuses as unresolved evidence.
- * A provider that gives no usable answer makes the check unavailable. A refusal of a message the structure
- * check passed carries that check's detail.
+ * messages; that check's refusal refuses the message. The `judge` then
+ * answers whether the message breaks each text rule the structure check gave
+ * it: complies, violates or unsure. A violation refuses, and an unsure answer
+ * refuses as unresolved evidence. A judge that gives no usable answer, and
+ * rules without a judge, make the check unavailable. A refusal of a message
+ * the structure check passed carries that check's detail.
  */
 export function makeFirewall(applies: {
-  readonly policy?: MessagePolicy;
-  /** Judges each message before the text rules, and gives the text rules that join them. */
   readonly structureCheck?: StructureCheck;
+  readonly judge?: Judge;
   /** The most earlier messages the provider reads: 256 when unset. */
   readonly historyLimit?: number;
 }): Firewall {
-  const { policy } = applies;
-  if (policy === undefined) {
+  const { structureCheck, judge } = applies;
+  if (structureCheck === undefined) {
     return { check: () => Effect.succeed({ kind: "allowed" }) };
   }
   const permits = Effect.unsafeMakeSemaphore(
-    policy.maximumConcurrentChecks ?? 4,
+    judge?.maximumConcurrentChecks ?? 1,
   );
-  const check: Firewall["check"] = (direction, message, earlier) =>
+  const check: Firewall["check"] = (sender, message, earlier) =>
     Effect.gen(function* () {
       const now = yield* Clock.currentTimeMillis;
-      const checked = { message, direction, now };
-      const structure = yield* (
-        applies.structureCheck?.(message, earlier, now) ??
-          Effect.succeed(undefined)
-      );
-      if (structure?.kind === "refused") {
+      const checked = { message, sender, now };
+      const structure = yield* structureCheck(sender, message, earlier, now);
+      if (structure.kind === "refused") {
         const { reason, ruleId, feedback, detail } = structure;
         return refused(checked, {
           reason,
@@ -214,20 +198,21 @@ export function makeFirewall(applies: {
           checkedRuleIds: [ruleId],
         });
       }
-      const rules = [...policy.rules, ...(structure?.textRules ?? [])].filter(
-        (rule) => rule.applies === "both" || rule.applies === direction,
-      );
-      return yield* askProvider(policy, rules, {
-        ...checked,
-        earlier,
-        historyLimit: applies.historyLimit,
-        protocol: structure?.protocol,
-      }).pipe(
-        Effect.map((answers) => conclude(checked, answers, structure?.detail)),
+      return yield* askProvider(
+        structure.textRules,
+        {
+          ...checked,
+          earlier,
+          historyLimit: applies.historyLimit,
+          protocol: structure.protocol,
+        },
+        judge,
+      ).pipe(
+        Effect.map((answers) => conclude(checked, answers, structure.detail)),
         Effect.catchTag("DecisionProviderError", () =>
-          Effect.succeed(unavailable(structure?.detail)),
+          Effect.succeed(unavailable(structure.detail)),
         ),
-        markCheckActivity(direction),
+        markCheckActivity(sender),
         Effect.withSpan("assessMessage"),
         permits.withPermits(1),
       );
@@ -238,8 +223,9 @@ export function makeFirewall(applies: {
 /**
  * What a check concludes from the provider's answers. A violation refuses,
  * and an unsure answer refuses the message as unresolved evidence. Otherwise
- * the message is allowed. `detail` is what the structure check gave of the
- * message it passed.
+ * the message is allowed. The feedback of a refusal is the text of each
+ * deciding rule. `detail` is what the structure check gave of the message it
+ * passed.
  */
 function conclude(
   checked: Checked,
@@ -262,15 +248,14 @@ function conclude(
       }),
     };
   }
-  const decidedBy = deciding.map(({ rule }) => ({
-    ruleId: rule.id,
-    feedback: rule.feedback,
-  }));
   return refused(checked, {
     reason: violated.length === 0 ? "unresolved-evidence" : "rule-violation",
-    decidedBy,
+    decidedBy: deciding.map(({ rule }) => ({
+      ruleId: rule.id,
+      feedback: rule.text,
+    })),
     checkedRuleIds,
-    feedback: decidedBy.flatMap(({ feedback }) => feedback ?? []),
+    feedback: deciding.map(({ rule }) => rule.text),
     detail,
   });
 }
@@ -297,18 +282,18 @@ function unavailable(detail?: StructureDetail): Refused {
   };
 }
 
-/** The record of the decision a check applied to its message, with the other agent of that message as its peer. */
+/** The record of the decision a check applied to its message, which names the client of the message's conversation. */
 function recordOf(
-  { message, direction, now }: Checked,
+  { message, sender, now }: Checked,
   checkId: string,
   concluded: Pick<CheckRecord, "reason" | "decidedBy" | "checkedRuleIds">,
 ): CheckRecord {
   return {
     checkId,
-    direction,
+    sender,
+    client: sender === "client" ? message.author : message.recipient,
     decision: concluded.reason === "eligible" ? "allowed" : "refused",
     time: now,
-    peer: direction === "outgoing" ? message.recipient : message.author,
     ...Struct.pick(concluded, "reason", "decidedBy", "checkedRuleIds"),
   };
 }
@@ -318,118 +303,16 @@ function mintCheckId() {
   return `chk_${randomBytes(32).toString("hex")}`;
 }
 
-/** A message-policy file or the decision provider's key that cannot be loaded, and why. */
-class MessagePolicyConfigurationError extends Data.TaggedError(
-  "MessagePolicyConfigurationError",
-)<{ readonly message: string }> {}
-
-const unloadable = (message: string) =>
-  new MessagePolicyConfigurationError({ message });
-
-/**
- * A message-policy file. Omitted settings take defaults: an answer below a
- * probability of 0.8 is unsure, and one request to the provider may take 15
- * seconds. Text rules need a provider, and rule ids are unique. Unknown
- * properties are rejected, so a misspelled setting cannot silently weaken the
- * policy.
- */
-const messagePolicyFile = Schema.Struct({
-  rules: Schema.optionalWith(Schema.Array(TextRule), { default: () => [] }),
-  decisionProvider: Schema.optional(
-    Schema.Struct({ model: Schema.NonEmptyTrimmedString }),
-  ),
-  settings: Schema.optionalWith(
-    Schema.Struct({
-      minimumProbability: Schema.Number.pipe(Schema.between(0.5, 1)),
-      timeoutMilliseconds: Schema.Positive.pipe(Schema.int()),
-    }),
-    {
-      default: () => ({ minimumProbability: 0.8, timeoutMilliseconds: 15_000 }),
-    },
-  ),
-  maximumConcurrentChecks: Schema.optional(
-    Schema.Int.pipe(Schema.between(1, 32)),
-  ),
-}).pipe(
-  Schema.filter(
-    (policy) =>
-      policy.decisionProvider !== undefined || policy.rules.length === 0,
-    { message: () => "decisionProvider is required for text rules" },
-  ),
-  Schema.filter(
-    (policy) =>
-      new Set(policy.rules.map((rule) => rule.id)).size === policy.rules.length,
-    { message: () => "text rule ids must be unique" },
-  ),
-);
-
-/**
- * A message policy as a firewall applies it: the rules and settings of its
- * file, and the provider that judges text rules. A file that names no
- * `decisionProvider` gives none.
- */
-export interface MessagePolicy
-  extends Omit<typeof messagePolicyFile.Type, "decisionProvider"> {
-  readonly provider?: DecisionProvider;
-}
-
-/**
- * Loads the message-policy file at `path`. A file that names a
- * `decisionProvider` gets Jev under that model, with the key the environment
- * variable `SHARNESS_DECISION_PROVIDER_KEY` holds, even without text rules of
- * its own: a structure check can add rules for it to judge. A file that
- * cannot be read or decoded fails with a message naming it.
- */
-export const loadMessagePolicy = Effect.fn("loadMessagePolicy")(function* (
-  path: string,
-): Effect.fn.Return<
-  MessagePolicy,
-  MessagePolicyConfigurationError,
-  FileSystem.FileSystem
-> {
-  const filesystem = yield* FileSystem.FileSystem;
-  const { decisionProvider, ...policy } = yield* filesystem
-    .readFileString(path)
-    .pipe(
-      Effect.flatMap(
-        Schema.decodeUnknown(Schema.parseJson(messagePolicyFile), {
-          onExcessProperty: "error",
-        }),
-      ),
-      Effect.mapError((error) =>
-        unloadable(
-          `The message policy file ${path} is unreadable or invalid: ${error.message}`,
-        ),
-      ),
-    );
-  if (decisionProvider === undefined) {
-    return policy;
-  }
-  const apiKey = yield* Config.redacted(
-    Config.nonEmptyString("SHARNESS_DECISION_PROVIDER_KEY"),
-  ).pipe(
-    Effect.mapError(() =>
-      unloadable(
-        `The message policy ${path} names a decisionProvider and SHARNESS_DECISION_PROVIDER_KEY does not hold its key`,
-      ),
-    ),
-  );
-  return {
-    ...policy,
-    provider: jevDecisionProvider({ ...decisionProvider, apiKey }),
-  };
-});
-
 /** Pairs a pending and a settled span around one check, even when it fails or is cancelled. */
-function markCheckActivity(direction: Direction) {
+function markCheckActivity(sender: Role) {
   return <A, E, R>(work: Effect.Effect<A, E, R>): Effect.Effect<A, E, R> =>
     Effect.uninterruptibleMask((restore) =>
-      activitySpan("retry.pending", { id: direction }).pipe(
+      activitySpan("retry.pending", { id: sender }).pipe(
         Effect.zipRight(restore(work)),
         Effect.onExit((exit) => {
           const outcome = Exit.isInterrupted(exit) ? "interrupted" : "failed";
           return activitySpan("retry.settled", {
-            id: direction,
+            id: sender,
             outcome: Exit.isSuccess(exit) ? "checked" : outcome,
           });
         }),

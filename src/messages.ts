@@ -18,6 +18,9 @@ export const AgentName = Schema.String.pipe(
 /** Validated nominal value decoded by {@link AgentName}. */
 export type AgentName = typeof AgentName.Type;
 
+/** Which of a conversation's two members an agent is: the server agent, or its client. */
+export type Role = "client" | "server";
+
 /** A send whose text cannot be a message: it is malformed or too long. */
 class CommunicationError extends Data.TaggedError("CommunicationError")<{
   readonly reason: "content-invalid";

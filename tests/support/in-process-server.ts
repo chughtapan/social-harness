@@ -10,12 +10,9 @@ import {
 } from "@modelcontextprotocol/client";
 import { createMcpHandler } from "@modelcontextprotocol/server";
 import { Effect } from "effect";
+import type { DecisionProvider } from "../../src/decision-provider.js";
 import type { HeldNorms } from "../../src/norms/index.js";
-import {
-  type Firewall,
-  makeFirewall,
-  type MessagePolicy,
-} from "../../src/firewall.js";
+import { type Firewall, makeFirewall } from "../../src/firewall.js";
 import { mcpServerFactory } from "../../src/mcp.js";
 import { AgentName } from "../../src/messages.js";
 import { openServer } from "../../src/server.js";
@@ -30,15 +27,15 @@ const endpoint = new URL("http://127.0.0.1/mcp");
 
 /**
  * A server whose server agent is named `alice` and owned by the owner
- * `alice`, behind a firewall with the given policy, norms and history
- * limit, or one that allows every message. `firewall` replaces that
- * firewall. `signInAs` gives an MCP connection as the agent of an owner:
+ * `alice`, behind a firewall with the given norms, the provider that judges
+ * their text rules and the history limit, or one that allows every message.
+ * `firewall` replaces that firewall. `signInAs` gives an MCP connection as the agent of an owner:
  * the owner a name stands for, or the owner given.
  */
 export const inProcessServer = Effect.fn("inProcessServer")(function* (
   options: {
-    readonly policy?: MessagePolicy;
     readonly norms?: HeldNorms;
+    readonly provider?: DecisionProvider;
     readonly historyLimit?: number;
     readonly firewall?: Firewall;
   } = {},
@@ -49,9 +46,14 @@ export const inProcessServer = Effect.fn("inProcessServer")(function* (
     AgentName.make("alice"),
     options.firewall ??
       makeFirewall({
-        policy: options.policy,
-        historyLimit: options.historyLimit,
         structureCheck: options.norms?.structureCheck,
+        judge: options.provider && {
+          provider: options.provider,
+          minimumProbability: 0.8,
+          timeoutMilliseconds: 5_000,
+          maximumConcurrentChecks: 4,
+        },
+        historyLimit: options.historyLimit,
       }),
   ).pipe(Effect.orDie);
   const factory = yield* mcpServerFactory(server, {

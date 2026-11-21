@@ -8,7 +8,9 @@ import { AgentName, Message, MsgId } from "../messages.js";
 import { compileNorm } from "./compiler.js";
 import { structureCheck } from "./structure-check.js";
 
+/** The client of every conversation here. */
 const alice = AgentName.make("alice");
+/** The server agent. */
 const bob = AgentName.make("bob");
 const agents = [alice, bob] as const;
 
@@ -34,13 +36,13 @@ function actText(
 }
 
 /**
- * Offers alternate. `offer` opens an instance. Only the recipient of the
- * current offer may `counter` it or `choose` its value, replying in its
- * chain, and choosing settles it. Either agent may `finish`.
+ * Offers alternate. Either member's `offer` opens an instance. Only the
+ * recipient of the current offer may `counter` it or `choose` its value,
+ * replying in its chain, and choosing settles it. Either member may `finish`.
  */
 const turns = normFrom(`
-(norm turns :initiator Sender :participant Receiver)
-(content offer :by Sender :starts true :initiates offered
+(norm turns)
+(content offer :by (client server) :starts true :initiates offered
   (field value :type string))
 (content counter :by (recipient (fact offered)) :when offered :initiates offered
   (field value :type string))
@@ -48,7 +50,7 @@ const turns = normFrom(`
   :terminates offered :initiates selected
   (field value :type string)
   (relation equals value (previous (fact offered) value)))
-(content finish :by (Sender Receiver) :ends true)
+(content finish :by (client server) :ends true)
 `);
 
 /** A message id no generated history holds. */
@@ -99,14 +101,21 @@ function message(
   });
 }
 
-/** What the structure check of an agent that holds `norm` says of `candidate` at `now`, after `history`. */
+/** What the structure check of a server that holds `norm` says of `candidate` at `now`, after `history`. */
 function check(
   norm: Norm,
   candidate: Message,
   history: readonly CheckedMessage[] = [],
   now = 0,
 ) {
-  return Effect.runSync(structureCheck([norm])(candidate, history, now));
+  return Effect.runSync(
+    structureCheck([norm])(
+      candidate.author === alice ? "client" : "server",
+      candidate,
+      history,
+      now,
+    ),
+  );
 }
 
 /** The message id of step `index` of a walk. */
@@ -285,10 +294,10 @@ it("permits an act with a delay and a limit only once its fact is that old and w
       }),
       ({ wait, elapsed, maximum, sent }) => {
         const timed = normFrom(`
-(norm timed :initiator Sender :participant Receiver)
-(content hold :by Sender :starts true :initiates held
+(norm timed)
+(content hold :by client :starts true :initiates held
   (field wait :type integer :minimum 0))
-(content poll :by (Sender Receiver) :when held :max ${maximum}
+(content poll :by (client server) :when held :max ${maximum}
   :after held :delay wait :unit seconds)
 `);
         const history: CheckedMessage[] = [];
@@ -318,12 +327,12 @@ it("permits an act with a delay and a limit only once its fact is that old and w
   );
 });
 
-/** `open` starts an instance and `close` ends it. */
+/** The client's `open` starts an instance and the server's `close` ends it. */
 const exchange = normFrom(`
-(norm exchange :initiator Sender :participant Receiver)
-(content open :by Sender :starts true :initiates opened
+(norm exchange)
+(content open :by client :starts true :initiates opened
   (field value :type string))
-(content close :by Receiver :when opened :ends true)
+(content close :by server :when opened :ends true)
 `);
 
 it("refuses every text that is not an act of a held norm", () => {
@@ -340,28 +349,45 @@ it("refuses every text that is not an act of a held norm", () => {
   );
 });
 
-it.each(["ask", "tell"])(
-  "passes the act %s with the rules its norm gives that act and every act",
-  (act) => {
-    const duo = normFrom(`
-(norm duo :initiator Sender :participant Receiver)
-(content ask :by Sender :starts true :ends true)
-(content tell :by Sender :starts true :ends true)
-(rule :act ask "Ask politely.")
-(rule :act tell "Tell briefly.")
-(rule "Stay on the subject.")
+it("passes an act with one text rule for each described string field it states, which holds the field to its description", () => {
+  const described = normFrom(`
+(norm described)
+(content ask :by client :starts true :ends true
+  (field topic :type string :description "The subject.")
+  (field note :type string :optional true :description "A short note.")
+  (field plain :type string :optional true)
+  (field count :type integer :optional true :description "How many."))
 `);
+  const ask = actText("ask", "described", { topic: "x", plain: "y", count: 2 });
 
-    expect(check(duo, message(alice, actText(act, "duo")))).toMatchObject({
-      kind: "passed",
-      textRules: [
-        { id: act === "ask" ? "duo-rule-1" : "duo-rule-2", applies: "both" },
-        { id: "duo-rule-3", applies: "both" },
-      ],
-      protocol: { norm: "duo", act },
-    });
-  },
-);
+  expect(check(described, message(alice, ask))).toMatchObject({
+    kind: "passed",
+    textRules: [
+      {
+        id: "described.ask.topic",
+        text: "topic must hold what its description says and nothing else: The subject.",
+      },
+    ],
+    protocol: { norm: "described", act: "ask" },
+  });
+});
+
+it("refuses an act from the member whose role may not send it, to open an instance and within one", () => {
+  const open = message(alice, actText("open", "exchange", { value: "x" }));
+
+  expect(
+    check(exchange, message(bob, actText("open", "exchange", { value: "x" }))),
+  ).toMatchObject({ kind: "refused", ruleId: "norm-protocol" });
+  expect(
+    check(
+      exchange,
+      message(alice, actText("close", "exchange"), {
+        replyToMsgId: open.msgId,
+      }),
+      [{ message: open, checkedAt: 1 }],
+    ),
+  ).toMatchObject({ kind: "refused", ruleId: "exchange-protocol" });
+});
 
 it.each([
   { checked: { checkedAt: 1 }, continues: "passed" },
@@ -434,8 +460,8 @@ it.each([
 /** A norm whose one act, `open`, has the declared fields. */
 const sampleOf = (fields: readonly string[]) =>
   normFrom(`
-(norm sample :initiator Sender :participant Receiver)
-(content open :by Sender :starts true :ends true
+(norm sample)
+(content open :by client :starts true :ends true
   ${fields.join("\n  ")})
 `);
 

@@ -109,17 +109,14 @@ it.for(runs)(
     )(context),
 );
 
-/** A norm document with no text rule. */
-const unruledNorm = `(norm ping :initiator Asker :participant Answerer)
-(content ask :by Asker :starts true :ends true)
-`;
-
-/** The same norm with a text rule, which needs a decision provider. */
-const ruledNorm = `${unruledNorm}(rule :act ask "The question is polite.")
+/** A norm document with a described string field, which needs a decision provider. */
+const describedNorm = `(norm ping)
+(content ask :by client :starts true :ends true
+  (field question :type string :description "One polite question."))
 `;
 
 it(
-  "refuses each settings file it cannot serve and an occupied port, saying which, and starts with a policy and norms named relative to the settings file",
+  "refuses each settings file it cannot serve and an occupied port, saying which, and starts with a decision provider and norms named relative to the settings file",
   processTrace(
     Effect.gen(function* () {
       const sharnessd = yield* sharedServer();
@@ -135,13 +132,8 @@ it(
             ),
             Effect.as(path),
           );
-      const unjudged = yield* write("unjudged.json", "{}");
-      const judged = yield* write(
-        "nested/policy.json",
-        JSON.stringify({ decisionProvider: { model: "configured-model" } }),
-      );
-      yield* write("nested/norms/ping.lisp", ruledNorm);
-      yield* write("broken/ping.lisp", "(norm ping :initiator Asker)");
+      yield* write("nested/norms/ping.lisp", describedNorm);
+      yield* write("broken/ping.lisp", "(norm ping :unheard x)");
       const refusals: ReadonlyArray<
         readonly [Readonly<Record<string, unknown>>, string]
       > = [
@@ -154,16 +146,9 @@ it(
         ],
         [{ maximumHistoryRecords: 0 }, "settings file"],
         [{ maximumHistoryRecords: 1025 }, "settings file"],
-        [{ messagePolicyFile: "absent.json" }, ""],
+        [{ decisionProvider: {} }, "settings file"],
         [{ normsDirectory: "nested/norms" }, "configured norms"],
-        [
-          { normsDirectory: "nested/norms", messagePolicyFile: unjudged },
-          "configured norms",
-        ],
-        [
-          { normsDirectory: "broken", messagePolicyFile: unjudged },
-          "norms directory",
-        ],
+        [{ normsDirectory: "broken" }, "norms directory"],
       ];
       const settings = yield* fs.readFileString(
         join(sharnessd.directory, "settings.json"),
@@ -184,7 +169,7 @@ it(
       );
       yield* sharnessd.configure({
         maximumHistoryRecords: 1024,
-        messagePolicyFile: judged,
+        decisionProvider: { model: "configured-model" },
         normsDirectory: "nested/norms",
       });
       yield* sharnessd.start();
@@ -193,7 +178,7 @@ it(
         server.mcp.callTool({ name: "read_norms", arguments: {} }),
       );
       expect(shown.structuredContent).toMatchObject({
-        norms: [{ name: "ping", document: ruledNorm }],
+        norms: [{ name: "ping", document: describedNorm }],
       });
 
       const occupied = yield* sharnessd.startupFailure();

@@ -1,14 +1,15 @@
 /**
  * @file Compiles norm documents into norms: reads a document's declarations,
- * builds the norm they state and checks that its names and protocol
- * predicates refer to declared things.
+ * builds the norm they state and checks that its turn rules refer to
+ * declared acts, fields and facts.
  */
 
 import { Either } from "effect";
 import { createHash } from "node:crypto";
+import type { Role } from "../messages.js";
 import {
   decodeNorm,
-  isLowercaseName,
+  isName,
   type MessageForm,
   type Norm,
   readSExpressions,
@@ -33,30 +34,18 @@ const attributes: Readonly<Record<string, readonly string[]>> = {
   "multi-select": [":choices", ":min-items", ":max-items"],
 };
 
-/** The norm `source` declares. Its digest names the exact document bytes supplied to both participants. */
+/** The norm `source` declares. Its digest names the exact document bytes both members read. */
 export function compileNorm(source: string): Compiled<Norm> {
   return Either.gen(function* () {
     const { header, body } = yield* readDocument(source);
-    yield* checkAttributes(header, [
-      ":initiator",
-      ":participant",
-      ":description",
-    ]);
-    const initiator = atom(header.attributes.get(":initiator"));
-    const participant = atom(header.attributes.get(":participant"));
-    if (header.name === undefined || !isLowercaseName(header.name)) {
-      return yield* Either.left(
-        "A norm names two distinct roles and a lowercase norm name.",
-      );
-    }
+    yield* checkAttributes(header, [":description"]);
     if (
-      initiator === undefined ||
-      participant === undefined ||
-      initiator === participant ||
+      header.name === undefined ||
+      !isName(header.name) ||
       header.children.length !== 0
     ) {
       return yield* Either.left(
-        "A norm names two distinct roles without child declarations.",
+        "A norm has a lowercase name and no child declarations.",
       );
     }
     const norm = yield* decodeNorm({
@@ -64,20 +53,10 @@ export function compileNorm(source: string): Compiled<Norm> {
       digest: createHash("sha256").update(source, "utf8").digest("hex"),
       source,
       description: atom(header.attributes.get(":description")) ?? "",
-      roles: { initiator, participant },
-      forms: yield* Either.all(
-        body.filter((form) => form.kind === "content").map(compileForm),
-      ),
-      textRules: yield* Either.all(
-        body
-          .filter((form) => form.kind === "rule")
-          .map((form, index) =>
-            compileRule(form, `${header.name}-rule-${index + 1}`),
-          ),
-      ),
+      forms: yield* Either.all(body.map(compileForm)),
     }).pipe(
       Either.mapLeft(
-        () => "A declaration has an invalid name, value, bound or rule scope.",
+        () => "A declaration has an invalid name, value or bound.",
       ),
     );
     yield* validateReferences(norm);
@@ -137,6 +116,7 @@ function compileForm(form: Declaration) {
   });
 }
 
+/** Who may send an act: `client`, `server`, both, or the recipient of the message that set a fact. */
 function compileSender(form: Declaration): Compiled<MessageForm["by"]> {
   const node = form.attributes.get(":by");
   if (
@@ -144,7 +124,14 @@ function compileSender(form: Declaration): Compiled<MessageForm["by"]> {
     atom(node.values[0]) !== "recipient" ||
     node.values[1]?.kind !== "list"
   ) {
-    return names(node);
+    return Either.flatMap(names(node), (senders) => {
+      const roles = senders.flatMap((sender): Role[] =>
+        sender === "client" || sender === "server" ? [sender] : [],
+      );
+      return roles.length === 0 || roles.length !== senders.length
+        ? Either.left("An act's :by names client, server or both.")
+        : Either.right(roles);
+    });
   }
   const reference = node.values[1];
   const fact =
@@ -154,24 +141,6 @@ function compileSender(form: Declaration): Compiled<MessageForm["by"]> {
   return node.values.length !== 2 || fact === undefined
     ? Either.left("A recipient sender selector names one fact.")
     : Either.right({ recipient: { fact } });
-}
-
-function compileRule(form: Declaration, id: string) {
-  return Either.gen(function* () {
-    yield* checkAttributes(form, [":act", ":feedback"]);
-    const [text, ...rest] = form.children;
-    if (text?.kind !== "string" || rest.length !== 0) {
-      return yield* Either.left("A text rule contains one quoted rule text.");
-    }
-    const act = atom(form.attributes.get(":act"));
-    const feedback = atom(form.attributes.get(":feedback"));
-    return {
-      id,
-      text: text.value,
-      ...(act === undefined ? {} : { act }),
-      ...(feedback === undefined ? {} : { feedback }),
-    };
-  });
 }
 
 function compileRelation(form: Declaration) {
@@ -275,7 +244,7 @@ function compileField(form: Declaration) {
     if (
       allowed === undefined ||
       form.name === undefined ||
-      !isLowercaseName(form.name)
+      !isName(form.name)
     ) {
       return yield* Either.left(
         "A field needs a lowercase name and a supported primitive type.",
@@ -362,10 +331,10 @@ function readDocument(source: string) {
     const [header, ...body] = yield* Either.all(parsed.map(readDeclaration));
     if (
       header?.kind !== "norm" ||
-      body.some((item) => item.kind !== "content" && item.kind !== "rule")
+      body.some((item) => item.kind !== "content")
     ) {
       return yield* Either.left(
-        "A document starts with one norm declaration followed by content and rule declarations.",
+        "A document starts with one norm declaration followed by content declarations.",
       );
     }
     return { header, body };
@@ -492,13 +461,6 @@ function validateReferences(norm: Norm): Either.Either<void, string> {
   if (!norm.forms.some((form) => form.starts)) {
     return Either.left("Declare at least one opening act with :starts true.");
   }
-  if (
-    norm.textRules.some(
-      (rule) => rule.act !== undefined && !forms.has(rule.act),
-    )
-  ) {
-    return Either.left("A text rule names an undeclared act.");
-  }
   return Either.all(
     norm.forms.map((form) => validateForm(norm, form, forms)),
   ).pipe(Either.map(() => undefined));
@@ -509,28 +471,16 @@ function validateForm(
   form: MessageForm,
   forms: ReadonlyMap<string, MessageForm>,
 ): Either.Either<void, string> {
-  const roles = Object.values(norm.roles);
   const facts = new Set(norm.forms.flatMap((item) => item.initiates));
-  if (
-    !("recipient" in form.by) &&
-    (form.by.length === 0 || form.by.some((role) => !roles.includes(role)))
-  ) {
-    return Either.left("Every sender role must be declared.");
-  }
   if ("recipient" in form.by && !facts.has(form.by.recipient.fact)) {
     return Either.left("A recipient sender selector names an undeclared fact.");
   }
-  if (
-    !isLowercaseName(form.act) ||
-    [...form.when, ...form.terminates].some((fact) => !facts.has(fact))
-  ) {
-    return Either.left(
-      "Act names are lowercase; fact guards refer to declared facts.",
-    );
+  if ([...form.when, ...form.terminates].some((fact) => !facts.has(fact))) {
+    return Either.left("Fact guards refer to declared facts.");
   }
-  if (form.starts && !opens(norm, form)) {
+  if (form.starts && !opens(form)) {
     return Either.left(
-      "An opening act permits the initiator and cannot depend on an earlier instance.",
+      "An opening act names its senders by role and cannot depend on an earlier act.",
     );
   }
   if (form.delay !== undefined && !anchored(norm, form.delay)) {
@@ -543,16 +493,13 @@ function validateForm(
   ).pipe(Either.map(() => undefined));
 }
 
-/** Whether a form that starts an instance lets the initiator send it and needs nothing earlier. */
-function opens(norm: Norm, form: MessageForm) {
-  const needsHistory =
-    form.when.length !== 0 ||
-    form.delay !== undefined ||
-    form.relations.length !== 0;
+/** Whether a form that starts an instance needs nothing earlier: no fact, delay or relation, and senders named by role. */
+function opens(form: MessageForm) {
   return (
     !("recipient" in form.by) &&
-    form.by.includes(norm.roles.initiator) &&
-    !needsHistory
+    form.when.length === 0 &&
+    form.delay === undefined &&
+    form.relations.length === 0
   );
 }
 
