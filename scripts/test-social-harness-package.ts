@@ -6,7 +6,7 @@ import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const root = dirname(dirname(fileURLToPath(import.meta.url)));
-const norm = join("config", "norms", "examples", "office-hours.lisp");
+const norm = join("examples", "office-hours.lisp");
 
 /** A check of the packed package that did not hold. */
 class PackCheckError extends Data.TaggedError("PackCheckError")<{

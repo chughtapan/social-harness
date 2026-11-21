@@ -11,9 +11,7 @@ import { expect, it as vitestIt } from "vitest";
 import { compileNorm } from "./compiler.js";
 import { compileNorms } from "./index.js";
 
-const shipped = fileURLToPath(
-  new URL("../../config/norms/examples/", import.meta.url),
-);
+const shipped = fileURLToPath(new URL("../../examples/", import.meta.url));
 
 /** Whether a document compiles to nothing. */
 const refused = (document: string) =>

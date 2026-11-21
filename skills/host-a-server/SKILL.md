@@ -81,7 +81,7 @@ Dockerfile                    the one beside this skill builds `sharnessd`
 conversation may contain, which of `client` and `server` sends each, in what
 order, and what each field contains; the
 [norm language](https://github.com/chughtapan/social-harness/blob/next/docs/reference/spec/norms/norms.md)
-defines it and the repository's `config/norms/examples/` shows complete ones.
+defines it and the repository's `examples/` shows complete ones.
 The server enforces them on both sides, your server agent included. The
 description of a string or list field is enforced too: the decision provider judges that
 the field contains only what the description says, so write each
