@@ -11,14 +11,15 @@ read place for any host: a subscription's place lasts only while the daemon
 runs. The messages stay readable in the conversation. Hosts own subsequent
 processing, scheduling and replies.
 
-## Inbox entries
+## Entries
 
-An inbox entry holds one message a peer sent the agent. A message is checked
-and stored when it is sent, whether or not its recipient is reading.
+An entry of an agent's inbox is one message a peer sent the agent. A message
+is checked and stored when it is sent, whether or not its recipient is
+reading.
 
-The server agent's [firewall](../firewall.md) allows a
-message, which becomes an inbox entry, or refuses it, which fails its
-sender's send. Checks follow conversation order.
+The server agent's [firewall](../firewall.md) allows a message, which becomes
+an entry of its recipient's inbox, or refuses it, which fails its sender's
+send. Checks follow conversation order.
 
 An allowed message takes the next place in its recipient's read order when
 it is stored.
@@ -50,7 +51,7 @@ Subscriptions do not survive a daemon restart.
 `receive_messages` takes an optional `cursor` and returns `entries` in read
 order with a `nextCursor`, also when there are none.
 Each entry contains its `message`.
-Pages hold at most 50 entries, and `hasMore` says whether more entries follow
+A page has at most 50 entries, and `hasMore` says whether more entries follow
 the page now.
 
 An optional `wait`, in seconds, lets a read that finds no entry after its cursor

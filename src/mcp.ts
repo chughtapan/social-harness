@@ -17,15 +17,15 @@ import { createHash } from "node:crypto";
 import packageJson from "../package.json" with { type: "json" };
 import { checkRecordSchema } from "./firewall.js";
 import { AgentName, MsgId, wellFormedString } from "./messages.js";
-import { ACT_SYNTAX, type HeldNorms, publishedNorm } from "./norms/index.js";
+import { ACT_SYNTAX, type Norms, publishedNorm } from "./norms/index.js";
 import {
   ConversationPage,
   Cursor,
+  Entry,
   type Failure,
-  InboxEntry,
   InboxPage,
   PAGE_SIZE,
-  SentMessage,
+  SendReceipt,
   type Server,
 } from "./server.js";
 
@@ -60,7 +60,7 @@ const sentFields = {
  */
 const MAXIMUM_WAIT_SECONDS = 50;
 
-/** How often the SDK reads the inbox of an agent whose host holds a push stream or a webhook subscription. */
+/** How often the SDK reads the inbox of an agent whose host has a push stream or a webhook subscription. */
 const INBOX_CHECK_MILLISECONDS = 1000;
 
 const WEBHOOK_TTL_MILLISECONDS = 30 * 60_000;
@@ -72,7 +72,7 @@ const INBOX_EVENT = "org.social-harness/inbox.pending";
  * `server`. A request's `authInfo` names its owner in `extra.issuer` and
  * `extra.subject`: the owner `admits.issuer` and `admits.subject` name has
  * the server agent, and every other owner has a client, named from its
- * issuer and subject. `norms` are the norms the server holds, whose
+ * issuer and subject. `norms` are the norms the server publishes, whose
  * documents every agent reads with `read_norms`. A tool call runs on the
  * runtime this effect ran in and is interrupted when its request is aborted.
  */
@@ -82,7 +82,7 @@ export const mcpServerFactory = Effect.fn("serverFactory")(function* (
     readonly issuer: string;
     readonly subject: string;
   },
-  norms?: HeldNorms,
+  norms?: Norms,
 ) {
   const run = Runtime.runPromise(yield* Effect.runtime());
 
@@ -113,7 +113,7 @@ export const mcpServerFactory = Effect.fn("serverFactory")(function* (
   });
   events.registerEvent(INBOX_EVENT, {
     description: "An inbox entry: its message.",
-    payloadSchema: standard(InboxEntry),
+    payloadSchema: standard(Entry),
     check: (...[{ principal, maxEvents, signal }, , cursor]) =>
       run(inboxOccurrences(server, principal, { cursor, maxEvents }), {
         signal,
@@ -162,12 +162,12 @@ function inboxOccurrences(
       },
     );
     return {
-      events: (yield* Schema.encode(Schema.Array(InboxEntry))(
-        page.entries,
-      )).map((data) => ({
-        eventId: `${data.message.author}/${data.message.msgId}`,
-        data,
-      })),
+      events: (yield* Schema.encode(Schema.Array(Entry))(page.entries)).map(
+        (data) => ({
+          eventId: `${data.message.author}/${data.message.msgId}`,
+          data,
+        }),
+      ),
       cursor: page.nextCursor,
       hasMore: page.hasMore,
     };
@@ -177,7 +177,7 @@ function inboxOccurrences(
 function registerSharedTools(
   at: Registration,
   caller: AgentName,
-  norms?: HeldNorms,
+  norms?: Norms,
 ) {
   const { server } = at;
   register(
@@ -221,8 +221,8 @@ function registerSharedTools(
       {
         description: `${
           caller === server.name
-            ? "List the norms this server publishes, each with its complete document: which of client and server sends each act, when, and what each field holds. You are the server, and the same norms hold your messages and your clients'."
-            : "List the norms the server publishes, each with its complete document: which of client and server sends each act, when, and what each field holds. You are the client, and only a message that follows them is sent."
+            ? "List the norms this server publishes, each with its complete document: which of client and server sends each act, when, and what each field contains. You are the server, and your messages and your clients' must follow the same norms."
+            : "List the norms the server publishes, each with its complete document: which of client and server sends each act, when, and what each field contains. You are the client, and only a message that follows them is sent."
         } ${ACT_SYNTAX}`,
         input: noArguments,
         output: Schema.Struct({ norms: Schema.Array(publishedNorm) }),
@@ -249,7 +249,7 @@ function registerServerAgentTools(at: Registration) {
         }),
         ...sentFields,
       }),
-      output: SentMessage,
+      output: SendReceipt,
     },
     ({ to, ...sent }) => server.send(server.name, to, sent),
   );
@@ -258,7 +258,7 @@ function registerServerAgentTools(at: Registration) {
     "read_conversation",
     {
       description:
-        "Read your conversation with one client: the messages you sent and those you received. A page holds the oldest messages after cursor; pass nextCursor as cursor, with the same client, until it is absent.",
+        "Read your conversation with one client: the messages you sent and those you received. Each page gives the oldest entries after cursor, each with its message; pass nextCursor as cursor, with the same client, until it is absent.",
       input: Schema.Struct({
         with: Schema.propertySignature(AgentName).annotations({
           description: "The client's name.",
@@ -287,7 +287,7 @@ function registerServerAgentTools(at: Registration) {
     "read_firewall_decisions",
     {
       description:
-        "Read the records of the hundred latest completed firewall checks since inclusive Unix milliseconds, newest first. Each gives which member sent the message (client or server), the client of its conversation, the decision applied (allowed or refused), the reason and the deciding rules with their feedback, without message content or private model evidence.",
+        "Read the records of the hundred latest completed firewall checks since inclusive Unix milliseconds, newest first. Each gives which member sent the message (client or server), the client of its conversation, the decision (allowed or refused) and, for a refused message, the reason and the rules that refused it with their feedback, without message content or private model evidence.",
       input: Schema.Struct({ since: Schema.optional(Schema.NonNegativeInt) }),
       output: Schema.Struct({ decisions: Schema.Array(checkRecordSchema) }),
       readOnly: true,
@@ -309,7 +309,7 @@ function registerClientTools(at: Registration, client: AgentName) {
       description:
         "Send a message to the server agent. Returns id, the message id. A refused message was not sent: its error gives the feedback of the rules it broke, or says the server is unavailable, when the same message may be sent again later. Read the reply with receive_messages.",
       input: Schema.Struct(sentFields),
-      output: SentMessage,
+      output: SendReceipt,
     },
     (sent) => server.send(client, client, sent),
   );
@@ -318,7 +318,7 @@ function registerClientTools(at: Registration, client: AgentName) {
     "read_conversation",
     {
       description:
-        "Read the messages you sent and received in your conversation with the server agent. Follow nextCursor until absent.",
+        "Read your conversation with the server agent: the messages you sent and those you received. Each page gives the oldest entries after cursor, each with its message; pass nextCursor as cursor until it is absent.",
       input: Schema.Struct({ cursor: cursorArgument }),
       output: ConversationPage,
       readOnly: true,
@@ -391,7 +391,7 @@ function failed(failure: Failure) {
     content: [{ type: "text" as const, text: failure.message }],
     structuredContent: Object.fromEntries(
       Object.entries(failure).filter(
-        ([field, held]) => field !== "_tag" && held !== undefined,
+        ([field, value]) => field !== "_tag" && value !== undefined,
       ),
     ),
   };

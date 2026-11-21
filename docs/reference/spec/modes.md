@@ -89,9 +89,9 @@ The server agent has the full catalog, with `send_message` taking `to` and
 
 ### Firewall and norms
 
-A server publishes norms, and the server agent's firewall holds both members
-to them: it checks what a client sends the server agent and what the server
-agent sends a client. A client runs no check of its own.
+A server publishes norms, and the server agent's firewall enforces them on
+both members: it checks what a client sends the server agent and what the
+server agent sends a client. A client runs no check of its own.
 
 A client is not trusted with the check. When its message is refused, its send
 fails with feedback that says what does not fit the norm and nothing else of

@@ -47,7 +47,7 @@ import { basename, dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { prepareTables } from "../../src/database.js";
 import { openTestDatabase, restrictedLogin } from "../support/database.js";
-import { callTool, decodeInboxEntry, type SignedIn } from "../support/host.js";
+import { callTool, decodeEntry, type SignedIn } from "../support/host.js";
 import { issuerFixture, requiredScope } from "../support/issuer.js";
 
 /** The name of the event whose occurrences are an agent's inbox entries. */
@@ -409,9 +409,7 @@ export function inboxStream(
     ),
   ).pipe(
     Stream.orDie,
-    Stream.mapEffect((event) =>
-      decodeInboxEntry(event.data).pipe(Effect.orDie),
-    ),
+    Stream.mapEffect((event) => decodeEntry(event.data).pipe(Effect.orDie)),
   );
 }
 

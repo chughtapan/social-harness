@@ -9,7 +9,7 @@ import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { expect, it as vitestIt } from "vitest";
 import { compileNorm } from "./compiler.js";
-import { holdNorms } from "./index.js";
+import { compileNorms } from "./index.js";
 
 const shipped = fileURLToPath(
   new URL("../../config/norms/examples/", import.meta.url),
@@ -57,7 +57,7 @@ function document(declared: Fields, extra: Splices = {}) {
   );
   return [
     `(norm sample${extra.norm ?? ""})`,
-    `(act open :by client :starts true :initiates begun${extra.open ?? ""}`,
+    `(act open :by client :starts true :sets begun${extra.open ?? ""}`,
     ...lines,
     ")",
     `(act close :by (client server) :when begun :ends true${extra.close ?? ""})`,
@@ -72,24 +72,24 @@ it("compiles every shipped norm document to the norm its file is named for", () 
     );
     expect(files.length).toBeGreaterThan(0);
     for (const file of files) {
-      const source = yield* fs.readFileString(join(shipped, file));
-      expect(compileNorm(source)).toMatchObject(
-        Either.right({ name: file.replace(/\.lisp$/u, ""), source }),
+      const document = yield* fs.readFileString(join(shipped, file));
+      expect(compileNorm(document)).toMatchObject(
+        Either.right({ name: file.replace(/\.lisp$/u, ""), document }),
       );
     }
   }).pipe(Effect.provide(NodeContext.layer)));
 
 vitestIt(
-  "compiles a document to its source, that source's digest, and a form requiring exactly the fields not marked optional",
+  "compiles a document to a norm with that document, its digest, and a form requiring exactly the fields not marked optional",
   () => {
     fc.assert(
       fc.property(fields, (declared) => {
-        const source = document(declared);
-        const norm = Either.getOrThrow(compileNorm(source));
+        const text = document(declared);
+        const norm = Either.getOrThrow(compileNorm(text));
         const open = norm.forms.find((form) => form.performative === "open");
-        expect(norm.source).toBe(source);
+        expect(norm.document).toBe(text);
         expect(norm.digest).toBe(
-          createHash("sha256").update(source, "utf8").digest("hex"),
+          createHash("sha256").update(text, "utf8").digest("hex"),
         );
         expect(
           open?.fields.map(({ name, type, optional }) => ({
@@ -121,7 +121,7 @@ vitestIt.each<keyof Splices>(["norm", "open", "field", "close"])(
 
 vitestIt.each([
   ["a sender that is neither role", "(client server)", "(client absent)"],
-  ["a fact it clears", ":ends true)", ":ends true :terminates absent)"],
+  ["a fact it clears", ":ends true)", ":ends true :clears absent)"],
   [
     "a fact it waits on",
     ":ends true)",
@@ -151,7 +151,7 @@ vitestIt.each([
 );
 
 vitestIt.each(["member", "subset"])(
-  "refuses a %s relation that holds a string to a string",
+  "refuses a %s relation that compares a string with a string",
   (operator) => {
     expect(
       refused(
@@ -192,20 +192,20 @@ const documentOf = (name: string) =>
 `;
 
 vitestIt(
-  "holds the norms of several documents, and publishes each with its name, its description and its whole document",
+  "compiles the norms of several documents, and publishes each with its name, its description and its whole document",
   () => {
-    const held = Either.getOrThrow(
-      holdNorms([documentOf("second"), documentOf("first")]),
+    const norms = Either.getOrThrow(
+      compileNorms([documentOf("second"), documentOf("first")]),
     );
 
-    expect(held.published).toEqual(
+    expect(norms.published).toEqual(
       ["second", "first"].map((name) => ({
         name,
         description: "",
         document: documentOf(name),
       })),
     );
-    expect(held.hasTextRules).toBe(false);
+    expect(norms.hasTextRules).toBe(false);
   },
 );
 
@@ -216,11 +216,11 @@ vitestIt.each([
     [documentOf("ask").replace(":by client", ":by absent")],
   ],
   ["one that is not closed", [`${documentOf("ask")}(`]],
-])("holds no norms when the documents include %s", (...[, documents]) => {
+])("compiles no norms when the documents include %s", (...[, documents]) => {
   expect(
-    Either.match(holdNorms(documents), {
+    Either.match(compileNorms(documents), {
       onLeft: () => "none",
-      onRight: () => "held",
+      onRight: () => "compiled",
     }),
   ).toBe("none");
 });

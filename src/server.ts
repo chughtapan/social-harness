@@ -14,11 +14,7 @@ import {
   type Redacted,
   Schema,
 } from "effect";
-import type {
-  CheckRecord,
-  Firewall,
-  FirewallRefusalReason,
-} from "./firewall.js";
+import type { CheckRecord, Firewall, RefusalReason } from "./firewall.js";
 import { openDatabase, type StoredMessage } from "./database.js";
 import { type AgentName, Message, MsgId } from "./messages.js";
 
@@ -28,14 +24,14 @@ export const PAGE_SIZE = 50;
 /** A place in an ordered read, as decimal text. A read returns what follows it. */
 export const Cursor = Schema.String.pipe(Schema.pattern(/^\d{1,15}$/u));
 
-/** One message as a host reads it. */
+/** One message as a host reads it, from an inbox or a conversation. */
 // eslint-disable-next-line agent-code-guard/no-exported-brand-constructor -- The inbox event carries an entry as it stands, and needs its schema to publish it.
-export const InboxEntry: Schema.Schema<
+export const Entry: Schema.Schema<
   { readonly message: Message },
   { readonly message: Schema.Schema.Encoded<typeof Message> }
 > = Schema.Struct({ message: Message });
 
-const pageOfEntries = Schema.Array(InboxEntry).pipe(Schema.maxItems(PAGE_SIZE));
+const pageOfEntries = Schema.Array(Entry).pipe(Schema.maxItems(PAGE_SIZE));
 
 /** A page of an inbox: its entries, the cursor a read that continues it presents, and whether more entries follow now. */
 // eslint-disable-next-line agent-code-guard/no-exported-brand-constructor -- The receive_messages tool returns a page as it stands, and needs its schema to publish it.
@@ -46,17 +42,17 @@ export const InboxPage = Schema.Struct({
 });
 type InboxPage = typeof InboxPage.Type;
 
-/** A page of a conversation, with the cursor of the next page when there is one. */
+/** A page of a conversation: its entries, and the cursor of the next page when there is one. */
 // eslint-disable-next-line agent-code-guard/no-exported-brand-constructor -- The read_conversation tool returns a page as it stands, and needs its schema to publish it.
 export const ConversationPage = Schema.Struct({
-  records: pageOfEntries,
+  entries: pageOfEntries,
   nextCursor: Schema.optional(Cursor),
 });
 type ConversationPage = typeof ConversationPage.Type;
 
-/** A sent message, by the id it was stored under. */
+/** What a send returns: the id its message was stored under. */
 // eslint-disable-next-line agent-code-guard/no-exported-brand-constructor -- The send_message tool returns this as it stands, and needs its schema to publish it.
-export const SentMessage = Schema.Struct({ id: MsgId });
+export const SendReceipt = Schema.Struct({ id: MsgId });
 
 /** A failed operation: what a model reads of it in `message`, and its reason with the failure's other fields, which a host reads. */
 export interface Failure {
@@ -79,7 +75,7 @@ export interface Server {
     author: AgentName,
     client: AgentName,
     sent: { readonly text: string; readonly replyToMsgId?: MsgId },
-  ) => Effect.Effect<typeof SentMessage.Type, Failure>;
+  ) => Effect.Effect<typeof SendReceipt.Type, Failure>;
   /** A page of `reader`'s inbox after `cursor`. Without a cursor the read starts after the newest message and returns none. */
   readonly inbox: (
     reader: AgentName,
@@ -106,7 +102,7 @@ export interface Server {
   readonly decisions: (since: number) => Effect.Effect<readonly CheckRecord[]>;
 }
 
-const refusalText: Readonly<Record<FirewallRefusalReason, string>> = {
+const refusalText: Readonly<Record<RefusalReason, string>> = {
   "rule-violation": "The message breaks a rule of the server's norms.",
   "unresolved-evidence":
     "The check could not settle whether the message follows the server's norms.",
@@ -117,32 +113,31 @@ const refusalText: Readonly<Record<FirewallRefusalReason, string>> = {
  * A send the server agent's firewall refused, as the server agent reads its
  * own and as the daemon logs every one. The message states the feedback as
  * errors, or the reason when there is none, then the check, whose record
- * names the deciding rules. Feedback is a plain sentence: this message alone
- * marks it as an error.
+ * names the rules that refused it. Feedback is a plain sentence: this
+ * message alone marks it as an error.
  */
 class FirewallRefusal extends Data.TaggedError("FirewallRefusal")<{
-  readonly reason: "firewall-refused";
+  readonly reason: RefusalReason;
   readonly checkId: string;
-  readonly refusal: FirewallRefusalReason;
   readonly feedback: readonly string[];
 }> {
   override get message(): string {
     return [
       ...(this.feedback.length === 0
-        ? [`Error: ${refusalText[this.refusal]}`]
+        ? [`Error: ${refusalText[this.reason]}`]
         : this.feedback.map((text) => `Error: ${text}`)),
-      `Check: ${this.checkId}; ${this.refusal}.`,
+      `Check: ${this.checkId}; ${this.reason}.`,
     ].join(" ");
   }
 }
 
 /**
- * A client's send that the server agent's firewall refused, as the client
- * reads it. A client is not trusted with the check behind a refusal: it reads
- * the feedback, which says what in the message does not fit the norm, and
- * neither the check id nor the reason.
+ * A refusal of a client's send, as the client reads it. A client is not
+ * trusted with the check behind a refusal: it reads the feedback, which says
+ * what in the message does not fit the norm, and neither the check id nor
+ * the firewall's reason.
  */
-class ClientRefusal extends Data.TaggedError("ClientRefusal")<{
+class RefusalToClient extends Data.TaggedError("RefusalToClient")<{
   readonly reason: "refused";
   readonly feedback: readonly string[];
 }> {
@@ -156,7 +151,7 @@ class ClientRefusal extends Data.TaggedError("ClientRefusal")<{
 }
 
 /** What a client reads when the server could not check its message: nothing of why. */
-class ServerUnavailable extends Data.TaggedError("ServerUnavailable")<{
+class UnavailableToClient extends Data.TaggedError("UnavailableToClient")<{
   readonly reason: "unavailable";
 }> {
   override get message(): string {
@@ -242,7 +237,7 @@ export const openServer = Effect.fn("openServer")(function* (
           ),
   );
 
-  /** The server agent's inbox holds every client's messages; a client's holds the server agent's messages to it. */
+  /** The server agent's inbox has every client's messages; a client's has the server agent's messages to it. */
   const inbox = Effect.fn("readInbox")(function* (
     reader: AgentName,
     { limit, cursor }: { readonly limit: number; readonly cursor?: string },
@@ -272,7 +267,7 @@ export const openServer = Effect.fn("openServer")(function* (
     return yield* inbox(reader, { limit: PAGE_SIZE, cursor: page.nextCursor });
   }, Effect.scoped);
 
-  const conversation = Effect.fn("historyRecords")(function* (
+  const conversation = Effect.fn("readConversation")(function* (
     client: AgentName,
     cursor?: string,
   ) {
@@ -281,7 +276,7 @@ export const openServer = Effect.fn("openServer")(function* (
       PAGE_SIZE,
     );
     return {
-      records: entries,
+      entries,
       ...(more && last !== undefined ? { nextCursor: String(last) } : {}),
     };
   });
@@ -290,7 +285,7 @@ export const openServer = Effect.fn("openServer")(function* (
     Effect.gen(function* () {
       const page = yield* conversation(client, cursor);
       if (
-        page.records.length === 0 &&
+        page.entries.length === 0 &&
         (yield* database.conversation(client, 0, 1)).length === 0
       ) {
         return yield* new AddressError({
@@ -322,9 +317,8 @@ function refusalOf(
   >,
 ) {
   return new FirewallRefusal({
-    reason: "firewall-refused",
+    reason: decision.reason,
     checkId: decision.checkId,
-    refusal: decision.reason,
     feedback: decision.feedback,
   });
 }
@@ -335,9 +329,9 @@ function refusalOf(
  * checked.
  */
 function asClientReads(refusal: FirewallRefusal) {
-  return refusal.refusal === "check-unavailable"
-    ? new ServerUnavailable({ reason: "unavailable" })
-    : new ClientRefusal({ reason: "refused", feedback: refusal.feedback });
+  return refusal.reason === "check-unavailable"
+    ? new UnavailableToClient({ reason: "unavailable" })
+    : new RefusalToClient({ reason: "refused", feedback: refusal.feedback });
 }
 
 /** The first `limit` of `stored` as entries, the place of the last of them, and whether more were stored. */

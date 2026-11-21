@@ -19,25 +19,25 @@ const fields = Schema.decodeUnknownSync(
   Schema.Record({ key: Schema.String, value: Schema.Unknown }),
 );
 
-/** An inbox entry as a host reads it. */
-const inboxEntry = Schema.Struct({
+/** An entry as a host reads it. */
+const entry = Schema.Struct({
   message: Message,
 });
 
-/** Reads an inbox entry from what the inbox event delivers. */
-export const decodeInboxEntry = Schema.decodeUnknown(inboxEntry);
+/** Reads an entry from what the inbox event delivers. */
+export const decodeEntry = Schema.decodeUnknown(entry);
 
 /** What tests read of the result of each tool they call. */
 const results = {
   status: Schema.Struct({ agentName: AgentName }),
   send_message: Schema.Struct({ id: MsgId }),
   receive_messages: Schema.Struct({
-    entries: Schema.Array(inboxEntry),
+    entries: Schema.Array(entry),
     nextCursor: Schema.String,
   }),
   list_conversations: Schema.Struct({ clients: Schema.Array(Schema.String) }),
   read_conversation: Schema.Struct({
-    records: Schema.Array(inboxEntry),
+    entries: Schema.Array(entry),
     nextCursor: Schema.optional(Schema.String),
   }),
   read_firewall_decisions: Schema.Struct({
@@ -98,5 +98,5 @@ export const send = (
 /** The messages of the first page of the agent's inbox, from its first entry. */
 export const inboxOf = (agent: Pick<SignedIn, "mcp">) =>
   Effect.map(callTool(agent, "receive_messages", { cursor: "0" }), (page) =>
-    page.entries.map((entry) => entry.message),
+    page.entries.map(({ message }) => message),
   );

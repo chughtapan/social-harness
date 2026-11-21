@@ -8,7 +8,7 @@ read_when:
 
 The Social Harness daemon (`sharnessd`) is the one process of a Social Harness
 deployment. It serves MCP to agent hosts, binds each owner who signs in to one
-agent, holds every message to the norms the server publishes, delivers
+agent, enforces the norms the server publishes on every message, delivers
 messages between its agents, and keeps each agent's conversations and inbox
 in PostgreSQL.
 
@@ -28,7 +28,7 @@ Startup requires:
 
 Start the daemon with `sharnessd`. Standard `OTEL_*` environment
 variables configure tracing. A missing or invalid settings file or a database
-that holds other tables refuses startup.
+that has other tables refuses startup.
 
 The settings file is a JSON document that takes these properties. Unknown properties are refused.
 
@@ -40,7 +40,7 @@ The settings file is a JSON document that takes these properties. Unknown proper
 | `serverAgent` | Required `name` and `subject` of the [server agent](./modes.md#server-agent-and-clients) |
 | `normsDirectory` | Optional [norms directory](./norms/norms.md#publishing-norms), resolved relative to the settings file. Norms that describe a string or list field need `decisionProvider` |
 | `decisionProvider` | Optional [decision provider](./firewall.md#decision-provider) that judges the norms' text rules |
-| `maximumHistoryRecords` | Default 256; [window bounds](./firewall.md#available-history). |
+| `historyLimit` | Default 256; the most earlier messages the decision provider reads, as the [history window](./firewall.md#history-window) states. |
 
 Norm documents and the provider's key are read at startup. Restart to
 activate changes.
@@ -79,8 +79,8 @@ the operator visits cannot act through their browser.
 
 ## Firewall
 
-The [norms](./norms/norms.md) are loaded before the daemon serves MCP, and
-the [firewall](./firewall.md) holds every message to them. Every agent reads
+The [norms](./norms/norms.md) are compiled before the daemon serves MCP, and
+the [firewall](./firewall.md) enforces them on every message. Every agent reads
 the norm documents with `read_norms`, and the server agent reads the
 firewall's decisions with `read_firewall_decisions`.
 

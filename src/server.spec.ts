@@ -15,7 +15,6 @@ import {
   Fiber,
   Order,
   Schema,
-  Struct,
 } from "effect";
 import { expect } from "vitest";
 import type { DecisionProvider, DecisionRequest } from "./decision-provider.js";
@@ -30,7 +29,7 @@ import {
 } from "../tests/support/host.js";
 import { inProcessServer } from "../tests/support/in-process-server.js";
 import { prepareTables } from "./database.js";
-import { holdNorms } from "./norms/index.js";
+import { compileNorms } from "./norms/index.js";
 
 /** The text of the message a provider is asked to judge. */
 const candidateText = (request: DecisionRequest) =>
@@ -92,7 +91,7 @@ it("gives a client tools that name no recipient and no conversation", () =>
       ),
     ).toEqual(["text", "replyToMsgId"]);
     const { id } = yield* send(bob, { text: "hello" });
-    expect((yield* callTool(bob, "read_conversation")).records).toEqual([
+    expect((yield* callTool(bob, "read_conversation")).entries).toEqual([
       {
         message: {
           author: bob.name,
@@ -122,15 +121,13 @@ it("answers a failed call with the failure's message and its fields", () =>
   Effect.gen(function* () {
     const refusals = [
       {
-        reason: "firewall-refused" as const,
+        reason: "rule-violation" as const,
         checkId: "chk_1",
-        refusal: "rule-violation" as const,
         feedback: ["Send a greeting first."],
       },
       {
-        reason: "firewall-refused" as const,
+        reason: "unresolved-evidence" as const,
         checkId: "chk_2",
-        refusal: "unresolved-evidence" as const,
         feedback: [],
       },
     ];
@@ -139,8 +136,7 @@ it("answers a failed call with the failure's message and its fields", () =>
       firewall: decidingServerMessages(() =>
         Effect.map(Effect.fromNullable(pending.shift()), (next) => ({
           kind: "refused" as const,
-          ...Struct.omit(next, "reason", "refusal"),
-          reason: next.refusal,
+          ...next,
         })).pipe(Effect.orDie),
       ),
     });
@@ -231,7 +227,7 @@ it("interrupts only the aborted call, whose conversation the next send then uses
 
 /** A norm of one act that either member sends, whose described field gives it the one text rule here. */
 const chat = Either.getOrThrow(
-  holdNorms([
+  compileNorms([
     `(norm chat)
 (act say :by (client server) :starts true :ends true
   (field words :type string :description "Nothing private."))
@@ -245,11 +241,11 @@ const say = (words: string) =>
 
 /** What the sender of a `say` that breaks the field's description reads. */
 const nothingPrivate =
-  "words must hold what its description says and nothing else: Nothing private.";
+  "words must contain only what its description says: Nothing private.";
 
 /** A provider that finds a message in violation exactly when it says `private`, whichever member sent it. */
 const privateViolation: DecisionProvider = {
-  decide: (request) =>
+  answer: (request) =>
     Effect.succeed(
       answersTo(
         request,
@@ -272,9 +268,9 @@ const aliceAndBob = (options?: Parameters<typeof inProcessServer>[0]) =>
 const historyOf = (agent: SignedIn, client?: string) =>
   Effect.map(
     callTool(agent, "read_conversation", { with: client }),
-    ({ records }) =>
-      records.map((record) =>
-        record.message.author === agent.name ? "sent" : "received",
+    ({ entries }) =>
+      entries.map((entry) =>
+        entry.message.author === agent.name ? "sent" : "received",
       ),
   );
 
@@ -304,7 +300,7 @@ it("checks the messages of one conversation in order while another conversation 
     const { server, alice, bob } = yield* aliceAndBob({
       norms: chat,
       provider: {
-        decide: (request) =>
+        answer: (request) =>
           Effect.gen(function* () {
             const text = candidateText(request);
             assessed.push(text);
@@ -379,8 +375,7 @@ it("fails a send whose described field breaks its description, telling the serve
     expect(
       yield* Effect.flip(send(alice, { to: bob.name, text: say("private") })),
     ).toMatchObject({
-      reason: "firewall-refused",
-      refusal: "rule-violation",
+      reason: "rule-violation",
       feedback: [nothingPrivate],
     });
 
@@ -405,7 +400,7 @@ it("tells a client only that the server is unavailable, and stores nothing, when
   Effect.gen(function* () {
     const { alice, bob } = yield* aliceAndBob({
       norms: chat,
-      provider: { decide: () => Effect.succeed({ answers: {} }) },
+      provider: { answer: () => Effect.succeed({ answers: {} }) },
     });
 
     expect(yield* send(bob, { text: say("Hello") }).pipe(Effect.flip)).toEqual({
@@ -421,15 +416,15 @@ it("tells a client only that the server is unavailable, and stores nothing, when
 
 /** The client's `open` starts an instance and the server's `close` ends it. */
 const exchange = Either.getOrThrow(
-  holdNorms([
+  compileNorms([
     `(norm exchange)
-(act open :by client :starts true :initiates opened)
+(act open :by client :starts true :sets opened)
 (act close :by server :when opened :ends true)
 `,
   ]),
 );
 
-it("refuses what a server that holds norms does not accept, plain text and an act out of turn alike, telling the client only what to correct, and the conversation goes on", () =>
+it("refuses what the norms a server publishes do not accept, plain text and an act out of turn alike, telling the client only what to correct, and the conversation goes on", () =>
   Effect.gen(function* () {
     const { alice, bob } = yield* aliceAndBob({ norms: exchange });
 
@@ -444,7 +439,7 @@ it("refuses what a server that holds norms does not accept, plain text and an ac
     expect(yield* inboxOf(alice)).toHaveLength(1);
   }));
 
-it("checks each act of a norm against the whole conversation, though the provider's history window holds one message", () =>
+it("checks each act of a norm against the whole conversation, though the provider's history window has one message", () =>
   Effect.gen(function* () {
     const { alice, bob } = yield* aliceAndBob({
       historyLimit: 1,
@@ -480,8 +475,8 @@ it("continues a conversation's history from the cursor a page returned, with wha
       cursor: first.nextCursor,
     });
 
-    expect(first.records).toHaveLength(50);
-    expect(rest.records.map((record) => record.message.text)).toEqual([
+    expect(first.entries).toHaveLength(50);
+    expect(rest.entries.map((entry) => entry.message.text)).toEqual([
       "Message 50",
       "Later message",
     ]);

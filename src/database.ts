@@ -1,7 +1,7 @@
 /**
- * @file The server's tables. `messages` holds each message once, in the order
+ * @file The server's tables. `messages` stores each message once, in the order
  * it was stored, with the server agent's firewall's check of it, and
- * `firewall_checks` holds the record of each check. A query that fails ends
+ * `firewall_checks` stores the record of each check. A query that fails ends
  * its caller as a defect.
  */
 
@@ -36,19 +36,19 @@ export class DatabasePreparationError extends Data.TaggedError(
 }> {
   override get message(): string {
     return this.reason === "schema"
-      ? "The database holds tables that are not this server's; give the server an empty database"
+      ? "The database has tables that are not this server's; give the server an empty database"
       : "The server could not create its tables; check that SHARNESS_DATABASE_URL names a reachable database its login may create tables in";
   }
 }
 
 /**
  * Creates the tables in an empty database, in one transaction, and leaves a
- * database that already holds them as it is, so a login that cannot create
- * tables serves a database another login prepared. A database that holds
- * other tables is refused. `messages` holds each message once, in the order
+ * database that already has them as it is, so a login that cannot create
+ * tables serves a database another login prepared. A database that has
+ * other tables is refused. `messages` stores each message once, in the order
  * it was stored: `client` names its conversation, `from_server` says which of
  * the two agents wrote it, and `checked_at` is when the firewall checked it.
- * `firewall_checks` holds the record of each check.
+ * `firewall_checks` stores the record of each check.
  */
 export const prepareTables = Effect.fn("prepareDatabase")(
   function* (sql: SqlClient.SqlClient) {
@@ -116,8 +116,8 @@ class CheckRow extends Model.Class<CheckRow>("CheckRow")({
 }) {}
 
 /**
- * A message as the tables hold it: the time of the firewall's check of it,
- * and its place in the order messages were stored.
+ * A stored message: the message, the time the firewall checked it, and its
+ * place in the order messages were stored.
  */
 export interface StoredMessage extends CheckedMessage {
   readonly sequence: number;
@@ -167,7 +167,7 @@ export const openDatabase = Effect.fn("openDatabase")(function* (
       Effect.orDie,
     );
   const record = (decision: CheckRecord) =>
-    checks.insertVoid({ decidedAt: decision.time, record: decision });
+    checks.insertVoid({ decidedAt: decision.checkedAt, record: decision });
   return {
     /** The messages of `client`'s conversation after the place `after`, oldest first, `limit` of them at most. */
     conversation: (client: AgentName, after = 0, limit: number | null = null) =>
@@ -214,7 +214,7 @@ export const openDatabase = Effect.fn("openDatabase")(function* (
           Effect.gen(function* () {
             yield* sql`SELECT pg_advisory_xact_lock(${STORE_LOCK})`;
             yield* messages.insertVoid(
-              rowOf({ message, checkedAt: decision?.time }, serverAgent),
+              rowOf({ message, checkedAt: decision?.checkedAt }, serverAgent),
             );
             if (decision !== undefined) {
               yield* record(decision);

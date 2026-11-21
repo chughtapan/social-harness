@@ -1,6 +1,6 @@
 ---
 title: Message firewall
-description: How the server agent's firewall holds every message to the norms the server publishes.
+description: How the server agent's firewall enforces the norms the server publishes on every message.
 read_when:
   - You need to know what a firewall decision permits or refuses
   - You need to know what the sender of a refused message reads
@@ -8,11 +8,10 @@ read_when:
 
 The message firewall checks every message of the server agent's conversations
 when it is sent: what a client sends the server agent, and what the server
-agent sends a client. It holds each message to the
-[norms](./norms/norms.md) the server publishes. It receives a message, which
-member sent it and the earlier messages of its conversation. It returns a
-decision, the rules that determined it, and the feedback the sender of a
-refused message reads.
+agent sends a client. It enforces the [norms](./norms/norms.md) the server
+publishes. It receives a message, which member sent it and the earlier
+messages of its conversation. It returns a decision, the rules that refused
+a refused message, and the feedback its sender reads.
 
 The firewall owns its checks. The daemon supplies the message and its
 conversation, applies the decision to the send, and saves a record of the
@@ -26,16 +25,17 @@ host owns models, tools and the agent's private context.
 
 A check has two parts, in order:
 
-1. The structure check reads the message as an act of a held norm and judges
-   its form and its place in the conversation's protocol. It refuses a
-   message that fails either.
-2. The decision provider judges the text rules of an act that passed: one
-   rule for each [described string or list field](./norms/norms.md#text-rules)
-   the act states.
+1. The structure check reads the message as an act of a published norm. It
+   passes an act that fits its form and is its sender's to send next in the
+   conversation's protocol, and refuses any other message.
+2. The decision provider judges an act that passed against its text rules:
+   one rule for each
+   [described string or list field](./norms/norms.md#text-rules) the act
+   states.
 
-A continuation's reply reference must belong to the active instance. A
-reference from an ended instance cannot change or end a later instance
-in the same conversation.
+A continuation replies to a message in the thread of the instance in
+progress. A reply to a message of an ended instance cannot change or end a
+later instance in the same conversation.
 
 ## Decisions
 
@@ -47,17 +47,17 @@ priority order:
 2. An unsure answer refuses as unresolved evidence.
 3. Otherwise, allow.
 
-Every rule the check judges needs an answer, and a pass cannot erase another
-rule's violation. A check without a valid answer for every rule is
+Every text rule of the act needs an answer, and a compliant answer cannot
+erase another rule's violation. A check without a valid answer for every rule is
 unavailable: it decides nothing, its message's send fails, and it leaves no
 record. A cancelled check produces no decision. A check cannot alter its
 message.
 
 ### Provider answers
 
-A text rule holds one field to its description: the field must hold what the
-description says and nothing else. The norm's author writes the description,
-and the firewall derives the rule from it.
+A text rule requires one field to contain only what its description says.
+The norm's author writes the description, and the firewall derives the rule
+from it.
 
 For each rule, the decision provider answers one question about the message:
 does it break the rule? The answer is `compliant` or `violation`, with a
@@ -96,17 +96,17 @@ depends on who sent it:
 
 | Sender | Reads |
 | --- | --- |
-| Server agent | The reason (`rule-violation`, `unresolved-evidence` or `check-unavailable`), the check id and the feedback. The check's [record](#decision-records) names the deciding rules. |
+| Server agent | The reason (`rule-violation`, `unresolved-evidence` or `check-unavailable`), the check id and the feedback. The check's [record](#decision-records) names the rules that refused it. |
 | Client | The feedback. When the check was unavailable, only that the server is unavailable and to try again later. |
 
-A client's failure holds nothing else: no check id and no word of which
+A client's failure says nothing else: no check id and no word of which
 kind of refusal it was. Neither failure carries
 private evidence, credentials or raw provider output.
 [Failed sends](./host/messaging.md#failed-sends) gives the fields of each
 failure. Every member reads the norm documents whole with `read_norms`, so
 feedback tells a client nothing it could not read there.
 
-## Evidence
+## What a check reads
 
 A check receives its message and the earlier messages of the conversation
 once. It applies to that message and those earlier messages as captured,
@@ -114,24 +114,24 @@ without a second check when later messages arrive. An allowed message is
 stored with the recipient, text and message id that were checked.
 
 The decision provider is a service outside the daemon. Each check that has a
-text rule to judge sends it the message, the names of both agents, the rules,
-the norm's description with the act's form and current facts, and the history
-window below.
+text rule sends it the message, the names of both agents, the rules, the
+norm's description with the act's form and the facts that are set, and the
+history window below.
 
-### Available history
+### History window
 
-The decision provider reads the preceding messages in conversation order,
-excluding the message under check. The daemon's `maximumHistoryRecords`
-setting limits them to the latest 256 by default, configurable from 1 to
-1024. A check uses the conversation of its message; other conversations and
-host private context are excluded. The window also holds at most 2 MiB of
-messages, the latest that fit. `earlierHistoryOmitted` tells the provider that
-earlier messages were left out, and refuses nothing. The structure check
-separately receives every preceding message with the time of the firewall's
-check of it, outside this window.
+The decision provider reads the earlier messages in conversation order,
+without the message under check. The daemon's `historyLimit` setting limits
+them to the latest 256 by default, configurable from 1 to 1024. A check uses
+the conversation of its message; other conversations and host private context
+are excluded. The window also has at most 2 MiB of messages, the latest that
+fit. `earlierHistoryOmitted` tells the provider that earlier messages were
+left out, and refuses nothing. The structure check separately receives every
+earlier message with the time of the firewall's check of it, outside this
+window.
 
 A description that needs other conversations, older messages or instructions
-the owner gave elsewhere cannot be judged from this evidence.
+the owner gave elsewhere cannot be judged from what a check reads.
 
 ## Decision provider
 
@@ -157,7 +157,7 @@ Each completed check leaves one record. An unavailable or cancelled check
 leaves none, and neither does a send that fails before its check, such as one
 to an unknown client. `read_firewall_decisions` returns the hundred latest
 records since the time `since`, in Unix milliseconds, newest first. A record
-holds no message content, message id or private evidence.
+has no message content, message id or private evidence.
 
 | Field | Meaning |
 | --- | --- |
@@ -165,13 +165,12 @@ holds no message content, message id or private evidence.
 | `sender` | Which member sent the message: `client` or `server`. |
 | `client` | The client of the message's conversation. A client's refused first message leaves a record and no conversation. |
 | `decision` | `allowed` or `refused`. |
-| `reason` | `eligible` for an allowed message, `rule-violation` or `unresolved-evidence` for a refused one. |
-| `time` | When the check ran, in Unix milliseconds. |
-| `checkedRuleIds` | The rules the check judged. |
-| `decidedBy` | The deciding rules, each with its `feedback`. A text rule is its norm, act and field: `office-hours.request.topic`. A structure check's rule is the stage that refused, `structural` or `protocol`, after the name of the norm the message was judged under: `office-hours-protocol`. Its feedback is not saved. |
+| `reason` | Why a refused message was refused: `rule-violation` or `unresolved-evidence`. An allowed message has none. |
+| `checkedAt` | When the check ran, in Unix milliseconds. |
+| `checkedRuleIds` | The rules the check applied. |
+| `decidedBy` | The rules that refused the message, each with its `feedback`. An allowed message has none. A text rule is its norm, performative and field: `office-hours.request.topic`. A structure check's rule is the name of the norm the message was checked under, then the stage that refused, `form` or `protocol`: `office-hours-protocol`. Its feedback is not saved. |
 
-| Reason | Deciding rules |
+| Reason | Rules in `decidedBy` |
 | --- | --- |
-| Rule violation | Violated rules. |
-| Unresolved evidence | Rules with an unsure answer, or the rule of a structure check that could not settle the message. |
-| Eligible | None. |
+| `rule-violation` | Violated rules. |
+| `unresolved-evidence` | Rules with an unsure answer, or the rule of a structure check that could not settle the message. |

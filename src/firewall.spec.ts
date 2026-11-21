@@ -16,7 +16,7 @@ import {
   TestClock,
 } from "effect";
 import { describe, expect } from "vitest";
-import type { HeldNorms, Role, TextRule } from "./norms/index.js";
+import type { Norms, Role, TextRule } from "./norms/index.js";
 import { type Answer, answersTo } from "../tests/support/decision-provider.js";
 import {
   type DecisionProvider,
@@ -27,7 +27,7 @@ import {
 import { type CheckedMessage, makeFirewall } from "./firewall.js";
 import { AgentName, Message } from "./messages.js";
 
-type StructureCheck = HeldNorms["check"];
+type StructureCheck = Norms["structureCheck"];
 
 const senders = ["client", "server"] as const;
 
@@ -45,8 +45,8 @@ const privacy: TextRule = {
 
 /** A structure check that passes every message with `textRules` to judge. */
 const passing =
-  (textRules: readonly TextRule[], protocol?: unknown): StructureCheck =>
-  () => ({ kind: "passed", textRules, protocol });
+  (textRules: readonly TextRule[], instance?: unknown): StructureCheck =>
+  () => ({ kind: "passed", textRules, instance });
 
 /** A provider that answers as `answersTo` does and adds each request to `requests`. */
 function answering(
@@ -54,7 +54,7 @@ function answering(
   requests: DecisionRequest[] = [],
 ): DecisionProvider {
   return {
-    decide: (request) =>
+    answer: (request) =>
       Effect.sync(() => {
         requests.push(request);
         return answersTo(request, choices);
@@ -103,7 +103,7 @@ function check(sender: Role, setup: Setup = {}) {
 function firewallOf(setup: Setup = {}) {
   return makeFirewall({
     norms: {
-      check: setup.structureCheck ?? passing(setup.rules ?? [privacy]),
+      structureCheck: setup.structureCheck ?? passing(setup.rules ?? [privacy]),
     },
     judge: {
       provider: setup.provider ?? certain,
@@ -217,13 +217,13 @@ it.each([
   {
     failure: "fails",
     provider: {
-      decide: () =>
+      answer: () =>
         Effect.fail(new DecisionProviderError({ transient: false })),
     },
   },
   {
     failure: "leaves a question unanswered",
-    provider: { decide: () => Effect.succeed({ answers: {} }) },
+    provider: { answer: () => Effect.succeed({ answers: {} }) },
   },
   {
     failure: "chooses an answer the question does not offer",
@@ -279,7 +279,9 @@ it.each(senders)(
 
 it("makes the check of a message that has rules unavailable when the server names no decision provider", () =>
   Effect.gen(function* () {
-    const firewall = makeFirewall({ norms: { check: passing([privacy]) } });
+    const firewall = makeFirewall({
+      norms: { structureCheck: passing([privacy]) },
+    });
 
     expect(yield* firewall.check("client", yield* fromBob, [])).toMatchObject({
       kind: "refused",
@@ -333,7 +335,7 @@ it.prop(
       const running = yield* check("server", {
         rules: [proposal],
         provider: {
-          decide: (request) =>
+          answer: (request) =>
             Effect.sleep(delay).pipe(Effect.as(answersTo(request))),
         },
         timeoutMilliseconds,
@@ -348,7 +350,7 @@ it.prop(
     }),
 );
 
-it("allows every message on a server that holds no norms, with nothing to save", () =>
+it("allows every message on a server that publishes no norms, with nothing to save", () =>
   Effect.gen(function* () {
     const firewall = makeFirewall({});
     const message = yield* fromBob;
@@ -447,7 +449,7 @@ describe("Firewall structure check", () => {
     (sender) =>
       Effect.gen(function* () {
         const result = yield* check(sender, {
-          provider: { decide: () => Effect.dieMessage("Provider asked") },
+          provider: { answer: () => Effect.dieMessage("Provider asked") },
           structureCheck: () => refusal,
         });
 
@@ -463,10 +465,10 @@ describe("Firewall structure check", () => {
       }),
   );
 
-  it("judges a message its structure check passes by that check's rules, shows the provider that check's context, and tells the check which member sent each message and when it was checked", () =>
+  it("asks the provider about a message its structure check passes by that check's rules, shows the provider the instance that check gives, and tells the check which member sent each message and when it was checked", () =>
     Effect.gen(function* () {
       const requests: DecisionRequest[] = [];
-      const judged: Array<Parameters<StructureCheck>> = [];
+      const checked: Array<Parameters<StructureCheck>> = [];
       const earlier = [
         { message: yield* fromBob, checkedAt: 1 },
         {
@@ -482,17 +484,17 @@ describe("Firewall structure check", () => {
         provider: answering({ [privacy.id]: "violation" }, requests),
         earlier,
         structureCheck: (...given) => {
-          judged.push(given);
+          checked.push(given);
           return passing([privacy], { turn: 2 })(...given);
         },
       });
 
-      expect(judged).toMatchObject([
+      expect(checked).toMatchObject([
         [
-          { role: "client", text: "Hello" },
+          { sender: "client", text: "Hello" },
           [
-            { role: "client", text: "Hello", at: 1 },
-            { role: "server", text: "Hi" },
+            { sender: "client", text: "Hello", checkedAt: 1 },
+            { sender: "server", text: "Hi" },
           ],
           0,
         ],
@@ -500,8 +502,8 @@ describe("Firewall structure check", () => {
       expect(
         requests.map(({ state, questions }) => [
           Schema.decodeUnknownSync(
-            Schema.parseJson(Schema.Struct({ protocol: Schema.Unknown })),
-          )(state).protocol,
+            Schema.parseJson(Schema.Struct({ instance: Schema.Unknown })),
+          )(state).instance,
           Object.values(questions).map(({ ruleId }) => ruleId),
         ]),
       ).toEqual([[{ turn: 2 }, [privacy.id]]]);

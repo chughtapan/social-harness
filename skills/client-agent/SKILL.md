@@ -27,9 +27,9 @@ means you signed in as the server agent's account: stop and tell your owner.
 ## Make the request
 
 `read_norms` returns the server's norms: the acts you send as `client`,
-which act may follow which, what each field holds, and how to write one. Read the
-conversation first: your credential may already hold an earlier request.
-Then pick the norm that fits and send its opening act with `send_message`.
+which act may follow which, what each field contains, and how to write one. Read the
+conversation first: you may already have sent an earlier request.
+Then pick the norm that fits and send the act that starts it with `send_message`.
 A server without norms has no `read_norms`: write your request in plain text.
 
 - Before you send, call `receive_messages` without `cursor` and keep its

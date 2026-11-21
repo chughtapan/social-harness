@@ -61,7 +61,7 @@ it(
       const serverHistory = yield* callTool(server, "read_conversation", {
         with: client.name,
       });
-      expect(serverHistory.records.map(({ message }) => message.msgId)).toEqual(
+      expect(serverHistory.entries.map(({ message }) => message.msgId)).toEqual(
         [opened.id, replied.id],
       );
       expect(yield* callTool(client, "read_conversation")).toEqual(
@@ -154,9 +154,9 @@ it(
         with: client.name,
       });
       const clientSaved = yield* callTool(client, "read_conversation");
-      const order = serverSaved.records.map((record) => record.message.msgId);
+      const order = serverSaved.entries.map((entry) => entry.message.msgId);
       expect(order).toHaveLength(4 * CROSSING_ROUNDS + 1);
-      expect(clientSaved.records.map((record) => record.message.msgId)).toEqual(
+      expect(clientSaved.entries.map((entry) => entry.message.msgId)).toEqual(
         order,
       );
     }),

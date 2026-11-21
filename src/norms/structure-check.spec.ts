@@ -33,30 +33,30 @@ function actText(
 }
 
 /**
- * Offers alternate. Either member's `offer` opens an instance. Only the
+ * Offers alternate. Either member's `offer` starts an instance. Only the
  * recipient of the current offer may `counter` it or `choose` its value,
  * replying in its chain, and choosing settles it. Either member may `finish`.
  */
 const turns = normFrom(`
 (norm turns)
-(act offer :by (client server) :starts true :initiates offered
+(act offer :by (client server) :starts true :sets offered
   (field value :type string))
-(act counter :by (recipient (fact offered)) :when offered :initiates offered
+(act counter :by (recipient (fact offered)) :when offered :sets offered
   (field value :type string))
 (act choose :by (recipient (fact offered)) :when offered
-  :terminates offered :initiates selected
+  :clears offered :sets selected
   (field value :type string)
   (relation equals value (previous (fact offered) value)))
 (act finish :by (client server) :ends true)
 `);
 
-/** A message id no generated history holds. */
+/** A message id no generated history contains. */
 const unknownId = "unknown";
 
 /**
  * Checks the act `text` from `author` against `history` at `now`, and adds
  * its message to the history when the check passes it, as a refused message
- * is not stored. A history that holds every message twice gives the same
+ * is not stored. A history that contains every message twice gives the same
  * answer.
  */
 function attempt(
@@ -77,7 +77,7 @@ function attempt(
   );
   const { kind } = check(norm, candidate, history, taken.now);
   if (kind === "passed") {
-    history.push({ ...candidate, at: taken.now });
+    history.push({ ...candidate, checkedAt: taken.now });
   }
   return kind === "passed";
 }
@@ -92,10 +92,10 @@ function message(
   id?: string,
 ): Sent {
   minted += 1;
-  return { id: id ?? `minted-${minted}`, ...reference, role: author, text };
+  return { id: id ?? `minted-${minted}`, ...reference, sender: author, text };
 }
 
-/** What the structure check of a server that holds `norm` says of `candidate` at `now`, after `history`. */
+/** What the structure check of a server that publishes `norm` finds of `candidate` at `now`, after `history`. */
 function check(
   norm: Norm,
   candidate: Sent,
@@ -150,7 +150,7 @@ interface Model {
   readonly known: Set<string>;
 }
 
-/** The message a step replies to: none, one no history holds, or an earlier step's. */
+/** The message a step replies to: none, one no history contains, or an earlier step's. */
 function replyOf(history: readonly Sent[], taken: Step): Option.Option<string> {
   if (taken.reply === "none") {
     return Option.none();
@@ -185,7 +185,7 @@ function modelPermits(
   return taken.act === "finish" || answersOffer(model, taken, inInstance.value);
 }
 
-/** Whether `taken` counters or chooses the current offer: from its recipient, in a reply chain that holds it. */
+/** Whether `taken` counters or chooses the current offer: from its recipient, in a reply chain that contains it. */
 function answersOffer(model: Model, taken: Step, reply: string): boolean {
   const chain = new Set<string>();
   let current = Option.some(reply);
@@ -277,7 +277,7 @@ it("permits an act with a delay and a limit only once its fact is that old and w
       ({ wait, elapsed, maximum, sent }) => {
         const timed = normFrom(`
 (norm timed)
-(act hold :by client :starts true :initiates held
+(act hold :by client :starts true :sets held
   (field wait :type integer :minimum 0))
 (act poll :by (client server) :when held :max ${maximum}
   :after held :delay wait :unit seconds)
@@ -312,25 +312,25 @@ it("permits an act with a delay and a limit only once its fact is that old and w
 /** The client's `open` starts an instance and the server's `close` ends it. */
 const exchange = normFrom(`
 (norm exchange)
-(act open :by client :starts true :initiates opened
+(act open :by client :starts true :sets opened
   (field value :type string))
 (act close :by server :when opened :ends true)
 `);
 
-it("refuses every text that is not an act of a held norm", () => {
+it("refuses every text that is not an act of a published norm", () => {
   fc.assert(
     fc.property(fc.string({ minLength: 1 }), (text) => {
       expect(check(exchange, message(client, text))).toMatchObject({
         kind: "refused",
         reason: "rule-violation",
-        ruleId: "norm-structural",
+        ruleId: "norm-form",
       });
     }),
     { numRuns: 60 },
   );
 });
 
-it("passes an act with one text rule for each described string or list field it states, which holds the field to its description", () => {
+it("passes an act with one text rule for each described string or list field it states, which requires the field to contain only what its description says", () => {
   const described = normFrom(`
 (norm described)
 (act ask :by client :starts true :ends true
@@ -352,18 +352,18 @@ it("passes an act with one text rule for each described string or list field it 
     textRules: [
       {
         id: "described.ask.topic",
-        text: "topic must hold what its description says and nothing else: The subject.",
+        text: "topic must contain only what its description says: The subject.",
       },
       {
         id: "described.ask.slots",
-        text: "each item of slots must hold what its description says and nothing else: One slot.",
+        text: "each item of slots must contain only what its description says: One slot.",
       },
     ],
-    protocol: { norm: "described", act: "ask" },
+    instance: { norm: "described", performative: "ask" },
   });
 });
 
-it("refuses an act from the member whose role may not send it, to open an instance and within one", () => {
+it("refuses an act from the member whose role may not send it, to start an instance and within one", () => {
   const open = message(client, actText("open", "exchange", { value: "x" }));
 
   expect(
@@ -378,16 +378,16 @@ it("refuses an act from the member whose role may not send it, to open an instan
       message(client, actText("close", "exchange"), {
         replyTo: open.id,
       }),
-      [{ ...open, at: 1 }],
+      [{ ...open, checkedAt: 1 }],
     ),
   ).toMatchObject({ kind: "refused", ruleId: "exchange-protocol" });
 });
 
 it.each([
-  { checked: { at: 1 }, continues: "passed" },
+  { checked: { checkedAt: 1 }, continues: "passed" },
   { checked: {}, continues: "refused" },
 ])(
-  "continues an instance only from an opening act the firewall checked: $checked",
+  "continues an instance only from a starting act the firewall checked: $checked",
   ({ checked, continues }) => {
     const open = message(client, actText("open", "exchange", { value: "x" }));
 
@@ -402,26 +402,26 @@ it.each([
 );
 
 it.each([
-  { what: "plain text", text: "hello", stage: "structural" },
+  { what: "plain text", text: "hello", stage: "form" },
   {
     what: "an act the norm lacks",
     text: "(unknown :norm exchange)",
-    stage: "structural",
+    stage: "form",
   },
   {
     what: "a field its form lacks",
     text: '(close :norm exchange :extra "unasked")',
-    stage: "structural",
+    stage: "form",
   },
   {
     what: "a comment after the act",
     text: "(close :norm exchange) ; note",
-    stage: "structural",
+    stage: "form",
   },
   {
     what: "an unclosed act",
     text: "(close :norm exchange",
-    stage: "structural",
+    stage: "form",
   },
   {
     what: "a second opening",
@@ -441,7 +441,7 @@ it.each([
     const result = check(
       exchange,
       message(server, text, { replyTo: open.id }),
-      [{ ...open, at: 1 }],
+      [{ ...open, checkedAt: 1 }],
     );
 
     expect(result).toMatchObject({
@@ -542,7 +542,7 @@ it("refuses a value another type of field is given", () => {
   }
 });
 
-it("holds an integer to its bounds and to whole values", () => {
+it("requires an integer within its bounds and whole", () => {
   fc.assert(
     fc.property(
       fc.integer({ min: -100, max: 100 }),
@@ -584,7 +584,7 @@ it("reads any quoted string and counts its length in code points against its bou
   );
 });
 
-it("holds a list to nonempty items and their count to its bounds", () => {
+it("requires a list of nonempty items whose count is within its bounds", () => {
   fc.assert(
     fc.property(
       fc.array(fc.constantFrom("a", "b", ""), { maxLength: 5 }),
@@ -610,9 +610,9 @@ it("holds a list to nonempty items and their count to its bounds", () => {
 /** The client offers slots, the server keeps some of them, and the client picks one of those kept. */
 const picking = normFrom(`
 (norm picking)
-(act offer :by client :starts true :initiates offered
+(act offer :by client :starts true :sets offered
   (field slots :type list :min-items 1))
-(act keep :by server :when offered :initiates kept
+(act keep :by server :when offered :sets kept
   (field slots :type list :min-items 1)
   (relation subset slots (previous offer slots)))
 (act pick :by client :when kept :ends true
@@ -620,7 +620,7 @@ const picking = normFrom(`
   (relation member slot (previous (fact kept) slots)))
 `);
 
-it("holds a list to a subset of an earlier list, and a string to one of an earlier list's items", () => {
+it("requires a list to be a subset of an earlier list, and a string to be one of an earlier list's items", () => {
   const item = fc.constantFrom("mon", "tue", "wed");
   fc.assert(
     fc.property(

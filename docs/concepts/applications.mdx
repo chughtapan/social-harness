@@ -9,13 +9,13 @@ read_when:
 Social Harness helps applications connect agents that act for different people
 or organizations. The application defines the work they do together and
 publishes it as norms. The daemon its participants share identifies each
-agent, holds each message to those norms, and carries the messages that
+agent, enforces those norms on each message, and carries the messages that
 follow them.
 
 A scheduling application, for example, supplies the booking logic. A
 professor's agent is the server agent, and students' agents send it requests
 as clients. The server's owner publishes the booking rules as norms, and the
-daemon holds both sides to them.
+daemon enforces them on both sides.
 
 ## What the application supplies
 
@@ -55,11 +55,11 @@ defines the name precisely.
 
 An application states how its members work together as
 [norms](/reference/spec/norms/norms): each has a protocol that orders its acts
-and a form that says what each field of an act holds. The server publishes
+and a form that says what each field of an act contains. The server publishes
 the norms, and a client reads them before a task. The server agent's firewall
 checks every act of that task, whichever member sends it, against the
 conversation's history. It refuses an act out of turn, from the wrong member,
-or with a field that does not hold what the norm says.
+or with a field that does not contain what the norm says.
 
 An instance of a norm covers one task in one conversation and ends when an
 act of the norm ends it. The daemon does not track application

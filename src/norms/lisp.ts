@@ -17,7 +17,7 @@ import {
   type Norm,
   type Relation,
   type Role,
-  type Sender,
+  type Senders,
   type Value,
 } from "./norm.js";
 
@@ -50,7 +50,7 @@ const NUMBER = /^-?(?:0|[1-9]\d*)(?:\.\d+)?(?:[eE][+-]?\d+)?$/u;
  * the tool that returns the norm documents.
  */
 export const ACT_SYNTAX =
-  'A message is one act and nothing else: (<performative> :norm <norm> :<field> <value> ...). Quote text as a JSON string, write a list as quoted strings in parentheses such as ("first" "second"), and send an act without fields as (<performative> :norm <norm>). The opening act omits replyToMsgId in send_message; every later act supplies the id of the message it answers.';
+  'A message is one act and nothing else: (<performative> :norm <norm> :<field> <value> ...). Quote text as a JSON string, write a list as quoted strings in parentheses such as ("first" "second"), and send an act without fields as (<performative> :norm <norm>). The act that starts an instance omits replyToMsgId in send_message; every later act supplies the id of the message it answers.';
 
 /** The attributes that bound a field of each type. */
 const bounds = {
@@ -60,10 +60,10 @@ const bounds = {
 } as const;
 
 /** The norm a document states: one `norm` declaration, then an `act` declaration for each form. */
-export function readNorm(source: string): Read<Norm> {
+export function readNorm(document: string): Read<Norm> {
   return Either.gen(function* () {
     const expressions = yield* Either.mapLeft(
-      readSExpressions(source, true),
+      readSExpressions(document, true),
       ({ detail, offset }) => `${detail} Offset ${offset}.`,
     );
     const [header, ...body] = yield* Either.all(
@@ -82,8 +82,8 @@ export function readNorm(source: string): Read<Norm> {
       name: header.name,
       description: (yield* textAttribute(header, ":description")) ?? "",
       forms: yield* Either.all(body.map(readForm)),
-      source,
-      digest: createHash("sha256").update(source, "utf8").digest("hex"),
+      document,
+      digest: createHash("sha256").update(document, "utf8").digest("hex"),
     };
   });
 }
@@ -158,7 +158,7 @@ function readValue(node: SExpression): Read<Value> {
     );
     return items.length === node.values.length
       ? Either.right(items)
-      : Either.left("A list holds strings, not lists.");
+      : Either.left("A list contains strings, not lists.");
   }
   if (!NUMBER.test(node.value)) {
     return Either.right(node.value);
@@ -176,8 +176,8 @@ function readForm(form: Declaration): Read<Form> {
       ":starts",
       ":ends",
       ":when",
-      ":initiates",
-      ":terminates",
+      ":sets",
+      ":clears",
       ":max",
       ":after",
       ":delay",
@@ -191,15 +191,15 @@ function readForm(form: Declaration): Read<Form> {
     }
     return {
       performative: form.name ?? "",
-      by: yield* readSender(form),
+      by: yield* readSenders(form),
       fields: yield* Either.all(
         children.filter(({ kind }) => kind === "field").map(readField),
       ),
       starts: yield* booleanAttribute(form, ":starts"),
       ends: yield* booleanAttribute(form, ":ends"),
       when: yield* names(form.attributes.get(":when")),
-      terminates: yield* names(form.attributes.get(":terminates")),
-      initiates: yield* names(form.attributes.get(":initiates")),
+      clears: yield* names(form.attributes.get(":clears")),
+      sets: yield* names(form.attributes.get(":sets")),
       max: yield* numberAttribute(form, ":max"),
       delay: yield* readDelay(form),
       relations: yield* Either.all(
@@ -210,7 +210,7 @@ function readForm(form: Declaration): Read<Form> {
 }
 
 /** Who `:by` lets send an act: `client`, `server`, both, or `(recipient (fact name))`. */
-function readSender(form: Declaration): Read<Sender> {
+function readSenders(form: Declaration): Read<Senders> {
   const node = form.attributes.get(":by");
   if (node?.kind === "list" && symbol(node.values[0]) === "recipient") {
     const fact = node.values.length === 2 ? factOf(node.values[1]) : undefined;
@@ -332,7 +332,10 @@ function readSource(node: SExpression): Read<Relation["source"]> {
   }
   return performative === undefined
     ? Either.left("An act reference names one act or (fact name).")
-    : Either.right({ act: { kind: "act", performative }, field: named });
+    : Either.right({
+        act: { kind: "performative", performative },
+        field: named,
+      });
 }
 
 /** The fact `(fact name)` names. */
@@ -467,14 +470,14 @@ function symbol(node?: SExpression): string | undefined {
 }
 
 /**
- * Reads every expression of `source`: lists in parentheses, strings quoted
+ * Reads every expression of `text`: lists in parentheses, strings quoted
  * with JSON escaping, and symbols, which are every other run of characters.
  * A `;` starts a comment that runs to the end of its line, which a document
  * may carry and a message may not, so that every token of a message is
  * accounted for. A failure gives the offset of the token at fault.
  */
 function readSExpressions(
-  source: string,
+  text: string,
   comments: boolean,
 ): Either.Either<
   readonly SExpression[],
@@ -484,9 +487,9 @@ function readSExpressions(
   const stack: SExpression[][] = [roots];
   const tokens = /\s+|;[^\r\n]*|[()]|"(?:[^"\\]|\\[\s\S])*"|[^\s();"]+/uy;
   let offset = 0;
-  while (offset < source.length) {
+  while (offset < text.length) {
     tokens.lastIndex = offset;
-    const token = tokens.exec(source)?.[0];
+    const token = tokens.exec(text)?.[0];
     const refusal =
       token === undefined
         ? "Expected a complete token."

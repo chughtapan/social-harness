@@ -1,8 +1,8 @@
 #!/usr/bin/env node
 /**
- * @file The `sharnessd` executable: it reads the settings file, loads the
+ * @file The `sharnessd` executable: it reads the settings file, compiles the
  * norms the server publishes, opens the server behind the firewall that
- * holds every message to them, and serves its MCP tools over HTTP to the
+ * enforces them on every message, and serves its MCP tools over HTTP to the
  * owners the authentication admits. `--help` prints the
  * usage, no argument serves until the process is stopped, and any other
  * arguments print the usage to standard error. A startup failure prints one
@@ -41,7 +41,7 @@ import {
 import { makeFirewall } from "./firewall.js";
 import { mcpServerFactory, packageVersion } from "./mcp.js";
 import { AgentName } from "./messages.js";
-import { holdNorms } from "./norms/index.js";
+import { compileNorms } from "./norms/index.js";
 import { openServer } from "./server.js";
 
 /**
@@ -65,17 +65,15 @@ const settingsFile = Schema.Struct({
   }),
   normsDirectory: Schema.optional(Schema.NonEmptyString),
   decisionProvider: Schema.optional(decisionProviderSetting),
-  maximumHistoryRecords: Schema.optional(
-    Schema.Int.pipe(Schema.between(1, 1024)),
-  ),
+  historyLimit: Schema.optional(Schema.Int.pipe(Schema.between(1, 1024))),
 });
 
 /**
- * The norms of every `.lisp` document directly in `directory`, read in name
- * order, or the refusal of a directory that cannot be read or whose
- * documents are no norms.
+ * The norms of every `.lisp` document directly in `directory`, compiled in
+ * name order, or the refusal of a directory that cannot be read or whose
+ * documents state no norms.
  */
-const readNorms = Effect.fn("readNorms")(function* (directory: string) {
+const normsIn = Effect.fn("normsIn")(function* (directory: string) {
   const filesystem = yield* FileSystem.FileSystem;
   return yield* filesystem.readDirectory(directory).pipe(
     Effect.flatMap((files) =>
@@ -86,7 +84,7 @@ const readNorms = Effect.fn("readNorms")(function* (directory: string) {
       ),
     ),
     Effect.mapError(({ message }) => message),
-    Effect.flatMap(holdNorms),
+    Effect.flatMap(compileNorms),
     Effect.mapError((reason) =>
       refused(`The configured norms directory is invalid: ${reason}`),
     ),
@@ -94,12 +92,12 @@ const readNorms = Effect.fn("readNorms")(function* (directory: string) {
 });
 
 /**
- * The settings: what the process holds after reading the settings file, with
- * the held norms in place of their directory and the judge in place of the
+ * The settings as the process uses them: the settings file, with the
+ * compiled norms in place of their directory and the judge in place of the
  * decision provider's name. The norms directory resolves against the
  * settings file's own directory, whatever the working directory. The judge
- * is Jev under the named model, with the key the environment variable
- * `SHARNESS_DECISION_PROVIDER_KEY` holds.
+ * is Jev under the named model, with the key in the environment variable
+ * `SHARNESS_DECISION_PROVIDER_KEY`.
  */
 const loadSettings = Effect.fn("loadSettings")(function* () {
   const settingsPath = yield* Config.string("SHARNESS_CONFIG_FILE").pipe(
@@ -122,7 +120,7 @@ const loadSettings = Effect.fn("loadSettings")(function* () {
   const norms =
     file.normsDirectory === undefined
       ? undefined
-      : yield* readNorms(resolve(settingsDirectory, file.normsDirectory));
+      : yield* normsIn(resolve(settingsDirectory, file.normsDirectory));
   if (norms?.hasTextRules === true && file.decisionProvider === undefined) {
     return yield* refused(
       "The configured norms describe string or list fields, which need a decisionProvider to judge them",
@@ -212,7 +210,7 @@ const DEVELOPMENT_WARNING =
 
 /** Printed for a startup failure that names no setting of its own. */
 const UNEXPLAINED_FAILURE =
-  "The server could not start. Check SHARNESS_CONFIG_FILE and SHARNESS_DATABASE_URL; run sharnessd --help for what each must hold.";
+  "The server could not start. Check SHARNESS_CONFIG_FILE and SHARNESS_DATABASE_URL; run sharnessd --help for what each names.";
 
 /** Prints one line to standard error and makes the process exit unsuccessfully. */
 const exitUnsuccessfully = (line: string) =>
@@ -280,7 +278,7 @@ const serve = Effect.gen(function* () {
     makeFirewall({
       norms,
       judge: settings.judge,
-      historyLimit: settings.maximumHistoryRecords,
+      historyLimit: settings.historyLimit,
     }),
   );
   const factory = yield* mcpServerFactory(

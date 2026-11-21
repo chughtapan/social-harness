@@ -145,8 +145,8 @@ it(
           { serverAgent: { name: "Front Desk", subject: SERVER_AGENT_OWNER } },
           "settings file",
         ],
-        [{ maximumHistoryRecords: 0 }, "settings file"],
-        [{ maximumHistoryRecords: 1025 }, "settings file"],
+        [{ historyLimit: 0 }, "settings file"],
+        [{ historyLimit: 1025 }, "settings file"],
         [{ decisionProvider: {} }, "settings file"],
         [{ normsDirectory: "nested/norms" }, "configured norms"],
         [{ normsDirectory: "broken" }, "norms directory"],
@@ -169,7 +169,7 @@ it(
         settings,
       );
       yield* sharnessd.configure({
-        maximumHistoryRecords: 1024,
+        historyLimit: 1024,
         decisionProvider: { model: "configured-model" },
         normsDirectory: "nested/norms",
       });
@@ -333,7 +333,7 @@ it(
         ),
       ).toEqual(sent.ids);
       const history = yield* callTool(client, "read_conversation");
-      expect(history.records.map((record) => record.message.msgId)).toEqual([
+      expect(history.entries.map((entry) => entry.message.msgId)).toEqual([
         sent.opening,
         ...sent.ids,
       ]);

@@ -11,7 +11,7 @@ import {
 import { createMcpHandler } from "@modelcontextprotocol/server";
 import { Effect } from "effect";
 import type { DecisionProvider } from "../../src/decision-provider.js";
-import type { HeldNorms } from "../../src/norms/index.js";
+import type { Norms } from "../../src/norms/index.js";
 import { type Firewall, makeFirewall } from "../../src/firewall.js";
 import { mcpServerFactory } from "../../src/mcp.js";
 import { AgentName } from "../../src/messages.js";
@@ -34,7 +34,7 @@ const endpoint = new URL("http://127.0.0.1/mcp");
  */
 export const inProcessServer = Effect.fn("inProcessServer")(function* (
   options: {
-    readonly norms?: HeldNorms;
+    readonly norms?: Norms;
     readonly provider?: DecisionProvider;
     readonly historyLimit?: number;
     readonly firewall?: Firewall;

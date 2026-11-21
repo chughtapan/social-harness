@@ -79,12 +79,12 @@ Dockerfile                    the one beside this skill builds `sharnessd`
 
 **Norms** that say what the owner told you. A norm fixes which acts a
 conversation may contain, which of `client` and `server` sends each, in what
-order, and what each field holds; the
+order, and what each field contains; the
 [norm language](https://github.com/chughtapan/social-harness/blob/next/docs/reference/spec/norms/norms.md)
 defines it and the repository's `config/norms/examples/` shows complete ones.
 The server enforces them on both sides, your server agent included. The
 description of a string or list field is enforced too: a model judges that
-the field holds what the description says and nothing else, so write each
+the field contains only what the description says, so write each
 description as exactly what belongs in the field. Described fields need
 `decisionProvider` in the settings, and its key. Clients read every norm whole, and a refused
 message's sender is told what did not fit, so put nothing in a norm that a

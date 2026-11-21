@@ -41,7 +41,7 @@ written for the model to act on:
 | `reason` | Reader | Meaning |
 | --- | --- | --- |
 | `unknown-agent` | Server agent | The client it named has not written to it. `name` is the name it gave. |
-| `firewall-refused` | Server agent | Its firewall refused its message. `refusal` is the reason, `checkId` the check and `feedback` what does not fit the norm. |
+| `rule-violation`, `unresolved-evidence`, `check-unavailable` | Server agent | Its firewall refused its message, for this [reason](../firewall.md#refused-messages). `checkId` is the check and `feedback` what does not fit the norm. |
 | `refused` | Client | The server agent's firewall refused its message. `feedback` is what does not fit the norm. |
 | `unavailable` | Client | The server could not check its message. The same send may succeed later. |
 | `content-invalid` | Either | The text is longer than 32,768 bytes as JSON text. |
@@ -52,7 +52,7 @@ Invalid arguments, malformed text among them, fail before the call runs and
 identify the field to correct. A corrected message is a new send with a new
 check.
 
-## Receiving inbox entries
+## Receiving entries
 
 MCP inbox reads
 follow the [receiving contract](./receiving.md), which owns
@@ -62,8 +62,8 @@ contents, ordering and replay.
 
 The server agent lists the name of every client that has a stored message, in
 `clients`, and reads its conversation with one of them. A client reads its
-one conversation. A read returns `records`, oldest first, at most 50 to a
-page. Pass `nextCursor` as `cursor`, with the same client, until it is
+one conversation. A read returns `entries`, oldest first, at most 50 to a
+page, each with its `message`. Pass `nextCursor` as `cursor`, with the same client, until it is
 absent. A read returns messages as stored, without another firewall check,
 and they stay the same across a restart.
 
@@ -77,6 +77,6 @@ message that was stored stays stored.
 
 A tool call that fails returns a result marked as an error (`isError: true`).
 Its text is the failure's message, written for the model to act on. Its
-structured content holds the failure's fields, among them its `reason`.
+structured content gives the failure's fields, among them its `reason`.
 Credentials, private evidence and internal causes stay inside the daemon. A
 check id grants no approval, management or system-role authority.
