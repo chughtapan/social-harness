@@ -5,7 +5,7 @@ import type {
   DecisionRequest,
   DecisionResponse,
   LoadedMessagePolicy,
-} from "../firewall.js";
+} from "../../src/firewall.js";
 /** A message policy and the provider that judges its text rules in place of Jev. */
 export interface TestPolicy {
   readonly source: LoadedMessagePolicy;

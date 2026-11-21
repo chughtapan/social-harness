@@ -19,7 +19,7 @@
     "*.ts",
     "src/**/*.ts",
     "scripts/**/*.ts",
-    "tests/integration/**/*.ts"
+    "tests/**/*.ts"
   ],
   "exclude": [
     "**/node_modules",

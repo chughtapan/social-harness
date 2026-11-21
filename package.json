@@ -48,6 +48,7 @@
     "namedInputs": {
       "default": [
         "{projectRoot}/src/**/*",
+        "{projectRoot}/tests/support/**/*",
         "{projectRoot}/config/**/*",
         "{projectRoot}/skills/**/*",
         "{projectRoot}/tsconfig.json",
@@ -65,7 +66,7 @@
         ]
       },
       "lint": {
-        "command": "eslint src '*.ts' 'scripts/**/*.ts' --cache --max-warnings=0",
+        "command": "eslint src tests/support '*.ts' 'scripts/**/*.ts' --cache --max-warnings=0",
         "inputs": [
           "default",
           "^production",

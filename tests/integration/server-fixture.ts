@@ -15,7 +15,7 @@
  *   agent's, and any other is a client's.
  *
  * A suite drives the signed-in agents as their hosts do, through the official
- * MCP client and the tool helpers of `src/__tests__/server.ts`. `received`
+ * MCP client and the tool helpers of `tests/support/host.ts`. `received`
  * reads what the inbox event delivers to an agent. `processTrace` makes a
  * trace a vitest test whose children stop with it.
  */
@@ -43,20 +43,12 @@ import { type ChildProcess, spawn } from "node:child_process";
 import { createServer } from "node:net";
 import { basename, dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
-import {
-  callTool,
-  decodeInboxEntry,
-  type SignedIn,
-} from "../../src/__tests__/server.js";
-import {
-  issuerFixture,
-  openTestDatabase,
-  requiredScope,
-  restrictedLogin,
-} from "../../src/__tests__/test.js";
 import { makeFirewall } from "../../src/firewall.js";
 import { AgentName } from "../../src/messages.js";
 import { serverFactory } from "../../src/server.js";
+import { openTestDatabase, restrictedLogin } from "../support/database.js";
+import { callTool, decodeInboxEntry, type SignedIn } from "../support/host.js";
+import { issuerFixture, requiredScope } from "../support/issuer.js";
 
 /** The name of the event whose occurrences are an agent's inbox entries. */
 export const INBOX_EVENT = "org.social-harness/inbox.pending";

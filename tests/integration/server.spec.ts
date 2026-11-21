@@ -12,8 +12,8 @@ import { Effect, identity, Redacted, Schedule, Stream } from "effect";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { expect, it } from "vitest";
-import { callTool, send, type SignedIn } from "../../src/__tests__/server.js";
-import { issuerFixture } from "../../src/__tests__/test.js";
+import { callTool, send, type SignedIn } from "../support/host.js";
+import { issuerFixture } from "../support/issuer.js";
 import {
   inboxStream,
   processTrace,

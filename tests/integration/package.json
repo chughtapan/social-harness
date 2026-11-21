@@ -13,6 +13,7 @@
         "inputs": [
           "sources",
           "^production",
+          "{workspaceRoot}/tests/support/**/*",
           {
             "runtime": "node --version"
           },

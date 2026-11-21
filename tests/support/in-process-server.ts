@@ -2,7 +2,6 @@
  * @file The server in a test's own process: `server.ts` opened on a test
  * database with the server agent's real firewall. A test signs agents in and
  * calls their tools as a host does, through the MCP SDK's handler.
- * `callTool` and the helpers over it also drive a `sharnessd` process.
  */
 
 import {
@@ -11,12 +10,13 @@ import {
 } from "@modelcontextprotocol/client";
 import { createMcpHandler } from "@modelcontextprotocol/server";
 import { Effect, Schema } from "effect";
-import type { TestPolicy } from "./firewall-fixtures.js";
-import { checkRecordSchema, type Firewall, makeFirewall } from "../firewall.js";
-import { AgentName, Message, MsgId } from "../messages.js";
-import { type InstalledNorms, structureCheck } from "../norms/index.js";
-import { serverFactory } from "../server.js";
-import { openTestDatabase } from "./test.js";
+import type { TestPolicy } from "./decision-provider.js";
+import { type Firewall, makeFirewall } from "../../src/firewall.js";
+import { AgentName } from "../../src/messages.js";
+import { type InstalledNorms, structureCheck } from "../../src/norms/index.js";
+import { serverFactory } from "../../src/server.js";
+import { openTestDatabase } from "./database.js";
+import { callTool, type SignedIn } from "./host.js";
 
 /** The issuer of every owner a test signs in by name. */
 const issuer = "urn:social-harness:test";
@@ -35,12 +35,6 @@ export const decisionState = Schema.decodeUnknownSync(
     }),
   ),
 );
-
-/** A signed-in owner: its agent's name and an MCP connection as it. */
-export interface SignedIn {
-  readonly name: AgentName;
-  readonly mcp: Client;
-}
 
 /**
  * A server whose server agent is named `alice` and owned by the owner
@@ -113,93 +107,6 @@ export const inProcessServer = Effect.fn("inProcessServer")(function* (
       }),
   };
 });
-
-const fields = Schema.decodeUnknownSync(
-  Schema.Record({ key: Schema.String, value: Schema.Unknown }),
-);
-
-/** An inbox entry as a host reads it. */
-const inboxEntry = Schema.Struct({
-  message: Message,
-  guidance: Schema.optional(Schema.Unknown),
-});
-
-/** Reads an inbox entry from what the inbox event delivers. */
-export const decodeInboxEntry = Schema.decodeUnknown(inboxEntry);
-
-/** What tests read of the result of each tool they call. */
-const results = {
-  status: Schema.Struct({ agentName: AgentName }),
-  send_message: Schema.Struct({ id: MsgId }),
-  receive_messages: Schema.Struct({
-    entries: Schema.Array(inboxEntry),
-    nextCursor: Schema.String,
-  }),
-  list_conversations: Schema.Struct({ clients: Schema.Array(Schema.String) }),
-  read_conversation: Schema.Struct({
-    records: Schema.Array(inboxEntry),
-    nextCursor: Schema.optional(Schema.String),
-  }),
-  read_firewall_decisions: Schema.Struct({
-    decisions: Schema.Array(checkRecordSchema),
-  }),
-};
-type ToolName = keyof typeof results;
-
-export function callTool<Name extends ToolName>(
-  agent: Pick<SignedIn, "mcp">,
-  name: Name,
-  input?: object,
-): Effect.Effect<
-  (typeof results)[Name]["Type"],
-  Readonly<Record<string, unknown>>
->;
-/**
- * Calls a tool as `agent` and decodes its result. A call the server answers
- * as failed fails with the result's structured fields and, as `message`, the
- * text a model reads. Interrupting the call aborts its request.
- */
-export function callTool(
-  agent: Pick<SignedIn, "mcp">,
-  name: ToolName,
-  input: object = {},
-): Effect.Effect<unknown, Readonly<Record<string, unknown>>> {
-  const output: Schema.Schema.AnyNoContext = results[name];
-  return Effect.tryPromise((signal) =>
-    agent.mcp.callTool({ name, arguments: { ...input } }, { signal }),
-  ).pipe(
-    Effect.orDie,
-    Effect.flatMap((result) =>
-      result.isError === true
-        ? Effect.fail({
-            ...fields(result.structuredContent ?? {}),
-            message: result.content
-              .flatMap((part) => (part.type === "text" ? [part.text] : []))
-              .join("\n"),
-          })
-        : Schema.decodeUnknown(output)(result.structuredContent).pipe(
-            Effect.map((decoded): unknown => decoded),
-            Effect.orDie,
-          ),
-    ),
-  );
-}
-
-/** Sends a message as `sender`. The server agent names its recipient in `to`; a client names none. */
-export const send = (
-  sender: Pick<SignedIn, "mcp">,
-  input: {
-    readonly to?: string;
-    readonly text: string;
-    readonly replyToMsgId?: MsgId;
-  },
-) => callTool(sender, "send_message", input);
-
-/** The messages of the first page of the agent's inbox, from its first entry. */
-export const inboxOf = (agent: Pick<SignedIn, "mcp">) =>
-  Effect.map(callTool(agent, "receive_messages", { cursor: "0" }), (page) =>
-    page.entries.map((entry) => entry.message),
-  );
 
 /** An SDK client whose requests `answer` answers. The scope closes it. */
 function connect(answer: (request: Request) => ReturnType<typeof fetch>) {

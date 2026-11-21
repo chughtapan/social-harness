@@ -18,16 +18,21 @@ import {
 } from "effect";
 import { expect } from "vitest";
 import type { DecisionProvider, Firewall } from "./firewall.js";
-import { answersTo, type TestPolicy } from "./__tests__/firewall-fixtures.js";
+import { openTestDatabase } from "../tests/support/database.js";
+import {
+  answersTo,
+  type TestPolicy,
+} from "../tests/support/decision-provider.js";
 import {
   callTool,
-  decisionState,
   inboxOf,
-  inProcessServer,
   send,
   type SignedIn,
-} from "./__tests__/server.js";
-import { openTestDatabase } from "./__tests__/test.js";
+} from "../tests/support/host.js";
+import {
+  decisionState,
+  inProcessServer,
+} from "../tests/support/in-process-server.js";
 import { AgentName } from "./messages.js";
 import { compileNorm } from "./norms/compiler.js";
 import { serverFactory } from "./server.js";

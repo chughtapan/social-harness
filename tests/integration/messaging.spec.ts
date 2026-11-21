@@ -2,7 +2,7 @@
 
 import { Effect, Fiber, Stream } from "effect";
 import { expect, it } from "vitest";
-import { callTool, send } from "../../src/__tests__/server.js";
+import { callTool, send } from "../support/host.js";
 import {
   INBOX_EVENT,
   inboxStream,

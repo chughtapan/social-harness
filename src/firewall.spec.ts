@@ -24,7 +24,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { afterEach, describe, expect } from "vitest";
-import { type Answer, answersTo } from "./__tests__/firewall-fixtures.js";
+import { type Answer, answersTo } from "../tests/support/decision-provider.js";
 import {
   type DecisionProvider,
   DecisionProviderError,
