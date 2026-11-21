@@ -41,8 +41,8 @@ written for the model to act on:
 | `reason` | Reader | Meaning |
 | --- | --- | --- |
 | `unknown-agent` | Server agent | The client it named has not written to it. `name` is the name it gave. |
-| `firewall-refused` | Server agent | Its firewall refused its message. `refusal` is the reason, `checkId` the check and `feedback` the deciding rules' feedback. `detail` holds the structure check's diagnostics when the message was read as an act of a norm, and `rule` names the structure check's rule when that check refused. |
-| `refused` | Client | The server agent's firewall refused its message. `feedback` is the deciding rules' feedback. |
+| `firewall-refused` | Server agent | Its firewall refused its message. `refusal` is the reason, `checkId` the check and `feedback` what does not fit the norm. |
+| `refused` | Client | The server agent's firewall refused its message. `feedback` is what does not fit the norm. |
 | `unavailable` | Client | The server could not check its message. The same send may succeed later. |
 | `content-invalid` | Either | The text is longer than 32,768 bytes as JSON text. |
 

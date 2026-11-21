@@ -59,7 +59,7 @@ export const inProcessServer = Effect.fn("inProcessServer")(function* (
   const factory = yield* mcpServerFactory(server, {
     issuer,
     subject: "alice",
-    norms: options.norms?.documents,
+    norms: options.norms,
   });
   const handler = createMcpHandler(factory);
   return {

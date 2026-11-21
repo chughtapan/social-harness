@@ -42,20 +42,20 @@ A client books a meeting with the server:
 (norm booking
   :description "The client asks for a meeting, the server offers slots, and the client picks one.")
 
-(content request :by client :starts true :initiates requested
+(act request :by client :starts true :initiates requested
   (field topic :type string :min-length 1 :max-length 200
     :description "The subject of the meeting."))
 
-(content offer :by server :when requested
+(act offer :by server :when requested
   :terminates requested :initiates offered
   (field slots :type list :min-items 1 :max-items 3
     :description "One meeting slot: a date, start and end times, and a timezone."))
 
-(content pick :by client :when offered :ends true
+(act pick :by client :when offered :ends true
   (field slot :type string)
   (relation member slot (previous offer slots)))
 
-(content decline :by (client server) :ends true)
+(act decline :by (client server) :ends true)
 ```
 
 Under this norm a conversation goes as follows. Each act after the first
@@ -64,12 +64,12 @@ names the message it replies to as `replyToMsgId` in the send input.
 | # | Sender | Message | Replies to | Result |
 | --- | --- | --- | --- | --- |
 | 1 | client | `Hello, can we meet?` | | Refused: the message is not one act. |
-| 2 | server | `(request :ontology booking :topic "Thesis outline")` | | Refused: `request` is not the server's to send. |
-| 3 | client | `(request :ontology booking :topic "Thesis outline")` | | Allowed. It opens an instance, and `requested` holds. |
-| 4 | server | `(offer :ontology booking :slots ("Mon 10:00-10:30 UTC" "Tue 14:00-14:30 UTC"))` | 3 | Allowed. `offered` holds in place of `requested`. |
-| 5 | client | `(pick :ontology booking :slot "Wed 09:00-09:30 UTC")` | 4 | Refused: the slot is not one of the offered slots. |
-| 6 | client | `(pick :ontology booking :slot "Tue 14:00-14:30 UTC")` | 3 | Refused: the reply chain from message 3 does not hold the offer. |
-| 7 | client | `(pick :ontology booking :slot "Tue 14:00-14:30 UTC")` | 4 | Allowed. It ends the instance. |
+| 2 | server | `(request :norm booking :topic "Thesis outline")` | | Refused: `request` is not the server's to send. |
+| 3 | client | `(request :norm booking :topic "Thesis outline")` | | Allowed. It opens an instance, and `requested` holds. |
+| 4 | server | `(offer :norm booking :slots ("Mon 10:00-10:30 UTC" "Tue 14:00-14:30 UTC"))` | 3 | Allowed. `offered` holds in place of `requested`. |
+| 5 | client | `(pick :norm booking :slot "Wed 09:00-09:30 UTC")` | 4 | Refused: the slot is not one of the offered slots. |
+| 6 | client | `(pick :norm booking :slot "Tue 14:00-14:30 UTC")` | 3 | Refused: the reply chain from message 3 does not hold the offer. |
+| 7 | client | `(pick :norm booking :slot "Tue 14:00-14:30 UTC")` | 4 | Allowed. It ends the instance. |
 
 Refused messages are not stored, so message 7 is the third message of the
 conversation.
@@ -114,17 +114,17 @@ Nothing in a document or a message is evaluated.
 
 ## Norm documents
 
-A document is one `norm` declaration followed by a `content` declaration for
+A document is one `norm` declaration followed by an `act` declaration for
 each form. In this grammar, quoted words are symbols, `name`, `string` and
 `number` are the tokens above, `[ x ]` is optional and `{ x }` repeats zero
 or more times.
 
 ```ebnf
-document   = norm , { content } ;
+document   = norm , { form } ;
 
 norm       = "(" , "norm" , name , [ ":description" , string ] , ")" ;
 
-content    = "(" , "content" , name , { turn | field | relation } , ")" ;
+form       = "(" , "act" , name , { turn | field | relation } , ")" ;
 
 turn       = ":by" , sender
            | ":starts" , truth
@@ -162,7 +162,7 @@ source     = "(" , "previous" , ( name | "(" , "fact" , name , ")" ) , name , ")
 The grammar leaves these rules to prose:
 
 1. The name of a declaration follows its first word. After it, attributes
-   come in any order, and in a `content` declaration they may stand between
+   come in any order, and in an `act` declaration they may stand between
    fields and relations.
 2. A declaration takes each attribute at most once, and no attribute but
    those the grammar gives it. A misspelled attribute is therefore an error.
@@ -171,6 +171,7 @@ The grammar leaves these rules to prose:
 4. A field takes only the bounds of its type: `:min-length` and `:max-length`
    for a string, `:minimum` and `:maximum` for an integer, `:min-items` and
    `:max-items` for a list.
+5. No field is named `norm`, because an act names its norm with `:norm`.
 
 A role may be repeated in a sender list without effect, and a list of facts
 may be empty, which is the same as leaving the attribute out. A text that
@@ -188,12 +189,12 @@ value     = string | symbol | "(" , { string | symbol } , ")" ;
 ```
 
 ```lisp
-(offer :ontology booking :slots ("Mon 10:00-10:30 UTC" "Tue 14:00-14:30 UTC"))
+(offer :norm booking :slots ("Mon 10:00-10:30 UTC" "Tue 14:00-14:30 UTC"))
 ```
 
 1. The performative is a name, and each keyword is `:` and a name.
 2. No keyword appears twice.
-3. `:ontology` is present, and its value is text that names the act's norm.
+3. `:norm` is present, and its value is text that names the act's norm.
    Every other pair is a field of the act.
 4. A string is text. A symbol in the form of a number is that number, and any
    other symbol is its own text, whatever its form: `Tue` and `"Tue"` are the
@@ -252,7 +253,7 @@ Each part of a document maps to one part of the norm:
 | --- | --- | --- |
 | `(norm name …)` | `name` | Required. |
 | `:description` of the norm | `description` | Empty. |
-| `(content name …)` | A form whose `performative` is the name | |
+| `(act name …)` | A form whose `performative` is the name | |
 | `:by` | `by` | Required. |
 | `:starts`, `:ends` | `starts`, `ends` | False. |
 | `:when`, `:terminates`, `:initiates` | `when`, `terminates`, `initiates` | No facts, as for an empty list. |
@@ -296,8 +297,7 @@ compile. The rules read the norm, so they hold for a norm however it was
 written.
 
 1. The name of the norm, of every performative, of every field and of every
-   fact is a name, which the grammar already requires of a document. No field
-   is named `ontology`.
+   fact is a name, which the grammar already requires of a document.
 2. No two forms declare the same performative, and no two fields of a form
    have the same name.
 3. At least one form starts an instance.
@@ -358,8 +358,8 @@ refuses the message at the stage shown.
 | Step | The message is refused when | Stage |
 | --- | --- | --- |
 | 1 | Its text is not an [act](#acts). | Structural |
-| 2 | No instance is in progress and `:ontology` is not the name of a held norm. | Structural |
-| 3 | An instance is in progress and `:ontology` is not the name of the instance's norm. | Protocol |
+| 2 | No instance is in progress and `:norm` is not the name of a held norm. | Structural |
+| 3 | An instance is in progress and `:norm` is not the name of the instance's norm. | Protocol |
 | 4 | The norm declares no form for the performative. | Structural |
 | 5 | A required field is missing, a stated field is not declared, or a value is not of its field's type or within its bounds. The feedback names every such field. | Structural |
 | 6 | The form does not start an instance and the message has no `replyToMsgId`. | Protocol |
@@ -373,7 +373,7 @@ refuses the message at the stage shown.
 | 14 | A relation does not hold. Relations are tried in the order the form declares them. | Protocol |
 
 From step 2 on, the message is judged under one norm: the instance's norm
-when an instance is in progress, and the norm `:ontology` names otherwise. An
+when an instance is in progress, and the norm `:norm` names otherwise. An
 opening act is judged by steps 1 to 8 and then step 11. It may carry a
 `replyToMsgId` that names a known message, which changes nothing: the
 instance it opens begins with it.
@@ -483,11 +483,8 @@ under. For a message refused at step 1, that is the norm of the instance in
 progress. A message refused at step 1 or 2 while no instance is in progress
 was judged under no norm, and its rule is `norm-structural`.
 
-The server agent's failure also holds diagnostics: the norm, its digest, the
-performative and the field when they are known, and the stage, which is
-`structural` or `protocol` when the structure check refused and `semantic`
-when the act fits and its text rules refused it or could not be judged. A
-client reads the feedback alone, as
+The feedback is all a refusal says of the norm. The server agent's failure
+adds the check and the reason, and a client reads the feedback alone, as
 [refused messages](../firewall.md#refused-messages) states. A refusal does
 not select a replacement act or reference, or instruct the agent to restart
 an instance.

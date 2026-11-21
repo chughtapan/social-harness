@@ -441,7 +441,6 @@ describe("Firewall structure check", () => {
     reason: "rule-violation",
     ruleId: "shape",
     feedback: "Send a greeting first.",
-    detail: { stage: "structural" },
   } as const;
 
   it.each(senders)(
@@ -456,9 +455,7 @@ describe("Firewall structure check", () => {
         expect(result).toMatchObject({
           kind: "refused",
           reason: "rule-violation",
-          rule: "shape",
           feedback: [refusal.feedback],
-          detail: refusal.detail,
           record: {
             decidedBy: [{ ruleId: "shape" }],
             checkedRuleIds: ["shape"],

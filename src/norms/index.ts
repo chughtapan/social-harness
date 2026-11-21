@@ -5,7 +5,7 @@ import { Data, Effect, Either, Order } from "effect";
 import { join } from "node:path";
 import type { StructureCheck } from "../firewall.js";
 import { compileNorm } from "./compiler.js";
-import { readAct } from "./lisp.js";
+import { ACT_SYNTAX, readAct } from "./lisp.js";
 import { describedFields } from "./norm.js";
 import { structureCheck } from "./structure-check.js";
 
@@ -20,9 +20,10 @@ export class NormsConfigurationError extends Data.TaggedError(
 
 /**
  * The norms a server holds: the structure check that holds each message to
- * them, each norm's document as an agent reads it, and whether any describes
- * a string or list field, which gives it a text rule that needs a decision
- * provider.
+ * them, each norm's document as an agent reads it, whether any describes a
+ * string or list field, which gives it a text rule that needs a decision
+ * provider, and how an act of them is written, for an agent that has to
+ * write one.
  */
 export interface HeldNorms {
   readonly structureCheck: StructureCheck;
@@ -32,6 +33,7 @@ export interface HeldNorms {
     readonly document: string;
   }>;
   readonly hasTextRules: boolean;
+  readonly actSyntax: string;
 }
 
 /**
@@ -70,6 +72,7 @@ export function holdNorms(
       onLeft: (reason) => new NormsConfigurationError({ reason }),
       onRight: (norms) => ({
         structureCheck: structureCheck(norms, readAct),
+        actSyntax: ACT_SYNTAX,
         documents: norms.map((norm) => ({
           name: norm.name,
           description: norm.description,

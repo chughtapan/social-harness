@@ -111,7 +111,7 @@ it.for(runs)(
 
 /** A norm document with a described string field, which needs a decision provider. */
 const describedNorm = `(norm ping)
-(content ask :by client :starts true :ends true
+(act ask :by client :starts true :ends true
   (field question :type string :description "One polite question."))
 `;
 

@@ -33,7 +33,7 @@ const fields = fc.uniqueArray(
   fc.record({
     name: fc
       .stringMatching(/^[a-z][a-z0-9-]{0,7}$/u)
-      .filter((name) => name !== "ontology"),
+      .filter((name) => name !== "norm"),
     type: fc.constantFrom<keyof typeof fieldTypes>("string", "integer", "list"),
     optional: fc.boolean(),
   }),
@@ -57,10 +57,10 @@ function document(declared: Fields, extra: Splices = {}) {
   );
   return [
     `(norm sample${extra.norm ?? ""})`,
-    `(content open :by client :starts true :initiates begun${extra.open ?? ""}`,
+    `(act open :by client :starts true :initiates begun${extra.open ?? ""}`,
     ...lines,
     ")",
-    `(content close :by (client server) :when begun :ends true${extra.close ?? ""})`,
+    `(act close :by (client server) :when begun :ends true${extra.close ?? ""})`,
   ].join("\n");
 }
 
@@ -172,7 +172,7 @@ vitestIt(
         [
           "; a comment before the header",
           '(norm quoted :description "a \\"b\\" (c); d\\n")',
-          "(content ask :by client :starts true :ends true ; a trailing comment",
+          "(act ask :by client :starts true :ends true ; a trailing comment",
           '  (field words :type string :description "Say (please); then \\\\ ask."))',
         ].join("\n"),
       ),
@@ -188,7 +188,7 @@ vitestIt(
 /** A document of the norm `name`, whose one act opens and ends an instance. */
 const documentOf = (name: string) =>
   `(norm ${name})
-(content ask :by client :starts true :ends true)
+(act ask :by client :starts true :ends true)
 `;
 
 /** A directory holding `files`, by name. */

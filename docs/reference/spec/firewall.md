@@ -96,11 +96,11 @@ depends on who sent it:
 
 | Sender | Reads |
 | --- | --- |
-| Server agent | The reason (`rule-violation`, `unresolved-evidence` or `check-unavailable`), the check id and the feedback. A message read as an act of a norm adds the [structure check's diagnostics](./norms/norms.md#refusals). |
+| Server agent | The reason (`rule-violation`, `unresolved-evidence` or `check-unavailable`), the check id and the feedback. The check's [record](#decision-records) names the deciding rules. |
 | Client | The feedback. When the check was unavailable, only that the server is unavailable and to try again later. |
 
-A client's failure holds nothing else: no check id, no rule id, no word of
-which kind of refusal it was and no diagnostics. Neither failure carries
+A client's failure holds nothing else: no check id and no word of which
+kind of refusal it was. Neither failure carries
 private evidence, credentials or raw provider output.
 [Failed sends](./host/messaging.md#failed-sends) gives the fields of each
 failure. Every member reads the norm documents whole with `read_norms`, so

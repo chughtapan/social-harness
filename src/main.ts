@@ -262,7 +262,7 @@ const serve = Effect.gen(function* () {
   const factory = yield* mcpServerFactory(server, {
     issuer: admitted.issuer,
     subject: serverAgent.subject,
-    norms: norms?.documents,
+    norms,
   });
   yield* listen(settings, admitted, factory);
   yield* Console.log(

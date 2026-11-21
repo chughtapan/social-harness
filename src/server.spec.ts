@@ -125,7 +125,6 @@ it("answers a failed call with the failure's message and its fields", () =>
         reason: "firewall-refused" as const,
         checkId: "chk_1",
         refusal: "rule-violation" as const,
-        rule: "shape",
         feedback: ["Send a greeting first."],
       },
       {
@@ -149,8 +148,7 @@ it("answers a failed call with the failure's message and its fields", () =>
     const bob = yield* server.signInAs("bob");
     yield* send(bob, { text: "hi" });
     const said: Readonly<Record<string, string>> = {
-      chk_1:
-        "Error: Send a greeting first. Check: chk_1, rule shape; rule-violation.",
+      chk_1: "Error: Send a greeting first. Check: chk_1; rule-violation.",
       chk_2:
         "Error: The check could not settle whether the message follows the server's norms. Check: chk_2; unresolved-evidence.",
     };
@@ -235,7 +233,7 @@ it("interrupts only the aborted call, whose conversation the next send then uses
 const chat = Either.getOrThrow(
   holdNorms([
     `(norm chat)
-(content say :by (client server) :starts true :ends true
+(act say :by (client server) :starts true :ends true
   (field words :type string :description "Nothing private."))
 `,
   ]),
@@ -243,7 +241,7 @@ const chat = Either.getOrThrow(
 
 /** The act `say` with `words`. */
 const say = (words: string) =>
-  `(say :ontology chat :words ${JSON.stringify(words)})`;
+  `(say :norm chat :words ${JSON.stringify(words)})`;
 
 /** What the sender of a `say` that breaks the field's description reads. */
 const nothingPrivate =
@@ -425,8 +423,8 @@ it("tells a client only that the server is unavailable, and stores nothing, when
 const exchange = Either.getOrThrow(
   holdNorms([
     `(norm exchange)
-(content open :by client :starts true :initiates opened)
-(content close :by server :when opened :ends true)
+(act open :by client :starts true :initiates opened)
+(act close :by server :when opened :ends true)
 `,
   ]),
 );
@@ -435,14 +433,14 @@ it("refuses what a server that holds norms does not accept, plain text and an ac
   Effect.gen(function* () {
     const { alice, bob } = yield* aliceAndBob({ norms: exchange });
 
-    for (const text of ["Hello, can you help?", "(close :ontology exchange)"]) {
+    for (const text of ["Hello, can you help?", "(close :norm exchange)"]) {
       const refusal = yield* send(bob, { text }).pipe(Effect.flip);
       expect(refusal.reason).toBe("refused");
       expect(new Set(Object.keys(refusal))).toEqual(
         new Set(["reason", "feedback", "message"]),
       );
     }
-    yield* send(bob, { text: "(open :ontology exchange)" });
+    yield* send(bob, { text: "(open :norm exchange)" });
     expect(yield* inboxOf(alice)).toHaveLength(1);
   }));
 
@@ -454,10 +452,10 @@ it("checks each act of a norm against the whole conversation, though the provide
     });
 
     for (let instance = 0; instance < 3; instance += 1) {
-      const opened = yield* send(bob, { text: "(open :ontology exchange)" });
+      const opened = yield* send(bob, { text: "(open :norm exchange)" });
       yield* send(alice, {
         to: bob.name,
-        text: "(close :ontology exchange)",
+        text: "(close :norm exchange)",
         replyToMsgId: opened.id,
       });
     }

@@ -60,29 +60,11 @@ export interface CheckedMessage {
 }
 
 /**
- * What a refusal says of the structure check behind it, as the server agent
- * reads it in a failed send: the norm the message was read as an act of, with
- * the digest of its document, the act, and the stage that refused it. A
- * message the structure check passed and a text rule refused has the stage
- * `semantic`. `explanation` and `field` are those of a problem the structure
- * check found.
- */
-export interface StructureDetail {
-  readonly norm?: string;
-  readonly digest?: string;
-  readonly act?: string;
-  readonly stage: "structural" | "protocol" | "semantic";
-  readonly explanation?: string;
-  readonly field?: string;
-}
-
-/**
  * Judges whether a message `sender` sends may follow the earlier messages of
  * its conversation at the time `now`, before the text rules do. A refusal
- * gives its explanation as `feedback`, the rule the decision names and its
- * diagnostics as `detail`. A pass gives the text rules that judge this
- * message, the `protocol` context the decision provider reads and the
- * `detail` a refusal by a text rule carries.
+ * gives the rule it is recorded under and, as `feedback`, what does not fit.
+ * A pass gives the text rules that judge this message and the `protocol`
+ * context the decision provider reads.
  */
 export type StructureCheck = (
   sender: Role,
@@ -95,13 +77,11 @@ export type StructureCheck = (
       readonly reason: Refusal["reason"];
       readonly ruleId: string;
       readonly feedback: string;
-      readonly detail?: StructureDetail;
     }
   | {
       readonly kind: "passed";
       readonly textRules: readonly TextRule[];
       readonly protocol?: unknown;
-      readonly detail?: StructureDetail;
     }
 >;
 
@@ -117,15 +97,13 @@ interface Allowed {
 /**
  * A message whose send fails, whichever member sent it: one that breaks a
  * rule or leaves one unsettled, or one whose check could not run, which has
- * no record. `rule` and `detail` are those of a structure check.
+ * no record. `feedback` is what its sender reads.
  */
 interface Refused {
   readonly kind: "refused";
   readonly checkId: string;
   readonly reason: FirewallRefusalReason;
-  readonly rule?: string;
   readonly feedback: readonly string[];
-  readonly detail?: StructureDetail;
   readonly record?: CheckRecord;
 }
 
@@ -152,9 +130,7 @@ interface Checked {
 /** What a check that refuses its message concluded. */
 interface Refusal extends Pick<CheckRecord, "decidedBy" | "checkedRuleIds"> {
   readonly reason: Exclude<CheckRecord["reason"], "eligible">;
-  readonly rule?: string;
   readonly feedback: readonly string[];
-  readonly detail?: StructureDetail;
 }
 
 /**
@@ -166,8 +142,7 @@ interface Refusal extends Pick<CheckRecord, "decidedBy" | "checkedRuleIds"> {
  * answers whether the message breaks each text rule the structure check gave
  * it: complies, violates or unsure. A violation refuses, and an unsure answer
  * refuses as unresolved evidence. A judge that gives no usable answer, and
- * rules without a judge, make the check unavailable. A refusal of a message
- * the structure check passed carries that check's detail.
+ * rules without a judge, make the check unavailable.
  */
 export function makeFirewall(applies: {
   readonly structureCheck?: StructureCheck;
@@ -188,12 +163,10 @@ export function makeFirewall(applies: {
       const checked = { message, sender, now };
       const structure = yield* structureCheck(sender, message, earlier, now);
       if (structure.kind === "refused") {
-        const { reason, ruleId, feedback, detail } = structure;
+        const { reason, ruleId, feedback } = structure;
         return refused(checked, {
           reason,
-          rule: ruleId,
           feedback: [feedback],
-          detail,
           decidedBy: [{ ruleId }],
           checkedRuleIds: [ruleId],
         });
@@ -208,9 +181,9 @@ export function makeFirewall(applies: {
         },
         judge,
       ).pipe(
-        Effect.map((answers) => conclude(checked, answers, structure.detail)),
+        Effect.map((answers) => conclude(checked, answers)),
         Effect.catchTag("DecisionProviderError", () =>
-          Effect.succeed(unavailable(structure.detail)),
+          Effect.succeed(unavailable()),
         ),
         markCheckActivity(sender),
         Effect.withSpan("assessMessage"),
@@ -224,13 +197,11 @@ export function makeFirewall(applies: {
  * What a check concludes from the provider's answers. A violation refuses,
  * and an unsure answer refuses the message as unresolved evidence. Otherwise
  * the message is allowed. The feedback of a refusal is the text of each
- * deciding rule. `detail` is what the structure check gave of the message it
- * passed.
+ * deciding rule.
  */
 function conclude(
   checked: Checked,
   answers: ReadonlyArray<Answer<TextRule>>,
-  detail?: StructureDetail,
 ): Allowed | Refused {
   const checkedRuleIds = answers.map(({ rule }) => rule.id);
   const violated = answers.filter((answer) => answer.violates);
@@ -256,7 +227,6 @@ function conclude(
     })),
     checkedRuleIds,
     feedback: deciding.map(({ rule }) => rule.text),
-    detail,
   });
 }
 
@@ -266,19 +236,18 @@ function refused(checked: Checked, refusal: Refusal): Refused {
   return {
     kind: "refused",
     checkId,
-    ...Struct.pick(refusal, "reason", "rule", "feedback", "detail"),
+    ...Struct.pick(refusal, "reason", "feedback"),
     record: recordOf(checked, checkId, refusal),
   };
 }
 
 /** The refusal of a send whose check could not run. Nothing was decided, so nothing is recorded. */
-function unavailable(detail?: StructureDetail): Refused {
+function unavailable(): Refused {
   return {
     kind: "refused",
     checkId: mintCheckId(),
     reason: "check-unavailable",
     feedback: [],
-    detail,
   };
 }
 

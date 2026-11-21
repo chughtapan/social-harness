@@ -33,7 +33,7 @@ function actText(
           : JSON.stringify(value)
       }`,
   );
-  return `(${name} :ontology ${norm}${stated.join("")})`;
+  return `(${name} :norm ${norm}${stated.join("")})`;
 }
 
 /**
@@ -43,15 +43,15 @@ function actText(
  */
 const turns = normFrom(`
 (norm turns)
-(content offer :by (client server) :starts true :initiates offered
+(act offer :by (client server) :starts true :initiates offered
   (field value :type string))
-(content counter :by (recipient (fact offered)) :when offered :initiates offered
+(act counter :by (recipient (fact offered)) :when offered :initiates offered
   (field value :type string))
-(content choose :by (recipient (fact offered)) :when offered
+(act choose :by (recipient (fact offered)) :when offered
   :terminates offered :initiates selected
   (field value :type string)
   (relation equals value (previous (fact offered) value)))
-(content finish :by (client server) :ends true)
+(act finish :by (client server) :ends true)
 `);
 
 /** A message id no generated history holds. */
@@ -296,9 +296,9 @@ it("permits an act with a delay and a limit only once its fact is that old and w
       ({ wait, elapsed, maximum, sent }) => {
         const timed = normFrom(`
 (norm timed)
-(content hold :by client :starts true :initiates held
+(act hold :by client :starts true :initiates held
   (field wait :type integer :minimum 0))
-(content poll :by (client server) :when held :max ${maximum}
+(act poll :by (client server) :when held :max ${maximum}
   :after held :delay wait :unit seconds)
 `);
         const history: CheckedMessage[] = [];
@@ -331,9 +331,9 @@ it("permits an act with a delay and a limit only once its fact is that old and w
 /** The client's `open` starts an instance and the server's `close` ends it. */
 const exchange = normFrom(`
 (norm exchange)
-(content open :by client :starts true :initiates opened
+(act open :by client :starts true :initiates opened
   (field value :type string))
-(content close :by server :when opened :ends true)
+(act close :by server :when opened :ends true)
 `);
 
 it("refuses every text that is not an act of a held norm", () => {
@@ -343,7 +343,6 @@ it("refuses every text that is not an act of a held norm", () => {
         kind: "refused",
         reason: "rule-violation",
         ruleId: "norm-structural",
-        detail: { stage: "structural" },
       });
     }),
     { numRuns: 60 },
@@ -353,7 +352,7 @@ it("refuses every text that is not an act of a held norm", () => {
 it("passes an act with one text rule for each described string or list field it states, which holds the field to its description", () => {
   const described = normFrom(`
 (norm described)
-(content ask :by client :starts true :ends true
+(act ask :by client :starts true :ends true
   (field topic :type string :description "The subject.")
   (field slots :type list :description "One slot.")
   (field note :type string :optional true :description "A short note.")
@@ -422,32 +421,32 @@ it.each([
   { what: "plain text", text: "hello", stage: "structural" },
   {
     what: "an act the norm lacks",
-    text: "(unknown :ontology exchange)",
+    text: "(unknown :norm exchange)",
     stage: "structural",
   },
   {
     what: "a field its form lacks",
-    text: '(close :ontology exchange :extra "unasked")',
+    text: '(close :norm exchange :extra "unasked")',
     stage: "structural",
   },
   {
     what: "a comment after the act",
-    text: "(close :ontology exchange) ; note",
+    text: "(close :norm exchange) ; note",
     stage: "structural",
   },
   {
     what: "an unclosed act",
-    text: "(close :ontology exchange",
+    text: "(close :norm exchange",
     stage: "structural",
   },
   {
     what: "a second opening",
-    text: '(open :ontology exchange :value "again")',
+    text: '(open :norm exchange :value "again")',
     stage: "protocol",
   },
   {
     what: "an act of another norm",
-    text: "(close :ontology other)",
+    text: "(close :norm other)",
     stage: "protocol",
   },
 ])(
@@ -472,7 +471,7 @@ it.each([
 const sampleOf = (fields: readonly string[]) =>
   normFrom(`
 (norm sample)
-(content open :by client :starts true :ends true
+(act open :by client :starts true :ends true
   ${fields.join("\n  ")})
 `);
 
@@ -627,12 +626,12 @@ it("holds a list to nonempty items and their count to its bounds", () => {
 /** The client offers slots, the server keeps some of them, and the client picks one of those kept. */
 const picking = normFrom(`
 (norm picking)
-(content offer :by client :starts true :initiates offered
+(act offer :by client :starts true :initiates offered
   (field slots :type list :min-items 1))
-(content keep :by server :when offered :initiates kept
+(act keep :by server :when offered :initiates kept
   (field slots :type list :min-items 1)
   (relation subset slots (previous offer slots)))
-(content pick :by client :when kept :ends true
+(act pick :by client :when kept :ends true
   (field slot :type string)
   (relation member slot (previous (fact kept) slots)))
 `);

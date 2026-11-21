@@ -68,9 +68,6 @@ const conversationPage = Schema.Struct({
  */
 const MAXIMUM_WAIT_SECONDS = 50;
 
-const ACT_SYNTAX =
-  'A message is one act and nothing else: (act :ontology <norm> :field value ...). Quote text as a JSON string, write a list as quoted strings in parentheses such as ("first" "second"), and send an act without fields as (act :ontology <norm>). The opening act omits replyToMsgId in send_message; every later act supplies the id of the message it answers.';
-
 /** How often the SDK reads the inbox of an agent whose host holds a push stream or a webhook subscription. */
 const INBOX_CHECK_MILLISECONDS = 1000;
 
@@ -83,8 +80,8 @@ const INBOX_EVENT = "org.social-harness/inbox.pending";
  * `server`. A request's `authInfo` names its owner in `extra.issuer` and
  * `extra.subject`: the owner `admits.issuer` and `admits.subject` name has
  * the server agent, and every other owner has a client, named from its
- * issuer and subject. `admits.norms` are the norm documents the server agent
- * holds, which every agent reads with `read_norms`. A tool call runs on the
+ * issuer and subject. `admits.norms` are the norms the server publishes,
+ * which every agent reads with `read_norms`. A tool call runs on the
  * runtime this effect ran in and is interrupted when its request is aborted.
  */
 export const mcpServerFactory = Effect.fn("serverFactory")(function* (
@@ -92,7 +89,7 @@ export const mcpServerFactory = Effect.fn("serverFactory")(function* (
   admits: {
     readonly issuer: string;
     readonly subject: string;
-    readonly norms?: typeof normDocuments.Type;
+    readonly norms?: PublishedNorms;
   },
 ) {
   const run = Runtime.runPromise(yield* Effect.runtime());
@@ -149,6 +146,12 @@ export const mcpServerFactory = Effect.fn("serverFactory")(function* (
   return factory;
 });
 
+/** The norms a server publishes, as `read_norms` shows them: each norm's document, and how an act of them is written. */
+interface PublishedNorms {
+  readonly documents: typeof normDocuments.Type;
+  readonly actSyntax: string;
+}
+
 /** What a request's tools are registered with: the SDK server of the request, the server whose operations they run, and the runner of their calls. */
 interface Registration {
   readonly mcp: McpServer;
@@ -188,7 +191,7 @@ function inboxOccurrences(
 function registerSharedTools(
   at: Registration,
   caller: AgentName,
-  norms?: typeof normDocuments.Type,
+  norms?: PublishedNorms,
 ) {
   const { server } = at;
   register(
@@ -237,12 +240,12 @@ function registerSharedTools(
           caller === server.name
             ? "List the norms this server publishes, each with its complete document: which of client and server sends each act, when, and what each field holds. You are the server, and the same norms hold your messages and your clients'."
             : "List the norms the server publishes, each with its complete document: which of client and server sends each act, when, and what each field holds. You are the client, and only a message that follows them is sent."
-        } ${ACT_SYNTAX}`,
+        } ${norms.actSyntax}`,
         input: noArguments,
         output: Schema.Struct({ norms: normDocuments }),
         readOnly: true,
       },
-      () => Effect.succeed({ norms }),
+      () => Effect.succeed({ norms: norms.documents }),
     );
   }
 }

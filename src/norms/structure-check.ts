@@ -21,17 +21,14 @@ import {
   type Value,
 } from "./norm.js";
 
-/** Reads a message's text as an act, or says why it is none and which field is at fault. */
-type ActReader = (
-  text: string,
-) => Either.Either<Act, { readonly detail: string; readonly field?: string }>;
+/** Reads a message's text as an act, or says why it is none. */
+type ActReader = (text: string) => Either.Either<Act, string>;
 
-/** Why a message fails its norm: the stage that failed, and the text its sender reads. */
+/** Why a message fails its norm: the stage that failed, and the feedback its sender reads. */
 interface NormProblem {
   readonly stage: "structural" | "protocol";
   readonly reason: "rule-violation" | "unresolved-evidence";
-  readonly detail: string;
-  readonly field?: string;
+  readonly feedback: string;
 }
 
 /** A message as the structure check judges it: which member sent it, and the time of the firewall's check of it. */
@@ -135,7 +132,7 @@ type Result = Effect.Effect.Success<ReturnType<StructureCheck>>;
  * that failed and the norm the message was judged under: `selected`, the
  * norm it was read as an act of, or the norm of the instance in progress
  * when its text is no act. A message judged under no norm has the word
- * `norm` there. The detail names `selected` when there is one.
+ * `norm` there.
  */
 function refusal(
   progress: Progress,
@@ -147,14 +144,7 @@ function refusal(
     kind: "refused",
     reason: problem.reason,
     ruleId: `${judgedUnder?.name ?? "norm"}-${problem.stage}`,
-    feedback: problem.detail,
-    detail: {
-      norm: selected?.name,
-      digest: selected?.digest,
-      stage: problem.stage,
-      explanation: problem.detail,
-      field: problem.field,
-    },
+    feedback: problem.feedback,
   };
 }
 
@@ -164,7 +154,6 @@ function refusal(
  * decision provider reads of the instance.
  */
 function pass(progress: Progress, { act, norm, form }: FittedAct): Result {
-  const named = { norm: norm.name, digest: norm.digest };
   return {
     kind: "passed",
     textRules: describedFields(form).flatMap(
@@ -179,13 +168,13 @@ function pass(progress: Progress, { act, norm, form }: FittedAct): Result {
           : [],
     ),
     protocol: {
-      ...named,
+      norm: norm.name,
+      digest: norm.digest,
       act: act.performative,
       description: norm.description,
       state: [...(progress.instance?.facts.keys() ?? [])],
       form: form.fields,
     },
-    detail: { ...named, act: act.performative, stage: "semantic" },
   };
 }
 
@@ -238,12 +227,14 @@ function readHeldAct(
   message: Message,
 ): Checked<HeldAct> {
   return readAct(message.text).pipe(
-    Either.mapLeft(({ detail, field }) => structural(detail, field)),
+    Either.mapLeft(structural),
     Either.flatMap((act) => {
       const norm =
         progress.instance?.norm ?? norms.find(({ name }) => name === act.norm);
       return norm === undefined
-        ? Either.left(structural("ontology must name a held norm.", "ontology"))
+        ? Either.left(
+            structural("The act's norm is not one this server holds."),
+          )
         : Either.right({ act, norm });
     }),
   );
@@ -375,10 +366,7 @@ function checkReference(
     return form.starts
       ? Either.void
       : Either.left(
-          violation(
-            "replyToMsgId is required for a continuation act.",
-            "replyToMsgId",
-          ),
+          violation("replyToMsgId is required for a continuation act."),
         );
   }
   return progress.known.has(replyToMsgId)
@@ -386,7 +374,6 @@ function checkReference(
     : Either.left(
         violation(
           "replyToMsgId does not identify a preceding message in this conversation.",
-          "replyToMsgId",
         ),
       );
 }
@@ -634,14 +621,14 @@ function within(value: number, minimum?: number, maximum?: number) {
   );
 }
 
-function structural(detail: string, field?: string): NormProblem {
-  return { stage: "structural", reason: "rule-violation", detail, field };
+function structural(feedback: string): NormProblem {
+  return { stage: "structural", reason: "rule-violation", feedback };
 }
 
-function violation(detail: string, field?: string): NormProblem {
-  return { stage: "protocol", reason: "rule-violation", detail, field };
+function violation(feedback: string): NormProblem {
+  return { stage: "protocol", reason: "rule-violation", feedback };
 }
 
-function unavailable(detail: string): NormProblem {
-  return { stage: "protocol", reason: "unresolved-evidence", detail };
+function unavailable(feedback: string): NormProblem {
+  return { stage: "protocol", reason: "unresolved-evidence", feedback };
 }

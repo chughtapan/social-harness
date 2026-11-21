@@ -22,7 +22,7 @@ office-hours norm, so her message is one of its acts:
 
 ```json
 {
-  "text": "(request :ontology office-hours :topic \"Thesis outline\")"
+  "text": "(request :norm office-hours :topic \"Thesis outline\")"
 }
 ```
 

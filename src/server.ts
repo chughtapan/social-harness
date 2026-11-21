@@ -10,7 +10,6 @@ import type {
   CheckRecord,
   Firewall,
   FirewallRefusalReason,
-  StructureDetail,
 } from "./firewall.js";
 import { openDatabase, type StoredMessage } from "./database.js";
 import { type AgentName, Message, type MsgId } from "./messages.js";
@@ -93,26 +92,23 @@ const refusalText: Readonly<Record<FirewallRefusalReason, string>> = {
 
 /**
  * A send the server agent's firewall refused, as the server agent reads its
- * own and as the daemon logs every one. `rule` and `detail` are those of a
- * structure check. The message states each deciding rule's feedback as an
- * error, or the reason when there is none, then the check. Feedback is a
- * plain sentence: this message alone marks it as an error.
+ * own and as the daemon logs every one. The message states the feedback as
+ * errors, or the reason when there is none, then the check, whose record
+ * names the deciding rules. Feedback is a plain sentence: this message alone
+ * marks it as an error.
  */
 class FirewallRefusal extends Data.TaggedError("FirewallRefusal")<{
   readonly reason: "firewall-refused";
   readonly checkId: string;
   readonly refusal: FirewallRefusalReason;
-  readonly rule?: string;
   readonly feedback: readonly string[];
-  readonly detail?: StructureDetail;
 }> {
   override get message(): string {
-    const rule = this.rule === undefined ? "" : `, rule ${this.rule}`;
     return [
       ...(this.feedback.length === 0
         ? [`Error: ${refusalText[this.refusal]}`]
         : this.feedback.map((text) => `Error: ${text}`)),
-      `Check: ${this.checkId}${rule}; ${this.refusal}.`,
+      `Check: ${this.checkId}; ${this.refusal}.`,
     ].join(" ");
   }
 }
@@ -120,9 +116,8 @@ class FirewallRefusal extends Data.TaggedError("FirewallRefusal")<{
 /**
  * A client's send that the server agent's firewall refused, as the client
  * reads it. A client is not trusted with the check behind a refusal: it reads
- * the feedback rules give a sender, which for a structure check says what in
- * the act does not fit the norm, and no check id, rule id, reason or
- * diagnostics.
+ * the feedback, which says what in the message does not fit the norm, and
+ * neither the check id nor the reason.
  */
 class ClientRefusal extends Data.TaggedError("ClientRefusal")<{
   readonly reason: "refused";
@@ -307,9 +302,7 @@ function refusalOf(
     reason: "firewall-refused",
     checkId: decision.checkId,
     refusal: decision.reason,
-    rule: decision.rule,
     feedback: decision.feedback,
-    detail: decision.detail,
   });
 }
 

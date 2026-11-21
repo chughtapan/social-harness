@@ -62,8 +62,8 @@ function wellFormed(norm: Norm): Checked {
  */
 function formed(norm: Norm, form: Form, facts: ReadonlySet<string>): Checked {
   const fieldNames = form.fields.map((field) => field.name);
-  if (!fieldNames.every((name) => isName(name) && name !== "ontology")) {
-    return Either.left(`${NAME_RULE} No field is named ontology.`);
+  if (!fieldNames.every(isName)) {
+    return Either.left(NAME_RULE);
   }
   if (new Set(fieldNames).size !== fieldNames.length) {
     return Either.left("Field names must be unique within a form.");

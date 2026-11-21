@@ -24,12 +24,6 @@ import {
 /** What the frontend read, or why the text is not that, in words that do not echo the text. */
 type Read<Value> = Either.Either<Value, string>;
 
-/** Why a message's text is not an act, with the field at fault when there is one. */
-export interface ActSyntaxProblem {
-  readonly detail: string;
-  readonly field?: string;
-}
-
 /** One value of parenthesized data: a symbol, a quoted string or a list. */
 type SExpression =
   | { readonly kind: "symbol"; readonly value: string }
@@ -38,8 +32,8 @@ type SExpression =
 
 /**
  * One declaration of a document: its keyword, the name that follows it in a
- * `norm`, `content`, `field` or `relation`, its `:attribute value` pairs and
- * the rest of its items.
+ * `norm`, `act`, `field` or `relation`, its `:attribute value` pairs and the
+ * rest of its items.
  */
 interface Declaration {
   readonly kind: string;
@@ -51,6 +45,13 @@ interface Declaration {
 /** The form of a symbol that is a number: a JSON number. */
 const NUMBER = /^-?(?:0|[1-9]\d*)(?:\.\d+)?(?:[eE][+-]?\d+)?$/u;
 
+/**
+ * How an act is written, for an agent that has to write one. It reads beside
+ * the tool that returns the norm documents.
+ */
+export const ACT_SYNTAX =
+  'A message is one act and nothing else: (<performative> :norm <norm> :<field> <value> ...). Quote text as a JSON string, write a list as quoted strings in parentheses such as ("first" "second"), and send an act without fields as (<performative> :norm <norm>). The opening act omits replyToMsgId in send_message; every later act supplies the id of the message it answers.';
+
 /** The attributes that bound a field of each type. */
 const bounds = {
   string: [":min-length", ":max-length"],
@@ -58,7 +59,7 @@ const bounds = {
   list: [":min-items", ":max-items"],
 } as const;
 
-/** The norm a document states: one `norm` declaration, then a `content` declaration for each form. */
+/** The norm a document states: one `norm` declaration, then an `act` declaration for each form. */
 export function readNorm(source: string): Read<Norm> {
   return Either.gen(function* () {
     const expressions = yield* Either.mapLeft(
@@ -68,12 +69,9 @@ export function readNorm(source: string): Read<Norm> {
     const [header, ...body] = yield* Either.all(
       expressions.map(readDeclaration),
     );
-    if (
-      header?.kind !== "norm" ||
-      body.some(({ kind }) => kind !== "content")
-    ) {
+    if (header?.kind !== "norm" || body.some(({ kind }) => kind !== "act")) {
       return yield* Either.left(
-        "A document starts with one norm declaration followed by content declarations.",
+        "A document starts with one norm declaration followed by act declarations.",
       );
     }
     yield* checkAttributes(header, [":description"]);
@@ -92,28 +90,25 @@ export function readNorm(source: string): Read<Norm> {
 
 /**
  * The act a message's text states. The whole text is one list: a
- * performative, then `:field value` pairs, of which `:ontology` names the
- * act's norm. A value is a quoted string, a symbol or a list of those. A
- * symbol that has the form of a number is one, and any other symbol is its
- * own text. A message carries no comment.
+ * performative, then `:field value` pairs, of which `:norm` names the act's
+ * norm. A value is a quoted string, a symbol or a list of those. A symbol
+ * that has the form of a number is one, and any other symbol is its own
+ * text. A message carries no comment.
  */
-export function readAct(text: string): Either.Either<Act, ActSyntaxProblem> {
+export function readAct(text: string): Read<Act> {
   return readSExpressions(text, false).pipe(
-    Either.mapLeft(({ detail }) => ({ detail })),
+    Either.mapLeft(({ detail }) => detail),
     Either.flatMap(([form, ...extra]) => {
       if (form?.kind !== "list" || extra.length !== 0) {
-        return Either.left({
-          detail: "The message is not exactly one parenthesized act.",
-        });
+        return Either.left("The message is not exactly one parenthesized act.");
       }
       const [head, ...parameters] = form.values;
       return head?.kind !== "symbol" ||
         !isName(head.value) ||
         parameters.length % 2 !== 0
-        ? Either.left({
-            detail:
-              "An act names a performative followed by :field value pairs.",
-          })
+        ? Either.left(
+            "An act names a performative followed by :field value pairs.",
+          )
         : readParameters(head.value, parameters);
     }),
   );
@@ -122,7 +117,7 @@ export function readAct(text: string): Either.Either<Act, ActSyntaxProblem> {
 function readParameters(
   performative: string,
   parameters: readonly SExpression[],
-): Either.Either<Act, ActSyntaxProblem> {
+): Read<Act> {
   return Either.gen(function* () {
     const fields = new Map<string, Value>();
     for (let index = 0; index < parameters.length; index += 2) {
@@ -134,30 +129,21 @@ function readParameters(
         !isName(key.value.slice(1)) ||
         value === undefined
       ) {
-        return yield* Either.left({
-          detail: "Parameters must have distinct :names and one value each.",
-        });
+        return yield* Either.left(
+          "Parameters must have distinct :names and one value each.",
+        );
       }
       const field = key.value.slice(1);
       if (fields.has(field)) {
-        return yield* Either.left({
-          detail: `${field} appears more than once.`,
-          field,
-        });
+        return yield* Either.left(`${field} appears more than once.`);
       }
-      fields.set(
-        field,
-        yield* Either.mapLeft(readValue(value), (detail) => ({ detail })),
-      );
+      fields.set(field, yield* readValue(value));
     }
-    const norm = fields.get("ontology");
+    const norm = fields.get("norm");
     if (typeof norm !== "string") {
-      return yield* Either.left({
-        detail: ":ontology must name the act's norm.",
-        field: "ontology",
-      });
+      return yield* Either.left(":norm must name the act's norm.");
     }
-    fields.delete("ontology");
+    fields.delete("norm");
     return { performative, norm, fields: Object.fromEntries(fields) };
   });
 }
@@ -182,7 +168,7 @@ function readValue(node: SExpression): Read<Value> {
     : Either.left("Numbers must be finite.");
 }
 
-/** The form a `content` declaration states: its turn rule in its attributes, and a child for each field and relation. */
+/** The form an `act` declaration states: its turn rule in its attributes, and a child for each field and relation. */
 function readForm(form: Declaration): Read<Form> {
   return Either.gen(function* () {
     yield* checkAttributes(form, [
@@ -200,7 +186,7 @@ function readForm(form: Declaration): Read<Form> {
     const children = yield* Either.all(form.children.map(readDeclaration));
     if (children.some(({ kind }) => kind !== "field" && kind !== "relation")) {
       return yield* Either.left(
-        "Content declarations contain fields and relations.",
+        "An act declaration contains fields and relations.",
       );
     }
     return {
@@ -276,6 +262,11 @@ function readField(form: Declaration): Read<Field> {
     ]);
     if (form.children.length !== 0) {
       return yield* Either.left("A field contains no child declarations.");
+    }
+    if (form.name === "norm") {
+      return yield* Either.left(
+        "No field is named norm: an act names its norm with :norm.",
+      );
     }
     const described = {
       name: form.name,
@@ -353,7 +344,7 @@ function factOf(node?: SExpression): string | undefined {
     : undefined;
 }
 
-/** A list whose first item is a symbol is a declaration. A `norm`, `content`, `field` or `relation` names itself with its next item. */
+/** A list whose first item is a symbol is a declaration. A `norm`, `act`, `field` or `relation` names itself with its next item. */
 function readDeclaration(node: SExpression): Read<Declaration> {
   if (node.kind !== "list") {
     return Either.left("Expected a parenthesized declaration.");
@@ -362,7 +353,7 @@ function readDeclaration(node: SExpression): Read<Declaration> {
   if (head?.kind !== "symbol") {
     return Either.left("A declaration starts with a symbol.");
   }
-  const named = ["norm", "content", "field", "relation"].includes(head.value);
+  const named = ["norm", "act", "field", "relation"].includes(head.value);
   const first = tail[0];
   if (named && (first?.kind !== "symbol" || first.value.startsWith(":"))) {
     return Either.left("The declaration needs a name.");
