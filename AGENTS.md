@@ -75,7 +75,9 @@ only module that knows the syntax. `norm.ts` is the norm it reads documents
 into, as plain data. `compiler.ts` checks that norm to be well formed, and
 `structure-check.ts` runs it over a conversation. Neither reads syntax: a
 change to how norms are written touches `lisp.ts` and the specification's
-grammar, and nothing else.
+grammar, and nothing else. The folder imports nothing from the rest of
+`src/`: the firewall, the MCP tools and `main.ts` import it through
+`norms/index.ts`, which owns every shape of the norm language they use.
 
 Onboarding is agent-led and lives only in `skills/`: an agent reads a skill
 and does the setup. `host-a-server` sets up an owner's server (sign-in,

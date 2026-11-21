@@ -254,16 +254,16 @@ const serve = Effect.gen(function* () {
     url,
     serverAgent.name,
     makeFirewall({
-      structureCheck: norms?.structureCheck,
+      norms,
       judge: settings.judge,
       historyLimit: settings.maximumHistoryRecords,
     }),
   );
-  const factory = yield* mcpServerFactory(server, {
-    issuer: admitted.issuer,
-    subject: serverAgent.subject,
+  const factory = yield* mcpServerFactory(
+    server,
+    { issuer: admitted.issuer, subject: serverAgent.subject },
     norms,
-  });
+  );
   yield* listen(settings, admitted, factory);
   yield* Console.log(
     `sharnessd listening on http://${settings.host}:${settings.port}/mcp (package ${packageVersion})`,

@@ -6,9 +6,8 @@
  * sent is the structure check's.
  */
 
-import { Either, Schema } from "effect";
+import { Either } from "effect";
 import { createHash } from "node:crypto";
-import { type Role, wellFormedString } from "../messages.js";
 import {
   type Act,
   type Delay,
@@ -17,6 +16,7 @@ import {
   isName,
   type Norm,
   type Relation,
+  type Role,
   type Sender,
   type Value,
 } from "./norm.js";
@@ -536,10 +536,10 @@ function acceptToken(
   const value = Either.getOrUndefined(
     Either.try((): unknown => JSON.parse(token)),
   );
-  if (value === undefined) {
+  if (typeof value !== "string") {
     return "Use JSON escaping inside quoted strings.";
   }
-  if (!Schema.is(wellFormedString)(value)) {
+  if (/\p{Surrogate}/u.test(value)) {
     return "Expected a well-formed Unicode string.";
   }
   parent.push({ kind: "string", value });

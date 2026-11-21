@@ -16,6 +16,7 @@ import {
   TestClock,
 } from "effect";
 import { describe, expect } from "vitest";
+import type { HeldNorms, Role, TextRule } from "./norms/index.js";
 import { type Answer, answersTo } from "../tests/support/decision-provider.js";
 import {
   type DecisionProvider,
@@ -23,13 +24,10 @@ import {
   type DecisionRequest,
   jevDecisionProvider,
 } from "./decision-provider.js";
-import {
-  type CheckedMessage,
-  makeFirewall,
-  type StructureCheck,
-  type TextRule,
-} from "./firewall.js";
-import { AgentName, Message, type Role } from "./messages.js";
+import { type CheckedMessage, makeFirewall } from "./firewall.js";
+import { AgentName, Message } from "./messages.js";
+
+type StructureCheck = HeldNorms["check"];
 
 const senders = ["client", "server"] as const;
 
@@ -48,8 +46,7 @@ const privacy: TextRule = {
 /** A structure check that passes every message with `textRules` to judge. */
 const passing =
   (textRules: readonly TextRule[], protocol?: unknown): StructureCheck =>
-  () =>
-    Effect.succeed({ kind: "passed", textRules, protocol });
+  () => ({ kind: "passed", textRules, protocol });
 
 /** A provider that answers as `answersTo` does and adds each request to `requests`. */
 function answering(
@@ -105,7 +102,9 @@ function check(sender: Role, setup: Setup = {}) {
 /** Alice's firewall under `setup`. */
 function firewallOf(setup: Setup = {}) {
   return makeFirewall({
-    structureCheck: setup.structureCheck ?? passing(setup.rules ?? [privacy]),
+    norms: {
+      check: setup.structureCheck ?? passing(setup.rules ?? [privacy]),
+    },
     judge: {
       provider: setup.provider ?? certain,
       minimumProbability: setup.minimumProbability ?? 0.5,
@@ -280,7 +279,7 @@ it.each(senders)(
 
 it("makes the check of a message that has rules unavailable when the server names no decision provider", () =>
   Effect.gen(function* () {
-    const firewall = makeFirewall({ structureCheck: passing([privacy]) });
+    const firewall = makeFirewall({ norms: { check: passing([privacy]) } });
 
     expect(yield* firewall.check("client", yield* fromBob, [])).toMatchObject({
       kind: "refused",
@@ -449,7 +448,7 @@ describe("Firewall structure check", () => {
       Effect.gen(function* () {
         const result = yield* check(sender, {
           provider: { decide: () => Effect.dieMessage("Provider asked") },
-          structureCheck: () => Effect.succeed(refusal),
+          structureCheck: () => refusal,
         });
 
         expect(result).toMatchObject({
@@ -464,11 +463,20 @@ describe("Firewall structure check", () => {
       }),
   );
 
-  it("judges a message its structure check passes by that check's rules, shows the provider that check's context, and tells the check the sender, the earlier messages and the time", () =>
+  it("judges a message its structure check passes by that check's rules, shows the provider that check's context, and tells the check which member sent each message and when it was checked", () =>
     Effect.gen(function* () {
       const requests: DecisionRequest[] = [];
-      const judged: unknown[][] = [];
-      const earlier = [{ message: yield* fromBob, checkedAt: 1 }];
+      const judged: Array<Parameters<StructureCheck>> = [];
+      const earlier = [
+        { message: yield* fromBob, checkedAt: 1 },
+        {
+          message: yield* Message.create({
+            author: alice,
+            recipient: bob,
+            text: "Hi",
+          }),
+        },
+      ];
 
       const result = yield* check("client", {
         provider: answering({ [privacy.id]: "violation" }, requests),
@@ -479,9 +487,15 @@ describe("Firewall structure check", () => {
         },
       });
 
-      expect(
-        judged.map(([sender, , given, now]) => [sender, given, now]),
-      ).toEqual([["client", earlier, 0]]);
+      expect(judged).toMatchObject([
+        [
+          { role: "client", text: "Hello", at: 0 },
+          [
+            { role: "client", text: "Hello", at: 1 },
+            { role: "server", text: "Hi" },
+          ],
+        ],
+      ]);
       expect(
         requests.map(({ state, questions }) => [
           Schema.decodeUnknownSync(

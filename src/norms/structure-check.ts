@@ -1,14 +1,12 @@
 /**
- * @file The structure check of a server that holds norms: what runs a norm.
- * It replays a conversation's earlier messages to find the instance in
- * progress, then says whether a further message is an act its sender may
- * send next. It reads norms and acts as data, and is handed the reader that
- * turns a message's text into an act.
+ * @file The structure check: what runs a norm. It replays a conversation's
+ * earlier messages to find the instance in progress, then says whether a
+ * further message is an act its sender may send next. It reads norms, acts
+ * and messages as plain data, and is handed the reader that turns a
+ * message's text into an act.
  */
 
-import { Effect, Either } from "effect";
-import type { CheckedMessage, StructureCheck } from "../firewall.js";
-import type { Message, Role } from "../messages.js";
+import { Either } from "effect";
 import {
   type Act,
   type ActReference,
@@ -18,8 +16,54 @@ import {
   type Form,
   type Norm,
   type Relation,
+  type Role,
   type Value,
 } from "./norm.js";
+
+/**
+ * A message as the structure check reads it: its id, the id of the message
+ * it replies to, which member sent it, its text, and the time of its check
+ * in milliseconds.
+ */
+export interface Sent {
+  readonly id: string;
+  readonly replyTo?: string;
+  readonly role: Role;
+  readonly text: string;
+  readonly at: number;
+}
+
+/** A stored message. One that was never checked has no time and is replayed as no act. */
+export type Stored = Omit<Sent, "at"> & { readonly at?: number };
+
+/**
+ * One text rule: a requirement in prose that a decision provider judges a
+ * message against. The sender of a message it refuses reads the same text as
+ * feedback, so a rule says what the message must do.
+ */
+export interface TextRule {
+  readonly id: string;
+  readonly text: string;
+}
+
+/**
+ * What the structure check says of one message. A refusal gives the rule it
+ * is recorded under and, as `feedback`, what does not fit. A pass gives the
+ * text rules that judge the message and the `protocol` context a decision
+ * provider reads with them.
+ */
+export type Judgement =
+  | {
+      readonly kind: "refused";
+      readonly reason: NormProblem["reason"];
+      readonly ruleId: string;
+      readonly feedback: string;
+    }
+  | {
+      readonly kind: "passed";
+      readonly textRules: readonly TextRule[];
+      readonly protocol?: unknown;
+    };
 
 /** Reads a message's text as an act, or says why it is none. */
 type ActReader = (text: string) => Either.Either<Act, string>;
@@ -29,13 +73,6 @@ interface NormProblem {
   readonly stage: "structural" | "protocol";
   readonly reason: "rule-violation" | "unresolved-evidence";
   readonly feedback: string;
-}
-
-/** A message as the structure check judges it: which member sent it, and the time of the firewall's check of it. */
-interface Sent {
-  readonly message: Message;
-  readonly role: Role;
-  readonly at: number;
 }
 
 /** One earlier act that fits the protocol, with the act its text states. */
@@ -93,28 +130,21 @@ interface Held {
 export function structureCheck(
   norms: readonly Norm[],
   readAct: ActReader,
-): StructureCheck {
-  return (sender, message, earlier, now) =>
-    Effect.sync(
-      (): Result =>
-        norms.length === 0
-          ? { kind: "passed", textRules: [] }
-          : checkMessage(
-              { norms, readAct },
-              { message, role: sender, at: now },
-              earlier,
-            ),
-    ).pipe(Effect.withSpan("structureCheck"));
+): (sent: Sent, earlier: readonly Stored[]) => Judgement {
+  return (sent, earlier) =>
+    norms.length === 0
+      ? { kind: "passed", textRules: [] }
+      : checkMessage({ norms, readAct }, sent, earlier);
 }
 
 /** What the structure check says of `sent`, after the `earlier` messages of its conversation. */
 function checkMessage(
   held: Held,
   sent: Sent,
-  earlier: readonly CheckedMessage[],
-): Result {
-  const progress = replay(held, earlier, sent);
-  const read = readHeldAct(progress, held, sent.message);
+  earlier: readonly Stored[],
+): Judgement {
+  const progress = replay(held, earlier);
+  const read = readHeldAct(progress, held, sent.text);
   return Either.match(
     Either.flatMap(read, (act) => fitAct(progress, act, sent)),
     {
@@ -124,8 +154,6 @@ function checkMessage(
     },
   );
 }
-
-type Result = Effect.Effect.Success<ReturnType<StructureCheck>>;
 
 /**
  * The refusal of a message with `problem`, under a rule named for the stage
@@ -138,7 +166,7 @@ function refusal(
   progress: Progress,
   problem: NormProblem,
   selected?: Norm,
-): Result {
+): Judgement {
   const judgedUnder = selected ?? progress.instance?.norm;
   return {
     kind: "refused",
@@ -153,7 +181,7 @@ function refusal(
  * states, which holds the field's text to its description, and what the
  * decision provider reads of the instance.
  */
-function pass(progress: Progress, { act, norm, form }: FittedAct): Result {
+function pass(progress: Progress, { act, norm, form }: FittedAct): Judgement {
   return {
     kind: "passed",
     textRules: describedFields(form).flatMap(
@@ -180,37 +208,29 @@ function pass(progress: Progress, { act, norm, form }: FittedAct): Result {
 
 /**
  * Replays a conversation's earlier messages in order under the held norms.
- * Only a message the firewall checked that reads as an act and fits the
- * protocol at the time of its check advances the instance. A conversation
- * has two members, so an earlier message has the role of `next`, the message
- * under check, when the same agent wrote it, and the other role otherwise.
+ * Only a checked message that reads as an act and fits the protocol at the
+ * time of its check advances the instance.
  */
-function replay(
-  held: Held,
-  earlier: readonly CheckedMessage[],
-  next: Sent,
-): Progress {
-  const other = next.role === "client" ? "server" : "client";
+function replay(held: Held, earlier: readonly Stored[]): Progress {
   const known = new Map<string, string | undefined>();
   let progress: Progress = { known };
-  for (const { message, checkedAt } of earlier) {
-    const role = message.author === next.message.author ? next.role : other;
+  for (const stored of earlier) {
     const act =
-      checkedAt === undefined
+      stored.at === undefined
         ? undefined
-        : replayed(progress, held, { message, role, at: checkedAt });
+        : replayed(progress, held, { ...stored, at: stored.at });
     if (act !== undefined) {
       progress = applyAct(progress, act);
     }
-    progress = joinInstance(progress, message);
-    known.set(message.msgId, act?.act.performative);
+    progress = joinInstance(progress, stored);
+    known.set(stored.id, act?.act.performative);
   }
   return progress;
 }
 
-/** The act of an earlier message, judged again at the time of the firewall's check of it, or nothing when it does not pass. */
+/** The act of an earlier message, judged again at the time of its check, or nothing when it does not pass. */
 function replayed(progress: Progress, held: Held, sent: Sent) {
-  return readHeldAct(progress, held, sent.message).pipe(
+  return readHeldAct(progress, held, sent.text).pipe(
     Either.flatMap((act) => fitAct(progress, act, sent)),
     Either.map((fitted) => ({ ...fitted, ...sent })),
     Either.getOrUndefined,
@@ -218,15 +238,15 @@ function replayed(progress: Progress, held: Held, sent: Sent) {
 }
 
 /**
- * Reads `message` as an act of the instance in progress or, when none is, of
+ * Reads `text` as an act of the instance in progress or, when none is, of
  * the held norm it names.
  */
 function readHeldAct(
   progress: Progress,
   { norms, readAct }: Held,
-  message: Message,
+  text: string,
 ): Checked<HeldAct> {
-  return readAct(message.text).pipe(
+  return readAct(text).pipe(
     Either.mapLeft(structural),
     Either.flatMap((act) => {
       const norm =
@@ -263,13 +283,13 @@ function checkProtocol(
   sent: Sent,
 ): Either.Either<void, NormProblem> {
   const { act, norm, form } = fitted;
-  const { message, role } = sent;
-  const invalid = invalidTransition(progress, norm, message, act);
+  const { role } = sent;
+  const invalid = invalidTransition(progress, norm, sent, act);
   const notTheirs = violation(
     `${act.performative} is not the ${role}'s to send in ${norm.name}.`,
   );
   return Either.gen(function* () {
-    yield* checkReference(progress, form, message);
+    yield* checkReference(progress, form, sent);
     const instance = progress.instance;
     if (instance === undefined) {
       const opening = senderPermitted(form, sent)
@@ -280,7 +300,7 @@ function checkProtocol(
     if (form.starts) {
       return yield* Either.left(invalid);
     }
-    const chain = replyChain(instance, message.replyToMsgId);
+    const chain = replyChain(instance, sent.replyTo);
     if (chain.size === 0) {
       return yield* Either.left(invalid);
     }
@@ -290,7 +310,7 @@ function checkProtocol(
         : undefined;
     if (
       form.by.kind === "recipient" &&
-      (anchor === undefined || !chain.has(anchor.message.msgId))
+      (anchor === undefined || !chain.has(anchor.id))
     ) {
       return yield* Either.left(invalid);
     }
@@ -307,33 +327,32 @@ function checkProtocol(
   });
 }
 
-/** Whether the form lets the sender of `sent` send its act: by its role, or as the recipient of the message that set the form's fact. */
-function senderPermitted(
-  { by }: Form,
-  { message, role }: Sent,
-  anchor?: ReplayedAct,
-) {
+/**
+ * Whether the form lets the sender of `sent` send its act: by its role, or
+ * as the recipient of the message that set the form's fact. A conversation
+ * has two members, so that recipient is the member who did not send it.
+ */
+function senderPermitted({ by }: Form, { role }: Sent, anchor?: ReplayedAct) {
   return by.kind === "recipient"
-    ? anchor?.message.recipient === message.author
+    ? anchor !== undefined && anchor.role !== role
     : by.roles.includes(role);
 }
 
 /** A message that replies into the instance belongs to it, whether or not it advanced the instance, so a later reply may name it. */
-function joinInstance(progress: Progress, message: Message) {
+function joinInstance(progress: Progress, { id, replyTo }: Stored) {
   const instance = progress.instance;
   if (instance === undefined) {
     return progress;
   }
-  const reference = message.replyToMsgId;
   const belongs =
-    instance.acts[0]?.message.msgId === message.msgId ||
-    (reference !== undefined && instance.members.has(reference));
+    instance.acts[0]?.id === id ||
+    (replyTo !== undefined && instance.members.has(replyTo));
   return belongs
     ? {
         ...progress,
         instance: {
           ...instance,
-          members: new Map([...instance.members, [message.msgId, reference]]),
+          members: new Map([...instance.members, [id, replyTo]]),
         },
       }
     : progress;
@@ -343,13 +362,11 @@ function joinInstance(progress: Progress, message: Message) {
 function invalidTransition(
   progress: Progress,
   norm: Norm,
-  message: Message,
+  { replyTo }: Sent,
   act: Act,
 ) {
   const preceding =
-    message.replyToMsgId === undefined
-      ? undefined
-      : progress.known.get(message.replyToMsgId);
+    replyTo === undefined ? undefined : progress.known.get(replyTo);
   const after = preceding === undefined ? "" : ` after ${preceding}`;
   return violation(
     `${act.performative} is not valid${after} for ${norm.name}.`,
@@ -360,16 +377,16 @@ function invalidTransition(
 function checkReference(
   progress: Progress,
   form: Form,
-  { replyToMsgId }: Message,
+  { replyTo }: Sent,
 ): Either.Either<void, NormProblem> {
-  if (replyToMsgId === undefined) {
+  if (replyTo === undefined) {
     return form.starts
       ? Either.void
       : Either.left(
           violation("replyToMsgId is required for a continuation act."),
         );
   }
-  return progress.known.has(replyToMsgId)
+  return progress.known.has(replyTo)
     ? Either.void
     : Either.left(
         violation(
@@ -527,15 +544,13 @@ function referencedAct(
 ) {
   if (reference.kind === "fact") {
     const anchor = instance.facts.get(reference.fact);
-    return anchor === undefined || !chain.has(anchor.message.msgId)
-      ? undefined
-      : anchor;
+    return anchor === undefined || !chain.has(anchor.id) ? undefined : anchor;
   }
   return [...instance.acts]
     .reverse()
     .find(
       (entry) =>
-        chain.has(entry.message.msgId) &&
+        chain.has(entry.id) &&
         entry.act.performative === reference.performative,
     );
 }

@@ -8,21 +8,12 @@
 
 import { Clock, Effect, Exit, Schema, Struct } from "effect";
 import { randomBytes } from "node:crypto";
+import type { HeldNorms, Role, TextRule } from "./norms/index.js";
 import { type Answer, askProvider, type Judge } from "./decision-provider.js";
-import { AgentName, type Message, type Role } from "./messages.js";
+import { AgentName, type Message } from "./messages.js";
 
 /** Why the firewall refused a message: it broke a rule, left one unsettled, or its check could not run. */
 export type FirewallRefusalReason = Refusal["reason"] | "check-unavailable";
-
-/**
- * One text rule: a requirement in prose that a decision provider judges a
- * message against. The sender of a message it refuses reads the same text as
- * feedback, so a rule says what the message must do.
- */
-export interface TextRule {
-  readonly id: string;
-  readonly text: string;
-}
 
 /**
  * What one completed check concluded, as its caller saves it, without message
@@ -58,32 +49,6 @@ export interface CheckedMessage {
   readonly message: Message;
   readonly checkedAt?: number;
 }
-
-/**
- * Judges whether a message `sender` sends may follow the earlier messages of
- * its conversation at the time `now`, before the text rules do. A refusal
- * gives the rule it is recorded under and, as `feedback`, what does not fit.
- * A pass gives the text rules that judge this message and the `protocol`
- * context the decision provider reads.
- */
-export type StructureCheck = (
-  sender: Role,
-  message: Message,
-  earlier: readonly CheckedMessage[],
-  now: number,
-) => Effect.Effect<
-  | {
-      readonly kind: "refused";
-      readonly reason: Refusal["reason"];
-      readonly ruleId: string;
-      readonly feedback: string;
-    }
-  | {
-      readonly kind: "passed";
-      readonly textRules: readonly TextRule[];
-      readonly protocol?: unknown;
-    }
->;
 
 /**
  * A message that may be sent. `record` is what the caller saves of the
@@ -134,24 +99,24 @@ interface Refusal extends Pick<CheckRecord, "decidedBy" | "checkedRuleIds"> {
 }
 
 /**
- * The firewall of a server whose norms `structureCheck` holds messages to. A
- * server without norms allows every message and records nothing.
+ * The firewall of a server that holds `norms`. A server without norms allows
+ * every message and records nothing.
  *
- * A check has the structure check judge its message first, with the earlier
- * messages; that check's refusal refuses the message. The `judge` then
- * answers whether the message breaks each text rule the structure check gave
- * it: complies, violates or unsure. A violation refuses, and an unsure answer
- * refuses as unresolved evidence. A judge that gives no usable answer, and
- * rules without a judge, make the check unavailable.
+ * A check has the norms' structure check judge its message first, with the
+ * earlier messages; that check's refusal refuses the message. The `judge`
+ * then answers whether the message breaks each text rule the structure check
+ * gave it: complies, violates or unsure. A violation refuses, and an unsure
+ * answer refuses as unresolved evidence. A judge that gives no usable
+ * answer, and rules without a judge, make the check unavailable.
  */
 export function makeFirewall(applies: {
-  readonly structureCheck?: StructureCheck;
+  readonly norms?: Pick<HeldNorms, "check">;
   readonly judge?: Judge;
   /** The most earlier messages the provider reads: 256 when unset. */
   readonly historyLimit?: number;
 }): Firewall {
-  const { structureCheck, judge } = applies;
-  if (structureCheck === undefined) {
+  const { norms, judge } = applies;
+  if (norms === undefined) {
     return { check: () => Effect.succeed({ kind: "allowed" }) };
   }
   const permits = Effect.unsafeMakeSemaphore(
@@ -161,7 +126,12 @@ export function makeFirewall(applies: {
     Effect.gen(function* () {
       const now = yield* Clock.currentTimeMillis;
       const checked = { message, sender, now };
-      const structure = yield* structureCheck(sender, message, earlier, now);
+      const structure = yield* Effect.sync(() =>
+        norms.check(
+          { ...readable(message), role: sender, at: now },
+          storedBefore(earlier, message, sender),
+        ),
+      ).pipe(Effect.withSpan("structureCheck"));
       if (structure.kind === "refused") {
         const { reason, ruleId, feedback } = structure;
         return refused(checked, {
@@ -191,6 +161,30 @@ export function makeFirewall(applies: {
       );
     });
   return { check };
+}
+
+/** What the structure check reads of a message. */
+function readable({ msgId, replyToMsgId, text }: Message) {
+  return { id: msgId, replyTo: replyToMsgId, text };
+}
+
+/**
+ * The earlier messages as the structure check reads them, given that the
+ * author of `sent` has the role `sender`. A conversation has two members, so
+ * an earlier message has that role when the same agent wrote it and the
+ * other role otherwise.
+ */
+function storedBefore(
+  earlier: readonly CheckedMessage[],
+  sent: Message,
+  sender: Role,
+) {
+  const other = sender === "client" ? "server" : "client";
+  return earlier.map(({ message, checkedAt }) => ({
+    ...readable(message),
+    role: message.author === sent.author ? sender : other,
+    at: checkedAt,
+  }));
 }
 
 /**

@@ -8,7 +8,8 @@
  * a norm prints as JSON.
  */
 
-import type { Role } from "../messages.js";
+/** Which of a conversation's two members sends an act: the server agent, or its client. */
+export type Role = "client" | "server";
 
 /**
  * One norm. `source` is the document it was compiled from and `digest` the

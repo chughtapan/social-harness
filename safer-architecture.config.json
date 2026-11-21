@@ -88,7 +88,7 @@
       "entrypoints": [
         "src/norms/index.ts"
       ],
-      "reason": "The norm language: its Lisp frontend, the norm it reads documents into, and the structure check that runs a norm"
+      "reason": "The norm language, self-contained: its Lisp frontend, the norm it reads documents into, and the structure check that runs a norm"
     }
   ],
   "layers": [
@@ -97,7 +97,7 @@
       "folders": [
         "norms"
       ],
-      "reason": "Norm documents compile to norms, which the structure check runs for the firewall"
+      "reason": "The norm language imports nothing from the daemon; the firewall and the MCP tools import it"
     }
   ],
   "publicTypePackages": [],

@@ -11,7 +11,8 @@ import {
 } from "@effect/platform";
 import { Data, Effect, type Redacted, Schedule, Schema, Stream } from "effect";
 import { createHash } from "node:crypto";
-import type { Message, Role } from "./messages.js";
+import type { Message } from "./messages.js";
+import type { Role } from "./norms/index.js";
 
 /** What a rule gives the provider: the prose it judges, under the rule's id. */
 interface RuleText {

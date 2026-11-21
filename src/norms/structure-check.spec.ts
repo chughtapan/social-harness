@@ -1,19 +1,15 @@
 /** @file The structure check passes exactly the acts a norm's turn rules and forms allow after a conversation's earlier messages and the firewall's checks of them, and names what is wrong with any other message. */
 
-import { Effect, Either, FastCheck as fc, Option, Schema } from "effect";
-import { randomBytes } from "node:crypto";
+import { Either, FastCheck as fc, Option } from "effect";
 import { expect, it } from "vitest";
-import type { CheckedMessage } from "../firewall.js";
-import { AgentName, Message, MsgId } from "../messages.js";
+import type { Role } from "./norm.js";
 import { compileNorm } from "./compiler.js";
 import { readAct } from "./lisp.js";
-import { structureCheck } from "./structure-check.js";
+import { type Stored, structureCheck } from "./structure-check.js";
 
-/** The client of every conversation here. */
-const alice = AgentName.make("alice");
-/** The server agent. */
-const bob = AgentName.make("bob");
-const agents = [alice, bob] as const;
+const client: Role = "client";
+const server: Role = "server";
+const members = [client, server] as const;
 
 /** The norm a document declares. */
 const normFrom = (document: string) => Either.getOrThrow(compileNorm(document));
@@ -55,7 +51,7 @@ const turns = normFrom(`
 `);
 
 /** A message id no generated history holds. */
-const unknownId = Schema.decodeUnknownSync(MsgId)(`msg_${"A".repeat(43)}`);
+const unknownId = "unknown";
 
 /**
  * Checks the act `text` from `author` against `history` at `now`, and adds
@@ -65,65 +61,53 @@ const unknownId = Schema.decodeUnknownSync(MsgId)(`msg_${"A".repeat(43)}`);
  */
 function attempt(
   norm: Norm,
-  history: CheckedMessage[],
+  history: Stored[],
   taken: {
-    readonly author: AgentName;
+    readonly author: Role;
     readonly text: string;
     readonly now: number;
-    readonly reply: Option.Option<MsgId>;
+    readonly reply: Option.Option<string>;
   },
 ) {
   const candidate = message(
     taken.author,
     taken.text,
-    { replyToMsgId: Option.getOrUndefined(taken.reply) },
+    { replyTo: Option.getOrUndefined(taken.reply) },
     stepId(history.length),
   );
   const { kind } = check(norm, candidate, history, taken.now);
   if (kind === "passed") {
-    history.push({ message: candidate, checkedAt: taken.now });
+    history.push({ ...candidate, at: taken.now });
   }
   return kind === "passed";
 }
 
-/** A message of `text` from `author` to the other agent, under `msgId` or a new id. */
+let minted = 0;
+
+/** A message of `text` from `author`, under `id` or a new id. */
 function message(
-  author: AgentName,
+  author: Role,
   text: string,
-  reference: Pick<Message, "replyToMsgId"> = {},
-  msgId?: MsgId,
-): Message {
-  return Schema.decodeSync(Message)({
-    author,
-    recipient: author === alice ? bob : alice,
-    msgId: msgId ?? `msg_${randomBytes(32).toString("base64url")}`,
-    ...reference,
-    text,
-  });
+  reference: Pick<Stored, "replyTo"> = {},
+  id?: string,
+): Stored {
+  minted += 1;
+  return { id: id ?? `minted-${minted}`, ...reference, role: author, text };
 }
 
 /** What the structure check of a server that holds `norm` says of `candidate` at `now`, after `history`. */
 function check(
   norm: Norm,
-  candidate: Message,
-  history: readonly CheckedMessage[] = [],
+  candidate: Stored,
+  history: readonly Stored[] = [],
   now = 0,
 ) {
-  return Effect.runSync(
-    structureCheck([norm], readAct)(
-      candidate.author === alice ? "client" : "server",
-      candidate,
-      history,
-      now,
-    ),
-  );
+  return structureCheck([norm], readAct)({ ...candidate, at: now }, history);
 }
 
 /** The message id of step `index` of a walk. */
-function stepId(index: number): MsgId {
-  return Schema.decodeUnknownSync(MsgId)(
-    `msg_${Buffer.alloc(32, index + 1).toString("base64url")}`,
-  );
+function stepId(index: number): string {
+  return `step-${index}`;
 }
 
 /**
@@ -158,19 +142,19 @@ type Step =
 interface Model {
   open: boolean;
   offer?: {
-    readonly id: MsgId;
+    readonly id: string;
     readonly author: number;
     readonly value: string;
   };
-  readonly members: Map<MsgId, Option.Option<MsgId>>;
-  readonly known: Set<MsgId>;
+  readonly members: Map<string, Option.Option<string>>;
+  readonly known: Set<string>;
 }
 
 /** The message a step replies to: none, one no history holds, or an earlier step's. */
 function replyOf(
-  history: readonly CheckedMessage[],
+  history: readonly Stored[],
   taken: Step,
-): Option.Option<MsgId> {
+): Option.Option<string> {
   if (taken.reply === "none") {
     return Option.none();
   }
@@ -178,7 +162,7 @@ function replyOf(
     return Option.some(unknownId);
   }
   return Option.fromNullable(
-    history[taken.reply % Math.max(history.length, 1)]?.message.msgId,
+    history[taken.reply % Math.max(history.length, 1)]?.id,
   );
 }
 
@@ -186,7 +170,7 @@ function replyOf(
 function modelPermits(
   model: Model,
   taken: Step,
-  reply: Option.Option<MsgId>,
+  reply: Option.Option<string>,
 ): boolean {
   if (!model.open) {
     return (
@@ -205,8 +189,8 @@ function modelPermits(
 }
 
 /** Whether `taken` counters or chooses the current offer: from its recipient, in a reply chain that holds it. */
-function answersOffer(model: Model, taken: Step, reply: MsgId): boolean {
-  const chain = new Set<MsgId>();
+function answersOffer(model: Model, taken: Step, reply: string): boolean {
+  const chain = new Set<string>();
   let current = Option.some(reply);
   while (
     Option.isSome(current) &&
@@ -231,7 +215,7 @@ function answersOffer(model: Model, taken: Step, reply: MsgId): boolean {
 function advanceModel(
   model: Model,
   taken: Step,
-  message: { readonly id: MsgId; readonly reply: Option.Option<MsgId> },
+  message: { readonly id: string; readonly reply: Option.Option<string> },
 ) {
   const { id, reply } = message;
   model.members.set(id, reply);
@@ -254,7 +238,7 @@ function advanceModel(
 it("permits exactly the acts the turn rules allow, whoever sends them and whichever message they reply to", () => {
   fc.assert(
     fc.property(fc.array(step, { maxLength: 12 }), (steps) => {
-      const history: CheckedMessage[] = [];
+      const history: Stored[] = [];
       const model: Model = {
         open: false,
         members: new Map(),
@@ -265,7 +249,7 @@ it("permits exactly the acts the turn rules allow, whoever sends them and whiche
         const reply = replyOf(history, taken);
         const expected = modelPermits(model, taken, reply);
         const permitted = attempt(turns, history, {
-          author: agents[taken.author] ?? alice,
+          author: members[taken.author] ?? client,
           text: actText(
             taken.act,
             "turns",
@@ -301,18 +285,18 @@ it("permits an act with a delay and a limit only once its fact is that old and w
 (act poll :by (client server) :when held :max ${maximum}
   :after held :delay wait :unit seconds)
 `);
-        const history: CheckedMessage[] = [];
+        const history: Stored[] = [];
         const start = 1_000;
         const due = start + wait * 1000;
         attempt(timed, history, {
-          author: alice,
+          author: client,
           text: actText("hold", "timed", { wait }),
           now: start,
           reply: Option.none(),
         });
         const poll = (now: number) =>
           attempt(timed, history, {
-            author: bob,
+            author: server,
             text: actText("poll", "timed"),
             now,
             reply: Option.some(stepId(0)),
@@ -339,7 +323,7 @@ const exchange = normFrom(`
 it("refuses every text that is not an act of a held norm", () => {
   fc.assert(
     fc.property(fc.string({ minLength: 1 }), (text) => {
-      expect(check(exchange, message(alice, text))).toMatchObject({
+      expect(check(exchange, message(client, text))).toMatchObject({
         kind: "refused",
         reason: "rule-violation",
         ruleId: "norm-structural",
@@ -366,7 +350,7 @@ it("passes an act with one text rule for each described string or list field it 
     count: 2,
   });
 
-  expect(check(described, message(alice, ask))).toMatchObject({
+  expect(check(described, message(client, ask))).toMatchObject({
     kind: "passed",
     textRules: [
       {
@@ -383,34 +367,37 @@ it("passes an act with one text rule for each described string or list field it 
 });
 
 it("refuses an act from the member whose role may not send it, to open an instance and within one", () => {
-  const open = message(alice, actText("open", "exchange", { value: "x" }));
+  const open = message(client, actText("open", "exchange", { value: "x" }));
 
   expect(
-    check(exchange, message(bob, actText("open", "exchange", { value: "x" }))),
+    check(
+      exchange,
+      message(server, actText("open", "exchange", { value: "x" })),
+    ),
   ).toMatchObject({ kind: "refused", ruleId: "exchange-protocol" });
   expect(
     check(
       exchange,
-      message(alice, actText("close", "exchange"), {
-        replyToMsgId: open.msgId,
+      message(client, actText("close", "exchange"), {
+        replyTo: open.id,
       }),
-      [{ message: open, checkedAt: 1 }],
+      [{ ...open, at: 1 }],
     ),
   ).toMatchObject({ kind: "refused", ruleId: "exchange-protocol" });
 });
 
 it.each([
-  { checked: { checkedAt: 1 }, continues: "passed" },
+  { checked: { at: 1 }, continues: "passed" },
   { checked: {}, continues: "refused" },
 ])(
   "continues an instance only from an opening act the firewall checked: $checked",
   ({ checked, continues }) => {
-    const open = message(alice, actText("open", "exchange", { value: "x" }));
+    const open = message(client, actText("open", "exchange", { value: "x" }));
 
     const result = check(
       exchange,
-      message(bob, actText("close", "exchange"), { replyToMsgId: open.msgId }),
-      [{ message: open, ...checked }],
+      message(server, actText("close", "exchange"), { replyTo: open.id }),
+      [{ ...open, ...checked }],
     );
 
     expect(result.kind).toBe(continues);
@@ -452,12 +439,12 @@ it.each([
 ])(
   "refuses $what in an instance under the norm's $stage rule",
   ({ text, stage }) => {
-    const open = message(alice, actText("open", "exchange", { value: "x" }));
+    const open = message(client, actText("open", "exchange", { value: "x" }));
 
     const result = check(
       exchange,
-      message(bob, text, { replyToMsgId: open.msgId }),
-      [{ message: open, checkedAt: 1 }],
+      message(server, text, { replyTo: open.id }),
+      [{ ...open, at: 1 }],
     );
 
     expect(result).toMatchObject({
@@ -482,7 +469,7 @@ const accepted = (
 ) =>
   check(
     sampleOf([`(field field ${declaration})`]),
-    message(alice, actText("open", "sample", { field: value })),
+    message(client, actText("open", "sample", { field: value })),
   ).kind === "passed";
 
 it("names exactly the fields an act is missing, adds or gets wrong", () => {
@@ -508,7 +495,7 @@ it("names exactly the fields an act is missing, adds or gets wrong", () => {
             ),
         ),
         message(
-          alice,
+          client,
           actText(
             "open",
             "sample",
@@ -644,21 +631,21 @@ it("holds a list to a subset of an earlier list, and a string to one of an earli
       fc.array(item, { minLength: 1, maxLength: 3 }),
       item,
       (offered, kept, picked) => {
-        const history: CheckedMessage[] = [];
-        const send = (author: AgentName, text: string) =>
+        const history: Stored[] = [];
+        const send = (author: Role, text: string) =>
           attempt(picking, history, {
             author,
             text,
             now: 1,
-            reply: Option.fromNullable(history.at(-1)?.message.msgId),
+            reply: Option.fromNullable(history.at(-1)?.id),
           });
 
-        send(alice, actText("offer", "picking", { slots: offered }));
+        send(client, actText("offer", "picking", { slots: offered }));
         const within = kept.every((slot) => offered.includes(slot));
-        expect(send(bob, actText("keep", "picking", { slots: kept }))).toBe(
+        expect(send(server, actText("keep", "picking", { slots: kept }))).toBe(
           within,
         );
-        expect(send(alice, actText("pick", "picking", { slot: picked }))).toBe(
+        expect(send(client, actText("pick", "picking", { slot: picked }))).toBe(
           within && kept.includes(picked),
         );
       },

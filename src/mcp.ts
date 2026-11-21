@@ -17,6 +17,7 @@ import { createHash } from "node:crypto";
 import packageJson from "../package.json" with { type: "json" };
 import { checkRecordSchema } from "./firewall.js";
 import { AgentName, Message, MsgId, wellFormedString } from "./messages.js";
+import { type HeldNorms, publishedNorm } from "./norms/index.js";
 import { type Failure, PAGE_SIZE, type Server } from "./server.js";
 
 /** The version of this package, as MCP clients and telemetry read it. */
@@ -49,14 +50,6 @@ const sentFields = {
 
 const SendResult = Schema.Struct({ id: MsgId });
 
-const normDocuments = Schema.Array(
-  Schema.Struct({
-    name: Schema.String,
-    description: Schema.String,
-    document: Schema.String,
-  }),
-);
-
 const conversationPage = Schema.Struct({
   records: Schema.Array(InboxEntry).pipe(Schema.maxItems(PAGE_SIZE)),
   nextCursor: Schema.optional(Cursor),
@@ -80,8 +73,8 @@ const INBOX_EVENT = "org.social-harness/inbox.pending";
  * `server`. A request's `authInfo` names its owner in `extra.issuer` and
  * `extra.subject`: the owner `admits.issuer` and `admits.subject` name has
  * the server agent, and every other owner has a client, named from its
- * issuer and subject. `admits.norms` are the norms the server publishes,
- * which every agent reads with `read_norms`. A tool call runs on the
+ * issuer and subject. `norms` are the norms the server holds, whose
+ * documents every agent reads with `read_norms`. A tool call runs on the
  * runtime this effect ran in and is interrupted when its request is aborted.
  */
 export const mcpServerFactory = Effect.fn("serverFactory")(function* (
@@ -89,8 +82,8 @@ export const mcpServerFactory = Effect.fn("serverFactory")(function* (
   admits: {
     readonly issuer: string;
     readonly subject: string;
-    readonly norms?: PublishedNorms;
   },
+  norms?: PublishedNorms,
 ) {
   const run = Runtime.runPromise(yield* Effect.runtime());
 
@@ -135,7 +128,7 @@ export const mcpServerFactory = Effect.fn("serverFactory")(function* (
       { extensions: [events] },
     );
     const at = { mcp, server, run };
-    registerSharedTools(at, caller, admits.norms);
+    registerSharedTools(at, caller, norms);
     if (caller === server.name) {
       registerServerAgentTools(at);
     } else {
@@ -146,11 +139,8 @@ export const mcpServerFactory = Effect.fn("serverFactory")(function* (
   return factory;
 });
 
-/** The norms a server publishes, as `read_norms` shows them: each norm's document, and how an act of them is written. */
-interface PublishedNorms {
-  readonly documents: typeof normDocuments.Type;
-  readonly actSyntax: string;
-}
+/** What `read_norms` shows of the held norms: each norm's document, and how an act of them is written. */
+type PublishedNorms = Pick<HeldNorms, "documents" | "actSyntax">;
 
 /** What a request's tools are registered with: the SDK server of the request, the server whose operations they run, and the runner of their calls. */
 interface Registration {
@@ -242,7 +232,7 @@ function registerSharedTools(
             : "List the norms the server publishes, each with its complete document: which of client and server sends each act, when, and what each field holds. You are the client, and only a message that follows them is sent."
         } ${norms.actSyntax}`,
         input: noArguments,
-        output: Schema.Struct({ norms: normDocuments }),
+        output: Schema.Struct({ norms: Schema.Array(publishedNorm) }),
         readOnly: true,
       },
       () => Effect.succeed({ norms: norms.documents }),

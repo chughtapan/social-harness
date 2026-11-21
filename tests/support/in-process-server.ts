@@ -46,7 +46,7 @@ export const inProcessServer = Effect.fn("inProcessServer")(function* (
     AgentName.make("alice"),
     options.firewall ??
       makeFirewall({
-        structureCheck: options.norms?.structureCheck,
+        norms: options.norms,
         judge: options.provider && {
           provider: options.provider,
           minimumProbability: 0.8,
@@ -56,11 +56,11 @@ export const inProcessServer = Effect.fn("inProcessServer")(function* (
         historyLimit: options.historyLimit,
       }),
   ).pipe(Effect.orDie);
-  const factory = yield* mcpServerFactory(server, {
-    issuer,
-    subject: "alice",
-    norms: options.norms,
-  });
+  const factory = yield* mcpServerFactory(
+    server,
+    { issuer, subject: "alice" },
+    options.norms,
+  );
   const handler = createMcpHandler(factory);
   return {
     sql: database.sql,
