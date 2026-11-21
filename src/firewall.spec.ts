@@ -142,13 +142,11 @@ const alice = AgentName.make("alice");
 const bob = AgentName.make("bob");
 const notice = "Your message was not accepted.";
 const repair = "Ask for acceptance of the chosen proposal.";
-const registeredGuidance = "Wait for every participant to accept a proposal.";
-/** A rule with guidance and feedback of its own. */
+/** A rule with feedback of its own. */
 const proposal: TextRule = {
   id: "proposal-acceptance",
   applies: "both",
   text: "Availability is not acceptance.",
-  guidance: registeredGuidance,
   feedback: repair,
 };
 /** A rule the provider of `certain` always finds broken. */
@@ -242,7 +240,7 @@ function answer(choice: Choice, probability: number): Answer {
 const percent = fc.integer({ min: 50, max: 100 }).map((whole) => whole / 100);
 
 it.prop(
-  "follows an answer at or above the minimum probability, and takes one below it as unsure: an unsure draft is held with the rule's feedback, an unsure incoming message allowed with the rule's guidance",
+  "follows an answer at or above the minimum probability, and takes one below it as unsure: an unsure message is held as unresolved evidence with the rule's feedback",
   [fc.constantFrom(...directions), choices, percent, percent],
   ([direction, choice, probability, minimumProbability]) =>
     Effect.gen(function* () {
@@ -251,44 +249,27 @@ it.prop(
         provider: answering({ [proposal.id]: answer(choice, probability) }),
         minimumProbability,
       });
-      const unsure = probability < minimumProbability;
-      const violation = {
-        outgoing: {
-          kind: "refused",
-          reason: "rule-violation",
-          feedback: [repair],
-        },
-        incoming: {
-          kind: "withheld",
-          record: {
-            reason: "rule-violation",
-            decidedBy: [{ ruleId: proposal.id, advice: repair }],
+      const held = (reason: string) =>
+        ({
+          outgoing: { kind: "refused", reason, feedback: [repair] },
+          incoming: {
+            kind: "withheld",
+            record: {
+              reason,
+              decidedBy: [{ ruleId: proposal.id, advice: repair }],
+            },
           },
-        },
-      }[direction];
-      const expected = {
-        sure: { compliant: { kind: "allowed" }, violation }[choice],
-        outgoing: {
-          kind: "refused",
-          reason: "unresolved-evidence",
-          feedback: [repair],
-        },
-        incoming: {
-          kind: "allowed",
-          guidance: {
-            instructions: [
-              {
-                ruleId: proposal.id,
-                instruction: registeredGuidance,
-                uncertain: { choice, probability },
-              },
-            ],
-          },
-        },
-      }[unsure ? direction : "sure"];
+        })[direction];
+      const settled = {
+        compliant: { kind: "allowed" },
+        violation: held("rule-violation"),
+      }[choice];
 
-      expect(result).toMatchObject(expected);
-      expect("guidance" in result).toBe("guidance" in expected);
+      expect(result).toMatchObject(
+        probability < minimumProbability
+          ? held("unresolved-evidence")
+          : settled,
+      );
     }),
 );
 
@@ -308,31 +289,6 @@ it("holds a draft as unresolved evidence when its choice meets the minimum proba
       feedback: [repair],
     });
   }));
-
-it.each([
-  {
-    registered: "guidance",
-    advice: { guidance: registeredGuidance },
-    text: registeredGuidance,
-  },
-  { registered: "feedback", advice: { feedback: repair }, text: repair },
-])(
-  "advises on an unsure answer from a rule that registers only $registered with that text, as the feedback of a held draft and the guidance of an allowed message",
-  ({ advice, text }) =>
-    Effect.gen(function* () {
-      const setup = {
-        rules: [{ id: "only", applies: "both", text: "Be clear.", ...advice }],
-        provider: answering({ only: answer("compliant", 0.6) }),
-        minimumProbability: 0.8,
-      } as const;
-      expect(yield* check("outgoing", setup)).toMatchObject({
-        feedback: [text],
-      });
-      expect(yield* check("incoming", setup)).toMatchObject({
-        guidance: { instructions: [{ instruction: text }] },
-      });
-    }),
-);
 
 it.prop(
   "refuses a message that violates one rule whether the provider is sure or unsure of another rule, and whichever way it leans",
@@ -405,7 +361,7 @@ it.each([
 );
 
 it.each(directions)(
-  "asks the provider once about exactly the rules that apply to an %s message, stating each rule's text and none of its feedback or guidance",
+  "asks the provider once about exactly the rules that apply to an %s message, stating each rule's text and none of its feedback",
   (direction) =>
     Effect.gen(function* () {
       const rules = (["incoming", "outgoing", "both"] as const).map(
@@ -413,7 +369,6 @@ it.each(directions)(
           id: applies,
           applies,
           text: `Rule for ${applies} messages.`,
-          guidance: registeredGuidance,
           feedback: repair,
         }),
       );
@@ -436,7 +391,6 @@ it.each(directions)(
       expect(
         rules.filter(({ text }) => stated.includes(text)).map(({ id }) => id),
       ).toEqual([direction, "both"]);
-      expect(stated).not.toContain(registeredGuidance);
       expect(stated).not.toContain(repair);
     }),
 );

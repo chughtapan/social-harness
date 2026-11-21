@@ -9,7 +9,7 @@ read_when:
 The message firewall checks what an agent sends and receives against its
 owner's rules and agreed norms. It receives a message, its participants
 and conversation evidence. It returns a judgment, the rules that
-determined it, and the feedback or guidance the agent may receive.
+determined it, and the feedback the agent may receive.
 
 The firewall owns the message policy in force and its checks. The daemon supplies the message and evidence, applies the decision to
 sending or delivery, and saves the check. Storage preserves those records across restart.
@@ -39,8 +39,7 @@ rules. A reject or hold judgment refuses an outgoing send or withholds an
 incoming message. Findings combine in priority order:
 
 1. A settled rule violation rejects.
-2. Required missing evidence, unavailable checks or an unsure answer about an
-   outgoing draft hold.
+2. Required missing evidence, unavailable checks or an unsure answer hold.
 3. Otherwise, allow.
 
 Every active rule needs a finding. A pass cannot erase another rule's violation.
@@ -67,7 +66,7 @@ than the other answer's.
 | --- | --- | --- |
 | Settled violation | Refused, with the rule's feedback | Withheld; a `reply` rule answers the sender |
 | Settled compliant | Sent | Allowed |
-| Unsure | Held as unresolved evidence and refused with the rule's feedback, so the agent can revise it | Allowed with guidance |
+| Unsure | Held as unresolved evidence and refused with the rule's feedback, so the agent can revise it | Withheld as unresolved evidence |
 
 Settled violations retain
 their effect. Invalid output or provider failure is unavailable; required
@@ -76,12 +75,7 @@ accuracy of its checks in any language.
 
 ## Incoming messages
 
-Allowed peer content reaches the host unchanged. When the provider was unsure
-about a rule, the inbox entry carries guidance: an instruction that gives the
-rule's registered guidance, or its feedback when it has none, with the
-provider's choice and probability. Guidance never promotes peer text to an
-instruction or exposes the check's private evidence. An inbox
-entry the provider settled carries no guidance.
+Allowed peer content reaches the host unchanged.
 
 A text rule whose `action` is `reply` answers each message it withholds for a
 rule violation: the sender receives the rule's registered feedback text.
@@ -100,9 +94,6 @@ A refused draft creates no send. A revised invocation gets a new
 check. The daemon neither changes the draft nor sends substitutes or
 later approval. Accepted sends follow the
 [send outcome contract](../host/messaging.md#failed-sends).
-
-An allowed send carries no
-guidance.
 
 ## Evidence
 
@@ -154,7 +145,6 @@ The settings file's `messagePolicyFile` names a JSON file.
 | `id` | Required. |
 | `text` | Required. |
 | `applies` | Required: `incoming`, `outgoing` or `both`. |
-| `guidance` | Optional: the guidance for an allowed incoming message the provider was unsure about. |
 | `feedback` | Optional. |
 | `action` | Optional: `deny` or `reply`. |
 
@@ -184,8 +174,8 @@ rows identify authors. Daemon-generated failures have no row. Retained identitie
 | Reason | Rules |
 | --- | --- |
 | Rule violation | Violated rules. |
-| Unresolved evidence | Rules reporting unresolved evidence, including an unsure answer about an outgoing draft. |
-| Allowed | Rules the provider was unsure about for an incoming message, otherwise none. |
+| Unresolved evidence | Rules reporting unresolved evidence, including an unsure answer. |
+| Allowed | None. |
 
-Advice is a rule's registered feedback for a refusal, and its guidance, or feedback when it has none, for an allowed message.
+Advice is a rule's registered feedback.
 

@@ -34,7 +34,7 @@ of thing.
 | Word | Meaning |
 | --- | --- |
 | **inbox** | What one agent has received and may read. |
-| **inbox entry** | One message as the host reads it, with its **guidance**. |
+| **inbox entry** | One message as the host reads it. |
 | **cursor** | A place in an inbox, in the order its entries were allowed. A read returns the entries after it. |
 | **withheld** | Refused by the firewall; the agent never reads it. |
 
@@ -49,7 +49,6 @@ of thing.
 | **decision** | What the firewall tells the daemon to do: a message an agent sends is **allowed** or **refused**; a message it receives is **allowed** or **withheld**. |
 | **reason** | Why a message was refused or withheld: rule-violation, unresolved-evidence or check-unavailable. |
 | **feedback** | The text a rule gives the sender of a message it refuses. |
-| **guidance** | The **instructions** rules give the receiving agent alongside a message it may read. |
 | **evidence** | The conversation history a check may read. |
 
 ## Norms

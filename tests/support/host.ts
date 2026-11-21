@@ -22,7 +22,6 @@ const fields = Schema.decodeUnknownSync(
 /** An inbox entry as a host reads it. */
 const inboxEntry = Schema.Struct({
   message: Message,
-  guidance: Schema.optional(Schema.Unknown),
 });
 
 /** Reads an inbox entry from what the inbox event delivers. */

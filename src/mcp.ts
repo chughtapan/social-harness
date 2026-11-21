@@ -15,7 +15,7 @@ import { nodeWebhookSender } from "@modelcontextprotocol/server/ext/events/node"
 import { Effect, JSONSchema, Runtime, Schema } from "effect";
 import { createHash } from "node:crypto";
 import packageJson from "../package.json" with { type: "json" };
-import { checkRecordSchema, LocalGuidance } from "./firewall.js";
+import { checkRecordSchema } from "./firewall.js";
 import { AgentName, Message, MsgId, wellFormedString } from "./messages.js";
 import { type Failure, PAGE_SIZE, type Server } from "./server.js";
 
@@ -23,10 +23,7 @@ import { type Failure, PAGE_SIZE, type Server } from "./server.js";
 export const packageVersion: string = packageJson.version;
 
 /** An inbox entry as a tool result and an inbox event carry it. */
-const InboxEntry = Schema.Struct({
-  message: Message,
-  guidance: Schema.optional(LocalGuidance),
-});
+const InboxEntry = Schema.Struct({ message: Message });
 
 /** A place in an ordered read, as decimal text. A read returns what follows it. */
 const Cursor = Schema.String.pipe(Schema.pattern(/^\d{1,15}$/u)).annotations({
@@ -126,7 +123,7 @@ export const mcpServerFactory = Effect.fn("serverFactory")(function* (
     webhookSender: nodeWebhookSender(),
   });
   events.registerEvent(INBOX_EVENT, {
-    description: "An inbox entry: its message and any guidance.",
+    description: "An inbox entry: its message.",
     payloadSchema: standard(InboxEntry),
     check: (...[{ principal, maxEvents, signal }, , cursor]) =>
       run(inboxOccurrences(server, principal, { cursor, maxEvents }), {
@@ -211,7 +208,7 @@ function registerSharedTools(
     "receive_messages",
     {
       description:
-        "Receive inbox entries in order, each with its message and any guidance. Keep the nextCursor of every result and pass it as cursor on the next call to receive the entries after it. Without cursor the call starts from now: it returns no earlier entries. Pass wait to wait up to that many seconds when no entry follows the cursor; the call returns as soon as one becomes readable, or with no entries when the wait ends.",
+        "Receive inbox entries in order, each with its message. Keep the nextCursor of every result and pass it as cursor on the next call to receive the entries after it. Without cursor the call starts from now: it returns no earlier entries. Pass wait to wait up to that many seconds when no entry follows the cursor; the call returns as soon as one becomes readable, or with no entries when the wait ends.",
       input: Schema.Struct({
         cursor: Schema.optional(Cursor),
         wait: Schema.optional(
@@ -275,7 +272,7 @@ function registerServerAgentTools(at: Registration) {
     "read_conversation",
     {
       description:
-        "Read your conversation with one client: the messages you sent and those you received, each with any guidance. A page holds the oldest messages after cursor; pass nextCursor as cursor, with the same client, until it is absent.",
+        "Read your conversation with one client: the messages you sent and those you received. A page holds the oldest messages after cursor; pass nextCursor as cursor, with the same client, until it is absent.",
       input: Schema.Struct({
         with: Schema.propertySignature(AgentName).annotations({
           description: "The client's name.",

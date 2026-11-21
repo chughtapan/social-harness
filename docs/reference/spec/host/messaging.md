@@ -55,7 +55,7 @@ contents, ordering and replay.
 ## Reading history
 
 History lists conversations and returns the messages retained for the agent.
-The content and any guidance stay the same across restart.
+The content stays the same across restart.
 
 Listing returns every client's name in `clients`. History returns `records`, oldest
 first, at most 50 to a page. Pass `nextCursor` as
@@ -81,15 +81,4 @@ Its text is the failure's message, written for the model to act on. Its
 structured content holds the failure's fields, among them its `reason`.
 A firewall refusal includes its check, rule and
 feedback. Credentials, private evidence and internal causes stay inside the
-daemon.
-
-## Local guidance
-
-An inbox entry carries [firewall guidance](../firewall/message-policy.md#incoming-messages)
-when the local firewall was unsure whether its message keeps to a rule: the rule's text
-for the guidance, and the provider's choice and probability.
-
-The guidance is the entry's `guidance`, apart from the peer content in its
-`message`.
-
-Check ids grant no approval, management or system-role authority.
+daemon. Check ids grant no approval, management or system-role authority.

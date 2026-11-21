@@ -21,7 +21,6 @@ import {
   type CheckedMessage,
   type CheckRecord,
   checkRecordSchema,
-  LocalGuidance,
 } from "./firewall.js";
 import { AgentName, MsgId } from "./messages.js";
 
@@ -48,10 +47,9 @@ export class DatabasePreparationError extends Data.TaggedError(
  * tables serves a database another login prepared. A database that holds
  * other tables is refused. `messages` holds each message once, in the order
  * it was stored: `client` names its conversation, `from_server` says which of
- * the two agents wrote it, and `allowed` is false for one withheld from the
- * server agent. `guidance` is what the firewall gave the server agent with
- * it, and `checked_at` is when the firewall checked it. `firewall_checks`
- * holds the record of each check.
+ * the two agents wrote it, `allowed` is false for one withheld from the
+ * server agent, and `checked_at` is when the firewall checked it.
+ * `firewall_checks` holds the record of each check.
  */
 export const prepareTables = Effect.fn("prepareDatabase")(
   function* (sql: SqlClient.SqlClient) {
@@ -75,7 +73,6 @@ export const prepareTables = Effect.fn("prepareDatabase")(
             text TEXT NOT NULL,
             reply_to TEXT,
             allowed BOOLEAN NOT NULL,
-            guidance TEXT,
             checked_at BIGINT,
             UNIQUE(client, from_server, msg_id)
           )`,
@@ -110,7 +107,6 @@ class MessageRow extends Model.Class<MessageRow>("MessageRow")({
   text: Schema.String,
   replyTo: Schema.NullOr(MsgId),
   allowed: Schema.Boolean,
-  guidance: Schema.NullOr(Schema.parseJson(LocalGuidance)),
   checkedAt: Schema.NullOr(Schema.NumberFromString),
 }) {}
 
@@ -258,13 +254,12 @@ function storedOf(row: MessageRow, serverAgent: AgentName): StoredMessage {
       text: row.text,
     },
     allowed: row.allowed,
-    guidance: row.guidance ?? undefined,
     checkedAt: row.checkedAt ?? undefined,
   };
 }
 
 function rowOf(
-  { message, allowed, guidance, checkedAt }: CheckedMessage,
+  { message, allowed, checkedAt }: CheckedMessage,
   serverAgent: AgentName,
 ): typeof MessageRow.insert.Type {
   const fromServer = message.author === serverAgent;
@@ -275,7 +270,6 @@ function rowOf(
     text: message.text,
     replyTo: message.replyToMsgId ?? null,
     allowed,
-    guidance: guidance ?? null,
     checkedAt: checkedAt ?? null,
   };
 }

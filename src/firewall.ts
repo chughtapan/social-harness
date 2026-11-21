@@ -30,9 +30,9 @@ const firewallRefusalReasonSchema = Schema.Literal(
 export type FirewallRefusalReason = typeof firewallRefusalReasonSchema.Type;
 
 /**
- * One text rule: the prose a decision provider judges, the guidance it gives
- * the receiving agent and the feedback it gives the sender of a message it
- * refuses. Validation requires nonempty text without restricting its
+ * One text rule: the prose a decision provider judges and the feedback it
+ * gives the sender of a message it refuses. Validation requires nonempty
+ * text without restricting its
  * language. An incoming message that violates a rule whose `action` is `reply`
  * is withheld, and its sender receives the rule's feedback text as a message;
  * `deny`, the default, withholds it silently.
@@ -41,7 +41,6 @@ export type FirewallRefusalReason = typeof firewallRefusalReasonSchema.Type;
  */
 export class TextRule extends Schema.Class<TextRule>("TextRule")({
   id: identifier,
-  guidance: Schema.optional(Schema.NonEmptyString),
   feedback: Schema.optional(Schema.NonEmptyString),
   action: Schema.optional(Schema.Literal("deny", "reply")),
   text: Schema.NonEmptyString,
@@ -52,8 +51,8 @@ export class TextRule extends Schema.Class<TextRule>("TextRule")({
  * What one completed check concluded, as its caller saves it, without message
  * content: the decision applied to a message the agent sent (`allowed` or
  * `refused`) or received (`allowed` or `withheld`), and its peer. `time` is
- * Unix milliseconds. `decidedBy[].advice` contains the rule's feedback for a
- * refused or withheld message, or its guidance for an allowed one.
+ * Unix milliseconds. `decidedBy[].advice` contains the feedback of each rule
+ * that decided a refused or withheld message.
  * `checkedRuleIds` lists the rules the check judged: a rule that does not
  * apply to the message's direction is not listed.
  */
@@ -77,38 +76,13 @@ export const checkRecordSchema = Schema.Struct({
 export type CheckRecord = typeof checkRecordSchema.Type;
 
 /**
- * The guidance a host reads with one message: its check, whose opaque id
- * conveys no approval or lookup authority, and an instruction for each rule
- * the provider could not settle for the allowed incoming message: the rule's
- * registered text and the choice the provider leaned to, with its probability.
- */
-// eslint-disable-next-line agent-code-guard/no-exported-brand-constructor -- The firewall owns this grammar, which the server stores and puts in its inbox entry schema.
-export const LocalGuidance = Schema.Struct({
-  checkId: Schema.String.pipe(Schema.pattern(/^chk_[a-f0-9]{64}$/u)),
-  instructions: Schema.Array(
-    Schema.Struct({
-      ruleId: Schema.NonEmptyTrimmedString,
-      instruction: Schema.NonEmptyString,
-      uncertain: Schema.Struct({
-        choice: Schema.NonEmptyTrimmedString,
-        probability: Schema.Number.pipe(Schema.between(0, 1)),
-      }),
-    }),
-  ),
-});
-/** @useDeclaredType */
-export type LocalGuidance = typeof LocalGuidance.Type;
-
-/**
  * A message with this firewall's check of it: whether it allowed the
- * message, the guidance it gave the agent that reads it, and the time of the
- * check in epoch milliseconds. A message this firewall has no check of has no
- * time and counts as not allowed.
+ * message, and the time of the check in epoch milliseconds. A message this
+ * firewall has no check of has no time and counts as not allowed.
  */
 export interface CheckedMessage {
   readonly message: Message;
   readonly allowed: boolean;
-  readonly guidance?: LocalGuidance;
   readonly checkedAt?: number;
 }
 
@@ -161,14 +135,11 @@ export type StructureCheck = (
 >;
 
 /**
- * A message the agent may send or read. `guidance` is for the agent that
- * reads an incoming message the provider was unsure about. `record` is what
- * the caller saves of the decision; an agent without a message policy has
- * none.
+ * A message the agent may send or read. `record` is what the caller saves of
+ * the decision; an agent without a message policy has none.
  */
 interface Allowed {
   readonly kind: "allowed";
-  readonly guidance?: LocalGuidance;
   readonly record?: CheckRecord;
 }
 
@@ -239,11 +210,9 @@ interface Refusal extends Pick<CheckRecord, "decidedBy" | "checkedRuleIds"> {
  * messages; that check's refusal refuses the message. The text rules that
  * apply to the message's direction then judge it: the owner's rules and those
  * the structure check gives it. Each answer complies, violates or is unsure.
- * A violation refuses. An unsure answer refuses an outgoing draft as
- * unresolved evidence, so its agent can revise it, and allows an incoming
- * message with the rule's guidance. History cut at the byte limit is
- * unresolved evidence too. A provider that gives no usable answer makes the
- * check unavailable. A refusal of a message the structure check passed
+ * A violation refuses. An unsure answer refuses as unresolved evidence, and
+ * so does history cut at the byte limit. A provider that gives no usable
+ * answer makes the check unavailable. A refusal of a message the structure check passed
  * carries that check's detail. A withheld message is answered as that check
  * phrases the reply, else with the feedback of the `reply` rules it broke,
  * else, when it broke a rule, with the notice.
@@ -338,9 +307,11 @@ function refusedByStructure(
 }
 
 /**
- * What a check concludes from the provider's answers. `gap` says the history
- * was cut at the byte limit; `detail` and `replyTo` are what the structure
- * check gave of the message it passed.
+ * What a check concludes from the provider's answers. A violation refuses.
+ * An unsure answer holds the message as unresolved evidence, and so does a
+ * `gap`: history cut at the byte limit. Otherwise the message is allowed.
+ * `detail` and `replyTo` are what the structure check gave of the message it
+ * passed.
  */
 function conclude(
   checked: Checked,
@@ -353,24 +324,33 @@ function conclude(
     readonly notice?: string;
   },
 ): Decision {
-  const { checkedRuleIds, detail } = judged;
-  const { reason, deciding } = verdict(
-    checked.direction,
-    judged.answers,
-    judged.gap,
-  );
-  if (reason === "eligible") {
-    return allowed(checked, deciding, checkedRuleIds);
+  const { answers, checkedRuleIds, detail } = judged;
+  const violated = answers.filter((answer) => answer.violates);
+  const deciding =
+    violated.length === 0
+      ? answers.filter((answer) => answer.unsure)
+      : violated;
+  if (deciding.length === 0 && !judged.gap) {
+    return {
+      kind: "allowed",
+      record: recordOf(checked, mintCheckId(), "allowed", {
+        reason: "eligible",
+        decidedBy: [],
+        checkedRuleIds,
+      }),
+    };
   }
+  const reason =
+    violated.length === 0 ? "unresolved-evidence" : "rule-violation";
   const decidedBy = deciding.map(({ rule }) => ({
     ruleId: rule.id,
-    advice: rule.feedback ?? rule.guidance,
+    advice: rule.feedback,
   }));
   const feedback = decidedBy.flatMap(({ advice }) => advice ?? []);
   const reply =
     judged.replyTo?.(
       feedback.join(" ") || `The semantic policy check returned ${reason}.`,
-    ) ?? textReply(reason === "rule-violation" ? deciding : [], judged.notice);
+    ) ?? textReply(violated, judged.notice);
   return unallowed(checked, {
     reason,
     decidedBy,
@@ -379,33 +359,6 @@ function conclude(
     detail,
     reply,
   });
-}
-
-/**
- * What the answers decide and which of them decided it. A violation refuses.
- * An unsure answer holds an outgoing draft, and a history cut at the byte
- * limit holds either way. Otherwise the message is eligible, and the unsure
- * answers give an incoming one its guidance.
- */
-function verdict(
-  direction: Direction,
-  answers: ReadonlyArray<Answer<TextRule>>,
-  gap: boolean,
-): {
-  readonly reason: "eligible" | Refusal["reason"];
-  readonly deciding: ReadonlyArray<Answer<TextRule>>;
-} {
-  const violated = answers.filter((answer) => answer.violates);
-  if (violated.length !== 0) {
-    return { reason: "rule-violation", deciding: violated };
-  }
-  const unsure = answers.filter((answer) => answer.unsure);
-  if (direction === "outgoing" && unsure.length !== 0) {
-    return { reason: "unresolved-evidence", deciding: unsure };
-  }
-  return gap
-    ? { reason: "unresolved-evidence", deciding: [] }
-    : { reason: "eligible", deciding: unsure };
 }
 
 /**
@@ -424,37 +377,6 @@ function textReply(violated: ReadonlyArray<Answer<TextRule>>, notice?: string) {
     return replies.join("\n");
   }
   return violated.length === 0 ? undefined : notice;
-}
-
-/**
- * The result of a check that allows its message, with its record. The rules
- * the provider was unsure of give the guidance of an incoming message.
- */
-function allowed(
-  checked: Checked,
-  unsure: ReadonlyArray<Answer<TextRule>>,
-  checkedRuleIds: readonly string[],
-): Allowed {
-  const checkId = mintCheckId();
-  const advised = unsure.map(({ rule, choice, probability }) => ({
-    ruleId: rule.id,
-    advice: rule.guidance ?? rule.feedback,
-    uncertain: { choice, probability },
-  }));
-  const instructions = advised.flatMap(({ ruleId, advice, uncertain }) =>
-    advice === undefined ? [] : [{ ruleId, instruction: advice, uncertain }],
-  );
-  return {
-    kind: "allowed",
-    ...(instructions.length === 0
-      ? {}
-      : { guidance: { checkId, instructions } }),
-    record: recordOf(checked, checkId, "allowed", {
-      reason: "eligible",
-      decidedBy: advised.map(({ ruleId, advice }) => ({ ruleId, advice })),
-      checkedRuleIds,
-    }),
-  };
 }
 
 /** What a refusal is in the direction of its check: a draft's send fails, and a peer's message is withheld. */

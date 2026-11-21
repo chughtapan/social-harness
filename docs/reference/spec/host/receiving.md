@@ -8,8 +8,7 @@ read_when:
 
 A host reads its inbox in order from a cursor it keeps. The daemon stores no
 read position. This applies
-to every host. The daemon retains the entries and their
-guidance in history. Hosts own subsequent processing, scheduling and replies.
+to every host. The daemon retains the entries in history. Hosts own subsequent processing, scheduling and replies.
 
 ## Inbox entries
 
@@ -17,7 +16,7 @@ An inbox entry holds a peer message.
 The daemon processes incoming work even without a subscription.
 
 [Incoming policy](../firewall/message-policy.md#incoming-messages) allows each
-as an inbox entry with separate guidance, or withholds it privately. Checks
+as an inbox entry, or withholds it privately. Checks
 follow conversation order and continue past what is withheld.
 
 An allowed entry takes the next place in the agent's
@@ -49,7 +48,7 @@ Subscriptions do not survive a daemon restart.
 
 `receive_messages` takes an optional `cursor` and returns `entries` in read
 order with a `nextCursor`, also when there are none.
-Each entry contains its `message` and optional guidance.
+Each entry contains its `message`.
 Pages hold at most 50 entries.
 
 An optional `wait`, in seconds, lets a read that finds no entry after its cursor

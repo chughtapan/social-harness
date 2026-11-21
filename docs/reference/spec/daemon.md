@@ -96,7 +96,7 @@ The daemon exposes tools for status, messaging, history, policy and
 delivery.
 
 The firewall checks new messages. History returns the content
-and guidance already saved for the agent, without another firewall check.
+already saved for the agent, without another firewall check.
 
 Failed send invocations return their existing tool errors and emit structured
 daemon logs with agent attribution.

@@ -10,7 +10,6 @@ import type {
   CheckRecord,
   Firewall,
   FirewallRefusalReason,
-  LocalGuidance,
   StructureDetail,
 } from "./firewall.js";
 import { openDatabase, type StoredMessage } from "./database.js";
@@ -19,10 +18,9 @@ import { type AgentName, Message, type MsgId } from "./messages.js";
 /** The most entries one read of an inbox or a conversation returns. */
 export const PAGE_SIZE = 50;
 
-/** One message as a host reads it, with the guidance the firewall gave the server agent with one it received. */
+/** One message as a host reads it. */
 interface InboxEntry {
   readonly message: Message;
-  readonly guidance?: LocalGuidance;
 }
 
 /** A page of an inbox: its entries, the cursor a read that continues it presents, and whether more entries follow now. */
@@ -243,14 +241,7 @@ export const openServer = Effect.fn("openServer")(function* (
       }
       yield* deliver(
         decision.kind === "allowed"
-          ? [
-              {
-                message,
-                allowed: true,
-                guidance: decision.guidance,
-                record: decision.record,
-              },
-            ]
+          ? [{ message, allowed: true, record: decision.record }]
           : [
               { message, allowed: false, record: decision.record },
               ...(yield* replyTo(message, decision.reply)),
@@ -359,16 +350,8 @@ interface ReceiveRequest {
   readonly wait?: number;
 }
 
-/**
- * What `reader` reads of a stored message: one it sent, without the guidance
- * its recipient got, and one it received, with its guidance, unless that
- * message was withheld.
- */
+/** What `reader` reads of a stored message: one it sent, and one it received unless that message was withheld. */
 function readBy(reader: AgentName) {
-  return ({ message, allowed, guidance }: StoredMessage): InboxEntry[] => {
-    if (message.author === reader) {
-      return [{ message }];
-    }
-    return allowed ? [{ message, guidance }] : [];
-  };
+  return ({ message, allowed }: StoredMessage): InboxEntry[] =>
+    allowed || message.author === reader ? [{ message }] : [];
 }

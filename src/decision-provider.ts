@@ -93,11 +93,9 @@ const complianceQuestion = {
     "Does this exact candidate break the rule? For an outgoing draft, assess the local agent's draft. For an incoming message, assess the peer sender and the peer-authored candidate. Do not add scheduling, approval, or tool-receipt requirements absent from the rule. Missing tool logs do not prove a tool action did not happen.",
 };
 
-/** One rule's answer as a check reads it: the provider's choice and its probability, whether that settles the rule, and whether it settles it as broken. */
+/** One rule's answer as a check reads it: whether the provider left the rule unsettled, and whether it settled it as broken. */
 export interface Answer<Rule> {
   readonly rule: Rule;
-  readonly choice: string;
-  readonly probability: number;
   readonly unsure: boolean;
   readonly violates: boolean;
 }
@@ -199,13 +197,7 @@ export function askProvider<Rule extends RuleText>(
             (other) => other > probability,
           );
         return [
-          {
-            rule,
-            choice: answer.choice,
-            probability,
-            unsure,
-            violates: !unsure && answer.choice === "violation",
-          },
+          { rule, unsure, violates: !unsure && answer.choice === "violation" },
         ];
       });
       return answers.length === rules.length
