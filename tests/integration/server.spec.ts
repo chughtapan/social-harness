@@ -133,6 +133,7 @@ it(
             Effect.as(path),
           );
       yield* write("nested/norms/ping.lisp", describedNorm);
+      yield* write("nested/norms/notes.json", "not a norm document");
       yield* write("broken/ping.lisp", "(norm ping :unheard x)");
       const refusals: ReadonlyArray<
         readonly [Readonly<Record<string, unknown>>, string]

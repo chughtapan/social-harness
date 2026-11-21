@@ -22,19 +22,18 @@ import {
 
 /**
  * A message as the structure check reads it: its id, the id of the message
- * it replies to, which member sent it, its text, and the time of its check
- * in milliseconds.
+ * it replies to, which member sent it and its text. `at` is the time of the
+ * check of it, in milliseconds. A stored message that was never checked has
+ * none and is replayed as no act, and the message under check takes the time
+ * given beside it.
  */
 export interface Sent {
   readonly id: string;
   readonly replyTo?: string;
   readonly role: Role;
   readonly text: string;
-  readonly at: number;
+  readonly at?: number;
 }
-
-/** A stored message. One that was never checked has no time and is replayed as no act. */
-export type Stored = Omit<Sent, "at"> & { readonly at?: number };
 
 /**
  * One text rule: a requirement in prose that a decision provider judges a
@@ -65,9 +64,6 @@ export type Judgement =
       readonly protocol?: unknown;
     };
 
-/** Reads a message's text as an act, or says why it is none. */
-type ActReader = (text: string) => Either.Either<Act, string>;
-
 /** Why a message fails its norm: the stage that failed, and the feedback its sender reads. */
 interface NormProblem {
   readonly stage: "structural" | "protocol";
@@ -75,52 +71,57 @@ interface NormProblem {
   readonly feedback: string;
 }
 
-/** One earlier act that fits the protocol, with the act its text states. */
-interface ReplayedAct extends Sent {
+type Checked<Value> = Either.Either<Value, NormProblem>;
+
+/** A message with the time of its check. */
+type Timed = Sent & { readonly at: number };
+
+/** An act that fits: the act, the norm it is judged under and the form that norm declares for it. */
+interface Fitted {
   readonly act: Act;
+  readonly norm: Norm;
+  readonly form: Form;
 }
 
 /**
- * What the firewall's checks say of a conversation. `known` gives
- * the performative of each message a reply may name. `instance` is the
- * instance in progress: its norm, the message that set each current fact,
- * how often each act was sent, and the reply reference of every message that
- * belongs to it.
+ * Reads a text as an act and fits it to its form, under the norm of the
+ * instance in progress or, when none is, the held norm the act names. It
+ * also gives the norm the text was judged under, which names a refusal's
+ * rule: a text that is no act is judged under the instance's norm, and under
+ * none when no instance is in progress.
+ */
+type Fit = (
+  text: string,
+  instance?: Norm,
+) => { readonly norm?: Norm; readonly fitted: Checked<Fitted> };
+
+/** One earlier act that fits the protocol, with the message that states it. */
+type AllowedAct = Fitted & Timed;
+
+/**
+ * What replaying a conversation finds. `known` gives the performative of
+ * each stored message a reply may name. `instance` is the instance in
+ * progress: its norm, the act that set each fact that holds, how often each
+ * performative was sent, its acts in order, and the reply reference of every
+ * message that belongs to it.
  */
 interface Progress {
   readonly known: ReadonlyMap<string, string | undefined>;
   readonly instance?: {
     readonly norm: Norm;
-    readonly facts: ReadonlyMap<string, ReplayedAct>;
+    readonly facts: ReadonlyMap<string, AllowedAct>;
     readonly counts: ReadonlyMap<string, number>;
-    readonly acts: readonly ReplayedAct[];
+    readonly acts: readonly AllowedAct[];
     readonly members: ReadonlyMap<string, string | undefined>;
   };
 }
 
 type Instance = NonNullable<Progress["instance"]>;
-type Checked<Value> = Either.Either<Value, NormProblem>;
-
-/** An act read from a message, with the norm it is held to. */
-interface HeldAct {
-  readonly act: Act;
-  readonly norm: Norm;
-}
-
-/** A held act whose fields fit `form`, the form its norm declares for it. */
-interface FittedAct extends HeldAct {
-  readonly form: Form;
-}
-
-/** The norms a server holds, with the reader of its messages. */
-interface Held {
-  readonly norms: readonly Norm[];
-  readonly readAct: ActReader;
-}
 
 /**
  * The structure check of a server that holds `norms` and reads each
- * message's text with `readAct`. It replays the earlier messages to find the
+ * message's text with `readAct`. It judges `sent` at the time `now`, after
+ * the `earlier` messages of its conversation: it replays them to find the
  * instance in progress, then reads the message as an act of that instance
  * or, when none is, of the norm it names. An act that fits passes with a
  * text rule for each described field it states. Any other message is refused
@@ -129,49 +130,37 @@ interface Held {
  */
 export function structureCheck(
   norms: readonly Norm[],
-  readAct: ActReader,
-): (sent: Sent, earlier: readonly Stored[]) => Judgement {
-  return (sent, earlier) =>
-    norms.length === 0
-      ? { kind: "passed", textRules: [] }
-      : checkMessage({ norms, readAct }, sent, earlier);
-}
-
-/** What the structure check says of `sent`, after the `earlier` messages of its conversation. */
-function checkMessage(
-  held: Held,
-  sent: Sent,
-  earlier: readonly Stored[],
-): Judgement {
-  const progress = replay(held, earlier);
-  const read = readHeldAct(progress, held, sent.text);
-  return Either.match(
-    Either.flatMap(read, (act) => fitAct(progress, act, sent)),
-    {
-      onLeft: (problem) =>
-        refusal(progress, problem, Either.getOrUndefined(read)?.norm),
-      onRight: (fitted) => pass(progress, fitted),
-    },
-  );
+  readAct: (text: string) => Either.Either<Act, string>,
+): (sent: Sent, earlier: readonly Sent[], now: number) => Judgement {
+  const fit: Fit = (text, instance) => {
+    const read = Either.mapLeft(readAct(text), structural);
+    const named = Either.getOrUndefined(read)?.norm;
+    const norm = instance ?? norms.find(({ name }) => name === named);
+    return { norm, fitted: Either.flatMap(read, (act) => fitForm(act, norm)) };
+  };
+  return (sent, earlier, now) => {
+    if (norms.length === 0) {
+      return { kind: "passed", textRules: [] };
+    }
+    const progress = replay(fit, earlier);
+    const { norm, allowed } = judge(progress, fit, { ...sent, at: now });
+    return Either.match(allowed, {
+      onLeft: (problem) => refusal(problem, norm),
+      onRight: (act) => pass(progress, act),
+    });
+  };
 }
 
 /**
  * The refusal of a message with `problem`, under a rule named for the stage
- * that failed and the norm the message was judged under: `selected`, the
- * norm it was read as an act of, or the norm of the instance in progress
- * when its text is no act. A message judged under no norm has the word
- * `norm` there.
+ * that failed and `norm`, the norm the message was judged under. A message
+ * judged under no norm has the word `norm` there.
  */
-function refusal(
-  progress: Progress,
-  problem: NormProblem,
-  selected?: Norm,
-): Judgement {
-  const judgedUnder = selected ?? progress.instance?.norm;
+function refusal(problem: NormProblem, norm?: Norm): Judgement {
   return {
     kind: "refused",
     reason: problem.reason,
-    ruleId: `${judgedUnder?.name ?? "norm"}-${problem.stage}`,
+    ruleId: `${norm?.name ?? "norm"}-${problem.stage}`,
     feedback: problem.feedback,
   };
 }
@@ -181,7 +170,7 @@ function refusal(
  * states, which holds the field's text to its description, and what the
  * decision provider reads of the instance.
  */
-function pass(progress: Progress, { act, norm, form }: FittedAct): Judgement {
+function pass(progress: Progress, { act, norm, form }: Fitted): Judgement {
   return {
     kind: "passed",
     textRules: describedFields(form).flatMap(
@@ -208,19 +197,22 @@ function pass(progress: Progress, { act, norm, form }: FittedAct): Judgement {
 
 /**
  * Replays a conversation's earlier messages in order under the held norms.
- * Only a checked message that reads as an act and fits the protocol at the
- * time of its check advances the instance.
+ * Only a checked message that passes every step at the time of its check
+ * has its effects. Every message is known afterwards, and may join the
+ * instance in progress.
  */
-function replay(held: Held, earlier: readonly Stored[]): Progress {
+function replay(fit: Fit, earlier: readonly Sent[]): Progress {
   const known = new Map<string, string | undefined>();
   let progress: Progress = { known };
   for (const stored of earlier) {
     const act =
       stored.at === undefined
         ? undefined
-        : replayed(progress, held, { ...stored, at: stored.at });
-    if (act !== undefined) {
-      progress = applyAct(progress, act);
+        : Either.getOrUndefined(
+            judge(progress, fit, { ...stored, at: stored.at }).allowed,
+          );
+    if (act !== undefined && stored.at !== undefined) {
+      progress = applyAct(progress, { ...act, ...stored, at: stored.at });
     }
     progress = joinInstance(progress, stored);
     known.set(stored.id, act?.act.performative);
@@ -228,48 +220,19 @@ function replay(held: Held, earlier: readonly Stored[]): Progress {
   return progress;
 }
 
-/** The act of an earlier message, judged again at the time of its check, or nothing when it does not pass. */
-function replayed(progress: Progress, held: Held, sent: Sent) {
-  return readHeldAct(progress, held, sent.text).pipe(
-    Either.flatMap((act) => fitAct(progress, act, sent)),
-    Either.map((fitted) => ({ ...fitted, ...sent })),
-    Either.getOrUndefined,
-  );
-}
-
 /**
- * Reads `text` as an act of the instance in progress or, when none is, of
- * the held norm it names.
+ * Judges one message by every step: whether its text is an act that fits its
+ * form, and whether the conversation's progress permits that act at the time
+ * of its check. It also gives the norm the message was judged under.
  */
-function readHeldAct(
-  progress: Progress,
-  { norms, readAct }: Held,
-  text: string,
-): Checked<HeldAct> {
-  return readAct(text).pipe(
-    Either.mapLeft(structural),
-    Either.flatMap((act) => {
-      const norm =
-        progress.instance?.norm ?? norms.find(({ name }) => name === act.norm);
-      return norm === undefined
-        ? Either.left(
-            structural("The act's norm is not one this server holds."),
-          )
-        : Either.right({ act, norm });
-    }),
-  );
-}
-
-/** The act of `sent` with its form, once its fields fit the form and the conversation's progress permits it at the time of its check. */
-function fitAct(
-  progress: Progress,
-  held: HeldAct,
-  sent: Sent,
-): Checked<FittedAct> {
-  return Either.flatMap(fitForm(held.norm, held.act), (form) => {
-    const fitted = { ...held, form };
-    return Either.map(checkProtocol(progress, fitted, sent), () => fitted);
-  });
+function judge(progress: Progress, fit: Fit, sent: Timed) {
+  const { norm, fitted } = fit(sent.text, progress.instance?.norm);
+  return {
+    norm,
+    allowed: Either.flatMap(fitted, (act) =>
+      Either.map(checkProtocol(progress, act, sent), () => act),
+    ),
+  };
 }
 
 /**
@@ -279,8 +242,8 @@ function fitAct(
  */
 function checkProtocol(
   progress: Progress,
-  fitted: FittedAct,
-  sent: Sent,
+  fitted: Fitted,
+  sent: Timed,
 ): Either.Either<void, NormProblem> {
   const { act, norm, form } = fitted;
   const { role } = sent;
@@ -332,14 +295,14 @@ function checkProtocol(
  * as the recipient of the message that set the form's fact. A conversation
  * has two members, so that recipient is the member who did not send it.
  */
-function senderPermitted({ by }: Form, { role }: Sent, anchor?: ReplayedAct) {
+function senderPermitted({ by }: Form, { role }: Sent, anchor?: AllowedAct) {
   return by.kind === "recipient"
     ? anchor !== undefined && anchor.role !== role
     : by.roles.includes(role);
 }
 
 /** A message that replies into the instance belongs to it, whether or not it advanced the instance, so a later reply may name it. */
-function joinInstance(progress: Progress, { id, replyTo }: Stored) {
+function joinInstance(progress: Progress, { id, replyTo }: Sent) {
   const instance = progress.instance;
   if (instance === undefined) {
     return progress;
@@ -412,7 +375,7 @@ function checkDelay(
 
 function checkRelations(
   instance: Instance,
-  { form, act }: FittedAct,
+  { form, act }: Fitted,
   chain: ReadonlySet<string>,
   invalid: NormProblem,
 ): Either.Either<void, NormProblem> {
@@ -428,10 +391,7 @@ function checkRelations(
 }
 
 /** A conversation's progress once `entry`, an allowed act, has its effects: it ends the instance, or opens one when none is in progress and then clears and sets facts. */
-function applyAct(
-  progress: Progress,
-  entry: ReplayedAct & FittedAct,
-): Progress {
+function applyAct(progress: Progress, entry: AllowedAct): Progress {
   const { norm, form } = entry;
   if (form.ends) {
     return { ...progress, instance: undefined };
@@ -556,13 +516,19 @@ function referencedAct(
 }
 
 /**
- * The form `norm` declares for `act`, once the act names that norm and its
+ * `act` with the norm it is judged under and the form that norm declares for
+ * it, once the server holds a norm for it, the act names that norm and its
  * fields fit the form: every required field stated, every stated field
  * declared, and each value of its field's type and within its bounds. The
  * refusal names every field at fault.
  */
-function fitForm(norm: Norm, act: Act): Checked<Form> {
+function fitForm(act: Act, norm?: Norm): Checked<Fitted> {
   const { performative, fields } = act;
+  if (norm === undefined) {
+    return Either.left(
+      structural("The act's norm is not one this server holds."),
+    );
+  }
   const form = norm.forms.find((entry) => entry.performative === performative);
   if (norm.name !== act.norm) {
     return Either.left(
@@ -598,7 +564,7 @@ function fitForm(norm: Norm, act: Act): Checked<Form> {
       ),
   ];
   return failures.length === 0
-    ? Either.right(form)
+    ? Either.right({ act, norm, form })
     : Either.left(structural(failures.join(" ")));
 }
 

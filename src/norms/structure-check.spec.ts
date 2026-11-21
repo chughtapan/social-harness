@@ -5,7 +5,7 @@ import { expect, it } from "vitest";
 import type { Role } from "./norm.js";
 import { compileNorm } from "./compiler.js";
 import { readAct } from "./lisp.js";
-import { type Stored, structureCheck } from "./structure-check.js";
+import { type Sent, structureCheck } from "./structure-check.js";
 
 const client: Role = "client";
 const server: Role = "server";
@@ -61,7 +61,7 @@ const unknownId = "unknown";
  */
 function attempt(
   norm: Norm,
-  history: Stored[],
+  history: Sent[],
   taken: {
     readonly author: Role;
     readonly text: string;
@@ -88,9 +88,9 @@ let minted = 0;
 function message(
   author: Role,
   text: string,
-  reference: Pick<Stored, "replyTo"> = {},
+  reference: Pick<Sent, "replyTo"> = {},
   id?: string,
-): Stored {
+): Sent {
   minted += 1;
   return { id: id ?? `minted-${minted}`, ...reference, role: author, text };
 }
@@ -98,11 +98,11 @@ function message(
 /** What the structure check of a server that holds `norm` says of `candidate` at `now`, after `history`. */
 function check(
   norm: Norm,
-  candidate: Stored,
-  history: readonly Stored[] = [],
+  candidate: Sent,
+  history: readonly Sent[] = [],
   now = 0,
 ) {
-  return structureCheck([norm], readAct)({ ...candidate, at: now }, history);
+  return structureCheck([norm], readAct)(candidate, history, now);
 }
 
 /** The message id of step `index` of a walk. */
@@ -151,10 +151,7 @@ interface Model {
 }
 
 /** The message a step replies to: none, one no history holds, or an earlier step's. */
-function replyOf(
-  history: readonly Stored[],
-  taken: Step,
-): Option.Option<string> {
+function replyOf(history: readonly Sent[], taken: Step): Option.Option<string> {
   if (taken.reply === "none") {
     return Option.none();
   }
@@ -238,7 +235,7 @@ function advanceModel(
 it("permits exactly the acts the turn rules allow, whoever sends them and whichever message they reply to", () => {
   fc.assert(
     fc.property(fc.array(step, { maxLength: 12 }), (steps) => {
-      const history: Stored[] = [];
+      const history: Sent[] = [];
       const model: Model = {
         open: false,
         members: new Map(),
@@ -285,7 +282,7 @@ it("permits an act with a delay and a limit only once its fact is that old and w
 (act poll :by (client server) :when held :max ${maximum}
   :after held :delay wait :unit seconds)
 `);
-        const history: Stored[] = [];
+        const history: Sent[] = [];
         const start = 1_000;
         const due = start + wait * 1000;
         attempt(timed, history, {
@@ -631,7 +628,7 @@ it("holds a list to a subset of an earlier list, and a string to one of an earli
       fc.array(item, { minLength: 1, maxLength: 3 }),
       item,
       (offered, kept, picked) => {
-        const history: Stored[] = [];
+        const history: Sent[] = [];
         const send = (author: Role, text: string) =>
           attempt(picking, history, {
             author,

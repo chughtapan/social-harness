@@ -12,13 +12,7 @@ import {
 import { Data, Effect, type Redacted, Schedule, Schema, Stream } from "effect";
 import { createHash } from "node:crypto";
 import type { Message } from "./messages.js";
-import type { Role } from "./norms/index.js";
-
-/** What a rule gives the provider: the prose it judges, under the rule's id. */
-interface RuleText {
-  readonly id: string;
-  readonly text: string;
-}
+import type { Role, TextRule } from "./norms/index.js";
 
 /**
  * What the decision provider is asked: the state and one question per rule,
@@ -152,7 +146,7 @@ const DEFAULT_HISTORY_LIMIT = 256;
  * when another choice is more probable. A question left without one of its
  * choices fails the request, and so does asking without a judge.
  */
-export function askProvider<Rule extends RuleText>(
+export function askProvider<Rule extends TextRule>(
   rules: readonly Rule[],
   candidate: Candidate,
   judge?: Judge,
@@ -286,7 +280,7 @@ export function jevDecisionProvider(options: {
 }
 
 /** The state of one provider request, as JSON text. */
-function providerState(rules: readonly RuleText[], candidate: Candidate) {
+function providerState(rules: readonly TextRule[], candidate: Candidate) {
   const window = historyWindow(
     candidate.earlier,
     candidate.historyLimit ?? DEFAULT_HISTORY_LIMIT,

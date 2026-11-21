@@ -50,7 +50,8 @@ Subscriptions do not survive a daemon restart.
 `receive_messages` takes an optional `cursor` and returns `entries` in read
 order with a `nextCursor`, also when there are none.
 Each entry contains its `message`.
-Pages hold at most 50 entries.
+Pages hold at most 50 entries, and `hasMore` says whether more entries follow
+the page now.
 
 An optional `wait`, in seconds, lets a read that finds no entry after its cursor
 wait for one: it returns as soon as an entry becomes readable, or no entries when

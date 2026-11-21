@@ -26,12 +26,13 @@ import {
   Effect,
   Layer,
   Option,
+  Order,
   Schema,
   Struct,
 } from "effect";
 // eslint-disable-next-line agent-code-guard/prefer-effect-platform -- The MCP SDK's Node handler serves on a node:http server.
 import { createServer } from "node:http";
-import { dirname, resolve } from "node:path";
+import { dirname, join, resolve } from "node:path";
 import { type Admission, admission, authentication } from "./authentication.js";
 import {
   decisionProviderSetting,
@@ -40,7 +41,7 @@ import {
 import { makeFirewall } from "./firewall.js";
 import { mcpServerFactory, packageVersion } from "./mcp.js";
 import { AgentName } from "./messages.js";
-import { loadNorms } from "./norms/index.js";
+import { holdNorms } from "./norms/index.js";
 import { openServer } from "./server.js";
 
 /**
@@ -67,6 +68,29 @@ const settingsFile = Schema.Struct({
   maximumHistoryRecords: Schema.optional(
     Schema.Int.pipe(Schema.between(1, 1024)),
   ),
+});
+
+/**
+ * The norms of every `.lisp` document directly in `directory`, read in name
+ * order, or the refusal of a directory that cannot be read or whose
+ * documents are no norms.
+ */
+const readNorms = Effect.fn("readNorms")(function* (directory: string) {
+  const filesystem = yield* FileSystem.FileSystem;
+  return yield* filesystem.readDirectory(directory).pipe(
+    Effect.flatMap((files) =>
+      Effect.forEach(
+        files.filter((file) => file.endsWith(".lisp")).sort(Order.string),
+        (file) => filesystem.readFileString(join(directory, file)),
+        { concurrency: 1 },
+      ),
+    ),
+    Effect.mapError(({ message }) => message),
+    Effect.flatMap(holdNorms),
+    Effect.mapError((reason) =>
+      refused(`The configured norms directory is invalid: ${reason}`),
+    ),
+  );
 });
 
 /**
@@ -98,7 +122,7 @@ const loadSettings = Effect.fn("loadSettings")(function* () {
   const norms =
     file.normsDirectory === undefined
       ? undefined
-      : yield* loadNorms(resolve(settingsDirectory, file.normsDirectory));
+      : yield* readNorms(resolve(settingsDirectory, file.normsDirectory));
   if (norms?.hasTextRules === true && file.decisionProvider === undefined) {
     return yield* refused(
       "The configured norms describe string or list fields, which need a decisionProvider to judge them",
@@ -289,7 +313,6 @@ NodeRuntime.runMain(
     Effect.catchTag(
       "SettingsError",
       "IssuerError",
-      "NormsConfigurationError",
       "DatabasePreparationError",
       ({ message }) => exitUnsuccessfully(message),
     ),

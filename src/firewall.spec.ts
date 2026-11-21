@@ -489,11 +489,12 @@ describe("Firewall structure check", () => {
 
       expect(judged).toMatchObject([
         [
-          { role: "client", text: "Hello", at: 0 },
+          { role: "client", text: "Hello" },
           [
             { role: "client", text: "Hello", at: 1 },
             { role: "server", text: "Hi" },
           ],
+          0,
         ],
       ]);
       expect(

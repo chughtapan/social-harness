@@ -128,8 +128,9 @@ export function makeFirewall(applies: {
       const checked = { message, sender, now };
       const structure = yield* Effect.sync(() =>
         norms.check(
-          { ...readable(message), role: sender, at: now },
+          { ...readable(message), role: sender },
           storedBefore(earlier, message, sender),
+          now,
         ),
       ).pipe(Effect.withSpan("structureCheck"));
       if (structure.kind === "refused") {

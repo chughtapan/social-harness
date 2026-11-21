@@ -9,7 +9,7 @@ import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { expect, it as vitestIt } from "vitest";
 import { compileNorm } from "./compiler.js";
-import { loadNorms } from "./index.js";
+import { holdNorms } from "./index.js";
 
 const shipped = fileURLToPath(
   new URL("../../config/norms/examples/", import.meta.url),
@@ -191,52 +191,36 @@ const documentOf = (name: string) =>
 (act ask :by client :starts true :ends true)
 `;
 
-/** A directory holding `files`, by name. */
-function directoryWith(files: Readonly<Record<string, string>>) {
-  return Effect.gen(function* () {
-    const fs = yield* FileSystem.FileSystem;
-    const directory = yield* fs.makeTempDirectoryScoped({
-      prefix: "sharness-norms-",
-    });
-    yield* Effect.forEach(
-      Object.entries(files),
-      ([file, text]) => fs.writeFileString(join(directory, file), text),
-      { concurrency: 1 },
+vitestIt(
+  "holds the norms of several documents, and publishes each with its name, its description and its whole document",
+  () => {
+    const held = Either.getOrThrow(
+      holdNorms([documentOf("second"), documentOf("first")]),
     );
-    return directory;
-  });
-}
 
-it("loads the norm of every .lisp document directly in a directory, and nothing of its other files", () =>
-  Effect.gen(function* () {
-    const directory = yield* directoryWith({
-      "b.lisp": documentOf("second"),
-      "a.lisp": documentOf("first"),
-      "notes.json": "not a norm document",
-    });
+    expect(held.published).toEqual(
+      ["second", "first"].map((name) => ({
+        name,
+        description: "",
+        document: documentOf(name),
+      })),
+    );
+    expect(held.hasTextRules).toBe(false);
+  },
+);
 
-    const loaded = yield* loadNorms(directory);
-
-    expect(loaded.documents.map((norm) => norm.name)).toEqual([
-      "first",
-      "second",
-    ]);
-  }).pipe(Effect.provide(NodeContext.layer)));
-
-it("refuses a directory that holds a document that does not compile or two documents of one norm", () =>
-  Effect.forEach(
-    [
-      { "a.lisp": documentOf("ask"), "b.lisp": documentOf("ask") },
-      { "a.lisp": documentOf("ask").replace(":by client", ":by absent") },
-      { "a.lisp": `${documentOf("ask")}(` },
-    ],
-    (files: Readonly<Record<string, string>>) =>
-      Effect.gen(function* () {
-        const directory = yield* directoryWith(files);
-
-        const failure = yield* Effect.flip(loadNorms(directory));
-
-        expect(failure._tag).toBe("NormsConfigurationError");
-      }),
-    { concurrency: 1, discard: true },
-  ).pipe(Effect.provide(NodeContext.layer)));
+vitestIt.each([
+  ["two of one norm", [documentOf("ask"), documentOf("ask")]],
+  [
+    "one that names a sender that is neither role",
+    [documentOf("ask").replace(":by client", ":by absent")],
+  ],
+  ["one that is not closed", [`${documentOf("ask")}(`]],
+])("holds no norms when the documents include %s", (...[, documents]) => {
+  expect(
+    Either.match(holdNorms(documents), {
+      onLeft: () => "none",
+      onRight: () => "held",
+    }),
+  ).toBe("none");
+});

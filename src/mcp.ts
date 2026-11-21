@@ -16,18 +16,24 @@ import { Effect, JSONSchema, Runtime, Schema } from "effect";
 import { createHash } from "node:crypto";
 import packageJson from "../package.json" with { type: "json" };
 import { checkRecordSchema } from "./firewall.js";
-import { AgentName, Message, MsgId, wellFormedString } from "./messages.js";
-import { type HeldNorms, publishedNorm } from "./norms/index.js";
-import { type Failure, PAGE_SIZE, type Server } from "./server.js";
+import { AgentName, MsgId, wellFormedString } from "./messages.js";
+import { ACT_SYNTAX, type HeldNorms, publishedNorm } from "./norms/index.js";
+import {
+  ConversationPage,
+  Cursor,
+  type Failure,
+  InboxEntry,
+  InboxPage,
+  PAGE_SIZE,
+  SentMessage,
+  type Server,
+} from "./server.js";
 
 /** The version of this package, as MCP clients and telemetry read it. */
 export const packageVersion: string = packageJson.version;
 
-/** An inbox entry as a tool result and an inbox event carry it. */
-const InboxEntry = Schema.Struct({ message: Message });
-
-/** A place in an ordered read, as decimal text. A read returns what follows it. */
-const Cursor = Schema.String.pipe(Schema.pattern(/^\d{1,15}$/u)).annotations({
+/** The cursor a read takes: the `nextCursor` an earlier result gave. */
+const cursorArgument = Schema.optional(Cursor).annotations({
   description: "the nextCursor of an earlier result",
 });
 
@@ -47,13 +53,6 @@ const sentFields = {
       "The message id of the message this replies to. Omit it when opening a new instance of a norm.",
   }),
 };
-
-const SendResult = Schema.Struct({ id: MsgId });
-
-const conversationPage = Schema.Struct({
-  records: Schema.Array(InboxEntry).pipe(Schema.maxItems(PAGE_SIZE)),
-  nextCursor: Schema.optional(Cursor),
-});
 
 /**
  * The longest a receive_messages call may wait. It stays under the time after
@@ -83,7 +82,7 @@ export const mcpServerFactory = Effect.fn("serverFactory")(function* (
     readonly issuer: string;
     readonly subject: string;
   },
-  norms?: PublishedNorms,
+  norms?: HeldNorms,
 ) {
   const run = Runtime.runPromise(yield* Effect.runtime());
 
@@ -139,9 +138,6 @@ export const mcpServerFactory = Effect.fn("serverFactory")(function* (
   return factory;
 });
 
-/** What `read_norms` shows of the held norms: each norm's document, and how an act of them is written. */
-type PublishedNorms = Pick<HeldNorms, "documents" | "actSyntax">;
-
 /** What a request's tools are registered with: the SDK server of the request, the server whose operations they run, and the runner of their calls. */
 interface Registration {
   readonly mcp: McpServer;
@@ -181,7 +177,7 @@ function inboxOccurrences(
 function registerSharedTools(
   at: Registration,
   caller: AgentName,
-  norms?: PublishedNorms,
+  norms?: HeldNorms,
 ) {
   const { server } = at;
   register(
@@ -201,9 +197,9 @@ function registerSharedTools(
     "receive_messages",
     {
       description:
-        "Receive inbox entries in order, each with its message. Keep the nextCursor of every result and pass it as cursor on the next call to receive the entries after it. Without cursor the call starts from now: it returns no earlier entries. Pass wait to wait up to that many seconds when no entry follows the cursor; the call returns as soon as one becomes readable, or with no entries when the wait ends.",
+        "Receive inbox entries in order, each with its message. Keep the nextCursor of every result and pass it as cursor on the next call to receive the entries after it. Without cursor the call starts from now: it returns no earlier entries. hasMore says more entries follow the page now. Pass wait to wait up to that many seconds when no entry follows the cursor; the call returns as soon as one becomes readable, or with no entries when the wait ends.",
       input: Schema.Struct({
-        cursor: Schema.optional(Cursor),
+        cursor: cursorArgument,
         wait: Schema.optional(
           Schema.Number.pipe(
             Schema.positive(),
@@ -213,10 +209,7 @@ function registerSharedTools(
           }),
         ),
       }),
-      output: Schema.Struct({
-        entries: Schema.Array(InboxEntry).pipe(Schema.maxItems(PAGE_SIZE)),
-        nextCursor: Cursor,
-      }),
+      output: InboxPage,
       readOnly: true,
     },
     (request) => server.receive(caller, request),
@@ -230,12 +223,12 @@ function registerSharedTools(
           caller === server.name
             ? "List the norms this server publishes, each with its complete document: which of client and server sends each act, when, and what each field holds. You are the server, and the same norms hold your messages and your clients'."
             : "List the norms the server publishes, each with its complete document: which of client and server sends each act, when, and what each field holds. You are the client, and only a message that follows them is sent."
-        } ${norms.actSyntax}`,
+        } ${ACT_SYNTAX}`,
         input: noArguments,
         output: Schema.Struct({ norms: Schema.Array(publishedNorm) }),
         readOnly: true,
       },
-      () => Effect.succeed({ norms: norms.documents }),
+      () => Effect.succeed({ norms: norms.published }),
     );
   }
 }
@@ -256,7 +249,7 @@ function registerServerAgentTools(at: Registration) {
         }),
         ...sentFields,
       }),
-      output: SendResult,
+      output: SentMessage,
     },
     ({ to, ...sent }) => server.send(server.name, to, sent),
   );
@@ -270,9 +263,9 @@ function registerServerAgentTools(at: Registration) {
         with: Schema.propertySignature(AgentName).annotations({
           description: "The client's name.",
         }),
-        cursor: Schema.optional(Cursor),
+        cursor: cursorArgument,
       }),
-      output: conversationPage,
+      output: ConversationPage,
       readOnly: true,
     },
     (input) => server.conversationWith(input.with, input.cursor),
@@ -316,7 +309,7 @@ function registerClientTools(at: Registration, client: AgentName) {
       description:
         "Send a message to the server agent. Returns id, the message id. A refused message was not sent: its error gives the feedback of the rules it broke, or says the server is unavailable, when the same message may be sent again later. Read the reply with receive_messages.",
       input: Schema.Struct(sentFields),
-      output: SendResult,
+      output: SentMessage,
     },
     (sent) => server.send(client, client, sent),
   );
@@ -326,8 +319,8 @@ function registerClientTools(at: Registration, client: AgentName) {
     {
       description:
         "Read the messages you sent and received in your conversation with the server agent. Follow nextCursor until absent.",
-      input: Schema.Struct({ cursor: Schema.optional(Cursor) }),
-      output: conversationPage,
+      input: Schema.Struct({ cursor: cursorArgument }),
+      output: ConversationPage,
       readOnly: true,
     },
     ({ cursor }) => server.conversation(client, cursor),

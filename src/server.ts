@@ -5,35 +5,58 @@
  * has one conversation, with the server agent, so its name identifies it.
  */
 
-import { Data, Duration, Effect, PubSub, Queue, type Redacted } from "effect";
+import {
+  Data,
+  Duration,
+  Effect,
+  PubSub,
+  Queue,
+  type Redacted,
+  Schema,
+} from "effect";
 import type {
   CheckRecord,
   Firewall,
   FirewallRefusalReason,
 } from "./firewall.js";
 import { openDatabase, type StoredMessage } from "./database.js";
-import { type AgentName, Message, type MsgId } from "./messages.js";
+import { type AgentName, Message, MsgId } from "./messages.js";
 
 /** The most entries one read of an inbox or a conversation returns. */
 export const PAGE_SIZE = 50;
 
+/** A place in an ordered read, as decimal text. A read returns what follows it. */
+export const Cursor = Schema.String.pipe(Schema.pattern(/^\d{1,15}$/u));
+
 /** One message as a host reads it. */
-interface InboxEntry {
-  readonly message: Message;
-}
+// eslint-disable-next-line agent-code-guard/no-exported-brand-constructor -- The inbox event carries an entry as it stands, and needs its schema to publish it.
+export const InboxEntry: Schema.Schema<
+  { readonly message: Message },
+  { readonly message: Schema.Schema.Encoded<typeof Message> }
+> = Schema.Struct({ message: Message });
+
+const pageOfEntries = Schema.Array(InboxEntry).pipe(Schema.maxItems(PAGE_SIZE));
 
 /** A page of an inbox: its entries, the cursor a read that continues it presents, and whether more entries follow now. */
-interface InboxPage {
-  readonly entries: readonly InboxEntry[];
-  readonly nextCursor: string;
-  readonly hasMore: boolean;
-}
+// eslint-disable-next-line agent-code-guard/no-exported-brand-constructor -- The receive_messages tool returns a page as it stands, and needs its schema to publish it.
+export const InboxPage = Schema.Struct({
+  entries: pageOfEntries,
+  nextCursor: Cursor,
+  hasMore: Schema.Boolean,
+});
+type InboxPage = typeof InboxPage.Type;
 
 /** A page of a conversation, with the cursor of the next page when there is one. */
-interface ConversationPage {
-  readonly records: readonly InboxEntry[];
-  readonly nextCursor?: string;
-}
+// eslint-disable-next-line agent-code-guard/no-exported-brand-constructor -- The read_conversation tool returns a page as it stands, and needs its schema to publish it.
+export const ConversationPage = Schema.Struct({
+  records: pageOfEntries,
+  nextCursor: Schema.optional(Cursor),
+});
+type ConversationPage = typeof ConversationPage.Type;
+
+/** A sent message, by the id it was stored under. */
+// eslint-disable-next-line agent-code-guard/no-exported-brand-constructor -- The send_message tool returns this as it stands, and needs its schema to publish it.
+export const SentMessage = Schema.Struct({ id: MsgId });
 
 /** A failed operation: what a model reads of it in `message`, and its reason with the failure's other fields, which a host reads. */
 export interface Failure {
@@ -56,7 +79,7 @@ export interface Server {
     author: AgentName,
     client: AgentName,
     sent: { readonly text: string; readonly replyToMsgId?: MsgId },
-  ) => Effect.Effect<{ readonly id: MsgId }, Failure>;
+  ) => Effect.Effect<typeof SentMessage.Type, Failure>;
   /** A page of `reader`'s inbox after `cursor`. Without a cursor the read starts after the newest message and returns none. */
   readonly inbox: (
     reader: AgentName,
