@@ -1,6 +1,9 @@
 /** @file A decision provider's answers, for the tests of the firewall and of what sits on it. */
 
-import type { DecisionRequest, DecisionResponse } from "../../src/firewall.js";
+import type {
+  DecisionRequest,
+  DecisionResponse,
+} from "../../src/decision-provider.js";
 
 /** One answer exactly as a provider reports it. */
 export type Answer = DecisionResponse["answers"][string];

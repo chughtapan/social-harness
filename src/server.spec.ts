@@ -17,7 +17,8 @@ import {
   Struct,
 } from "effect";
 import { expect } from "vitest";
-import type { DecisionProvider, Firewall, MessagePolicy } from "./firewall.js";
+import type { DecisionProvider } from "./decision-provider.js";
+import type { Firewall, MessagePolicy } from "./firewall.js";
 import { openTestDatabase } from "../tests/support/database.js";
 import { answersTo } from "../tests/support/decision-provider.js";
 import {
@@ -30,8 +31,16 @@ import {
   decisionState,
   inProcessServer,
 } from "../tests/support/in-process-server.js";
+import { prepareTables } from "./database.js";
 import { holdNorms } from "./norms/index.js";
-import { prepareTables } from "./server.js";
+
+/** A firewall that allows every message a client sends and decides each of the server agent's with `decide`. */
+const decidingOutgoing = (
+  decide: () => ReturnType<Firewall["check"]>,
+): Firewall => ({
+  check: (direction) =>
+    direction === "outgoing" ? decide() : Effect.succeed({ kind: "allowed" }),
+});
 
 it("gives the server agent its tools, and a status result that names the agent", () =>
   Effect.gen(function* () {
@@ -122,14 +131,13 @@ it("answers a failed call with the failure's message and its fields", () =>
     ];
     const pending = [...refusals];
     const server = yield* inProcessServer({
-      firewall: {
-        checkOutgoing: () =>
-          Effect.map(Effect.fromNullable(pending.shift()), (next) => ({
-            kind: "refused" as const,
-            ...Struct.omit(next, "reason", "refusal"),
-            reason: next.refusal,
-          })).pipe(Effect.orDie),
-      },
+      firewall: decidingOutgoing(() =>
+        Effect.map(Effect.fromNullable(pending.shift()), (next) => ({
+          kind: "refused" as const,
+          ...Struct.omit(next, "reason", "refusal"),
+          reason: next.refusal,
+        })).pipe(Effect.orDie),
+      ),
     });
     const alice = yield* server.signInAs("alice");
     const bob = yield* server.signInAs("bob");
@@ -165,10 +173,9 @@ it("answers a failed call with the failure's message and its fields", () =>
 it("answers a call that dies without the defect's text", () =>
   Effect.gen(function* () {
     const server = yield* inProcessServer({
-      firewall: {
-        checkOutgoing: () =>
-          Effect.dieMessage("PRIVATE relation does not exist"),
-      },
+      firewall: decidingOutgoing(() =>
+        Effect.dieMessage("PRIVATE relation does not exist"),
+      ),
     });
     const alice = yield* server.signInAs("alice");
     const bob = yield* server.signInAs("bob");
@@ -192,21 +199,18 @@ it("interrupts only the aborted call, whose conversation the next send then uses
     const interrupted = yield* Deferred.make<undefined>();
     let first = true;
     const server = yield* inProcessServer({
-      firewall: {
-        checkOutgoing: () =>
-          Effect.suspend(() => {
-            if (!first) {
-              return Effect.succeed({ kind: "allowed" as const });
-            }
-            first = false;
-            return Deferred.succeed(entered, undefined).pipe(
-              Effect.zipRight(Effect.never),
-              Effect.onInterrupt(() =>
-                Deferred.succeed(interrupted, undefined),
-              ),
-            );
-          }),
-      },
+      firewall: decidingOutgoing(() =>
+        Effect.suspend(() => {
+          if (!first) {
+            return Effect.succeed({ kind: "allowed" as const });
+          }
+          first = false;
+          return Deferred.succeed(entered, undefined).pipe(
+            Effect.zipRight(Effect.never),
+            Effect.onInterrupt(() => Deferred.succeed(interrupted, undefined)),
+          );
+        }),
+      ),
     });
     const alice = yield* server.signInAs("alice");
     const bob = yield* server.signInAs("bob");
@@ -578,7 +582,7 @@ it.prop(
 
 /** A server whose firewall withholds exactly the messages whose text is `withheld`, with Alice and two clients signed in. */
 const withholdingByText = Effect.gen(function* () {
-  const decide: Firewall["checkIncoming"] = (message) =>
+  const check: Firewall["check"] = (...[, message]) =>
     Effect.succeed(
       message.text === "withheld"
         ? {
@@ -597,7 +601,7 @@ const withholdingByText = Effect.gen(function* () {
         : { kind: "allowed" },
     );
   const server = yield* inProcessServer({
-    firewall: { checkIncoming: decide },
+    firewall: { check },
   });
   const alice = yield* server.signInAs("alice");
   const clients = {

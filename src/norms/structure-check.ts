@@ -7,7 +7,7 @@
 import { Effect, Either, Struct } from "effect";
 import type { Message } from "../messages.js";
 import {
-  type EarlierMessage,
+  type CheckedMessage,
   type StructureCheck,
   TextRule,
 } from "../firewall.js";
@@ -22,7 +22,7 @@ import {
 } from "./norm.js";
 
 /** One act the firewall allowed that fits the protocol: its message, the time of that check and the act its text states. */
-interface CheckedMessage {
+interface ReplayedAct {
   readonly message: Message;
   readonly at: number;
   readonly act: Act;
@@ -41,9 +41,9 @@ interface ProtocolView {
     readonly norm: Norm;
     readonly initiator: string;
     readonly participant: string;
-    readonly facts: ReadonlyMap<string, CheckedMessage>;
+    readonly facts: ReadonlyMap<string, ReplayedAct>;
     readonly counts: ReadonlyMap<string, number>;
-    readonly acts: readonly CheckedMessage[];
+    readonly acts: readonly ReplayedAct[];
     readonly references: ReadonlyMap<string, string | undefined>;
   };
 }
@@ -85,7 +85,7 @@ export function structureCheck(installed: readonly Norm[]): StructureCheck {
 function checkMessage(
   installed: readonly Norm[],
   message: Message,
-  earlier: readonly EarlierMessage[],
+  earlier: readonly CheckedMessage[],
   now: number,
 ): Result {
   const view = projectProtocol(installed, earlier);
@@ -174,7 +174,7 @@ function refusalReply(norm?: Norm) {
  */
 function projectProtocol(
   installed: readonly Norm[],
-  earlier: readonly EarlierMessage[],
+  earlier: readonly CheckedMessage[],
 ): ProtocolView {
   const referenceActs = new Map<string, string | undefined>();
   let view: ProtocolView = { referenceActs };
@@ -207,7 +207,7 @@ function projectProtocol(
 function replayed(
   view: ProtocolView,
   installed: readonly Norm[],
-  { message, checkedAt, allowed }: EarlierMessage,
+  { message, checkedAt, allowed }: CheckedMessage,
 ) {
   return !allowed || checkedAt === undefined
     ? undefined
@@ -310,7 +310,7 @@ function senderPermitted(
   form: MessageForm,
   author: string,
   role?: string,
-  anchor?: CheckedMessage,
+  anchor?: ReplayedAct,
 ) {
   if (role === undefined) {
     return false;
@@ -443,7 +443,7 @@ function checkRelations(
 /** The view once `entry`, an act the protocol permits, is applied: it opens an instance, changes the one in progress or ends it. */
 function advance(
   view: ProtocolView,
-  entry: CheckedMessage & FittedAct,
+  entry: ReplayedAct & FittedAct,
 ): ProtocolView {
   const { norm, form } = entry;
   if (form.ends) {

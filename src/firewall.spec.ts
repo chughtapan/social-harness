@@ -27,7 +27,10 @@ import {
   type DecisionProvider,
   DecisionProviderError,
   type DecisionRequest,
-  type EarlierMessage,
+  type Direction,
+} from "./decision-provider.js";
+import {
+  type CheckedMessage,
   loadMessagePolicy,
   makeFirewall,
   type StructureCheck,
@@ -35,7 +38,6 @@ import {
 } from "./firewall.js";
 import { AgentName, Message } from "./messages.js";
 
-type Direction = "incoming" | "outgoing";
 const directions = ["incoming", "outgoing"] as const;
 
 /** What a check that does not allow its message concludes: a draft is refused, a peer's message withheld. */
@@ -180,7 +182,7 @@ interface Setup {
   readonly provider?: DecisionProvider;
   readonly minimumProbability?: number;
   readonly timeoutMilliseconds?: number;
-  readonly earlier?: readonly EarlierMessage[];
+  readonly earlier?: readonly CheckedMessage[];
   readonly notice?: string;
   readonly structureCheck?: StructureCheck;
   readonly historyLimit?: number;
@@ -197,16 +199,15 @@ const fromBob = Message.create({
 function check(direction: Direction, setup: Setup = {}) {
   const firewall = firewallOf(setup);
   return Effect.gen(function* () {
-    return direction === "outgoing"
-      ? yield* firewall.checkOutgoing(
-          yield* Message.create({
+    const message =
+      direction === "outgoing"
+        ? yield* Message.create({
             author: alice,
             recipient: bob,
             text: "The private record says the owner is away.",
-          }),
-          setup.earlier ?? [],
-        )
-      : yield* firewall.checkIncoming(yield* fromBob, setup.earlier ?? []);
+          })
+        : yield* fromBob;
+    return yield* firewall.check(direction, message, setup.earlier ?? []);
   });
 }
 
@@ -502,12 +503,11 @@ it("allows every message of an agent without a message policy, with nothing to s
     const firewall = makeFirewall({});
     const message = yield* fromBob;
 
-    expect(yield* firewall.checkIncoming(message, [])).toEqual({
-      kind: "allowed",
-    });
-    expect(yield* firewall.checkOutgoing(message, [])).toEqual({
-      kind: "allowed",
-    });
+    for (const direction of directions) {
+      expect(yield* firewall.check(direction, message, [])).toEqual({
+        kind: "allowed",
+      });
+    }
   }));
 
 it.prop(
@@ -757,7 +757,7 @@ function checkWithJev(respond: () => ReturnType<typeof globalThis.fetch>) {
       secret,
     );
     const result = yield* makeFirewall({ policy })
-      .checkIncoming(yield* fromBob, [])
+      .check("incoming", yield* fromBob, [])
       .pipe(Effect.provideService(FetchHttpClient.Fetch, fetch));
     return { result, requests };
   });

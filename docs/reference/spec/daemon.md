@@ -35,7 +35,7 @@ The settings file is a JSON document that takes these properties. Unknown proper
 | --- | --- |
 | `port` | Required integer from 1 to 65535 |
 | `host` | Required listener address |
-| `authentication` | Required OAuth configuration, below |
+| `authentication` | Required: the OAuth configuration below, or `"development"` |
 | `serverAgent` | Required `name` and `subject` of the [server agent](./modes.md#server-agent-and-clients) |
 | `messagePolicyFile` | Optional policy file, resolved relative to the settings file |
 | `normsDirectory` | Optional [norms directory](./norms/norms.md#scope-and-installation), resolved relative to the settings file. Needs `messagePolicyFile`, and initial norms with English rules need its `decisionProvider` |
@@ -62,6 +62,19 @@ that runs unattended presents a token the identity provider issued to it, and
 the daemon treats it like any other.
 A token is checked when its request arrives; hosts renew their
 authorization before the next request.
+
+### Development authentication
+
+`"authentication": "development"` verifies no caller. A request acts as the
+owner its bearer token names: `Authorization: Bearer alice` signs in the owner
+whose subject is `alice`, under the issuer `development`, and a request
+without a bearer token is refused. Whoever can reach the listener can act as
+any agent, the server agent included, so the daemon prints a warning at every
+start in this mode. Use it only on a machine or network you control.
+
+The daemon checks no Host header in this mode. It refuses a request that
+carries an Origin header unless the origin is on the same machine, so a site
+the operator visits cannot act through their browser.
 
 ## Firewalls
 

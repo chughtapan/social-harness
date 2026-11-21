@@ -16,8 +16,9 @@ import {
   makeFirewall,
   type MessagePolicy,
 } from "../../src/firewall.js";
+import { mcpServerFactory } from "../../src/mcp.js";
 import { AgentName } from "../../src/messages.js";
-import { serverFactory } from "../../src/server.js";
+import { openServer } from "../../src/server.js";
 import { openTestDatabase } from "./database.js";
 import { callTool, type SignedIn } from "./host.js";
 
@@ -40,8 +41,8 @@ export const decisionState = Schema.decodeUnknownSync(
 /**
  * A server whose server agent is named `alice` and owned by the owner
  * `alice`, behind a firewall with the given policy, norms, notice and history
- * limit, or one that allows every message. `firewall` replaces operations of
- * that firewall. `signInAs` gives an MCP connection as the agent of an owner:
+ * limit, or one that allows every message. `firewall` replaces that
+ * firewall. `signInAs` gives an MCP connection as the agent of an owner:
  * the owner a name stands for, or the owner given.
  */
 export const inProcessServer = Effect.fn("inProcessServer")(function* (
@@ -50,25 +51,26 @@ export const inProcessServer = Effect.fn("inProcessServer")(function* (
     readonly norms?: HeldNorms;
     readonly notice?: string;
     readonly historyLimit?: number;
-    readonly firewall?: Partial<Firewall>;
+    readonly firewall?: Firewall;
   } = {},
 ) {
   const database = yield* openTestDatabase();
-  const factory = yield* serverFactory(database.url, {
-    issuer,
-    subject: "alice",
-    name: AgentName.make("alice"),
-    firewall: {
-      ...makeFirewall({
+  const server = yield* openServer(
+    database.url,
+    AgentName.make("alice"),
+    options.firewall ??
+      makeFirewall({
         policy: options.policy,
         historyLimit: options.historyLimit,
         notice: options.notice,
         structureCheck: options.norms?.structureCheck,
       }),
-      ...options.firewall,
-    },
+  ).pipe(Effect.orDie);
+  const factory = yield* mcpServerFactory(server, {
+    issuer,
+    subject: "alice",
     norms: options.norms?.documents,
-  }).pipe(Effect.orDie);
+  });
   const handler = createMcpHandler(factory);
   return {
     sql: database.sql,

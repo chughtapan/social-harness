@@ -13,6 +13,8 @@
  * - `signInAs(owner)`: an MCP connection as the owner's agent, and the agent
  *   `status` reports for it. The owner `SERVER_AGENT_OWNER` is the server
  *   agent's, and any other is a client's.
+ * - `signInNamed(owner)`: the same, with the owner's name itself as the
+ *   bearer token, as development authentication admits it.
  *
  * A suite drives the signed-in agents as their hosts do, through the official
  * MCP client and the tool helpers of `tests/support/host.ts`. `received`
@@ -43,7 +45,7 @@ import { type ChildProcess, spawn } from "node:child_process";
 import { createServer } from "node:net";
 import { basename, dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
-import { prepareTables } from "../../src/server.js";
+import { prepareTables } from "../../src/database.js";
 import { openTestDatabase, restrictedLogin } from "../support/database.js";
 import { callTool, decodeInboxEntry, type SignedIn } from "../support/host.js";
 import { issuerFixture, requiredScope } from "../support/issuer.js";
@@ -357,6 +359,7 @@ export const sharedServer = Effect.fn("sharedServer")(function* () {
     configure,
     signInAs: (owner: string) =>
       Effect.flatMap(bearer(owner), (presented) => signIn(endpoint, presented)),
+    signInNamed: (owner: string) => signIn(endpoint, Redacted.make(owner)),
   };
 }, Effect.provide(NodeFileSystem.layer));
 

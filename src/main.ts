@@ -1,8 +1,8 @@
 #!/usr/bin/env node
 /**
  * @file The `sharnessd` executable: it reads the settings file, builds the
- * server agent's firewall, and serves the MCP server of `server.ts` over
- * HTTP behind the MCP SDK's bearer authentication. `--help` prints the
+ * server agent's firewall, opens the server, and serves its MCP tools over
+ * HTTP to the owners the authentication admits. `--help` prints the
  * usage, no argument serves until the process is stopped, and any other
  * arguments print the usage to standard error. A startup failure prints one
  * line and exits unsuccessfully.
@@ -10,18 +10,10 @@
 import * as NodeSdk from "@effect/opentelemetry/NodeSdk";
 import { FileSystem } from "@effect/platform";
 import { NodeFileSystem, NodeRuntime } from "@effect/platform-node";
-import { discoverAuthorizationServerMetadata } from "@modelcontextprotocol/client";
 import { toNodeHandler } from "@modelcontextprotocol/node";
 import {
   createMcpHandler,
-  getOAuthProtectedResourceMetadataUrl,
-  hostHeaderValidationResponse,
   type McpServerFactory,
-  OAuthError,
-  OAuthErrorCode,
-  oauthMetadataResponse,
-  originValidationResponse,
-  requireBearerAuth,
 } from "@modelcontextprotocol/server";
 import { diag, DiagConsoleLogger, DiagLogLevel } from "@opentelemetry/api";
 import { OTLPTraceExporter } from "@opentelemetry/exporter-trace-otlp-proto";
@@ -36,14 +28,15 @@ import {
   Schema,
   Struct,
 } from "effect";
-import { createRemoteJWKSet, jwtVerify } from "jose";
 // eslint-disable-next-line agent-code-guard/prefer-effect-platform -- The MCP SDK's Node handler serves on a node:http server.
 import { createServer } from "node:http";
 import { dirname, resolve } from "node:path";
+import { type Admission, admission, authentication } from "./authentication.js";
 import { loadMessagePolicy, makeFirewall } from "./firewall.js";
+import { mcpServerFactory, packageVersion } from "./mcp.js";
 import { AgentName } from "./messages.js";
 import { loadNorms } from "./norms/index.js";
-import { packageVersion, serverFactory } from "./server.js";
+import { openServer } from "./server.js";
 
 /**
  * Messages identify the failed operation without disclosing documents or credentials.
@@ -55,51 +48,6 @@ class SettingsError extends Data.TaggedError("SettingsError")<{
 /** A startup refusal whose message names the setting to change. */
 const refused = (message: string) => new SettingsError({ message });
 
-/**
- * The URL `value` names when it parses, uses one of `protocols` (each with its
- * colon) and carries no userinfo and no fragment; otherwise `undefined`.
- */
-const plainUrl = (
-  value: string | URL,
-  protocols: readonly string[],
-): URL | undefined => {
-  if (!URL.canParse(value)) {
-    return undefined;
-  }
-  const url = new URL(value);
-  return protocols.includes(url.protocol) &&
-    [url.username, url.password, url.hash].every((part) => part === "")
-    ? url
-    : undefined;
-};
-
-const httpsUrl = Schema.String.pipe(
-  Schema.filter((value) => plainUrl(value, ["https:"])?.search === ""),
-);
-
-/** Plaintext discovery is limited to local issuer fixtures; hosted providers require HTTPS. */
-const oauthIssuer = Schema.Union(
-  httpsUrl,
-  Schema.String.pipe(
-    Schema.filter((value) => {
-      const url = plainUrl(value, ["http:"]);
-      return url?.search === "" && url.hostname === "127.0.0.1";
-    }),
-  ),
-);
-
-/** The OAuth resource the server is, and the issuer whose tokens it admits. */
-const authentication = Schema.Struct({
-  resource: httpsUrl.pipe(
-    Schema.filter(
-      (value) =>
-        new URL(value).pathname === "/mcp" && new URL(value).href === value,
-    ),
-    Schema.compose(Schema.URL),
-  ),
-  issuer: oauthIssuer,
-  scope: Schema.String.pipe(Schema.pattern(/^[\x21\x23-\x5B\x5D-\x7E]+$/u)),
-});
 /** The settings file as an operator writes it. */
 const settingsFile = Schema.Struct({
   port: Schema.Int.pipe(Schema.between(1, 65535)),
@@ -168,75 +116,27 @@ const loadSettings = Effect.fn("loadSettings")(function* () {
 });
 
 /**
- * Listens on the settings' host and port and answers each request as the MCP
- * SDK's example of a bearer-authenticated server does. The SDK validates the
- * Host and Origin headers against the resource's hostname, serves the OAuth
- * discovery documents, and checks the bearer token's scope and expiry; a
- * refusal is the SDK's response. Any path but `/mcp` answers 404. A token is
- * a JWT the issuer signed for the resource with a subject, verified against
- * the key set the issuer's metadata names. Returns once the listener accepts
- * connections.
+ * Listens on the settings' host and port. A request the admission answers
+ * gets that answer, any path but `/mcp` answers 404, and every other request
+ * reaches the MCP handler as the owner it is admitted as. Returns once the
+ * listener accepts connections.
  */
 const listen = Effect.fn("listen")(function* (
-  { host, port, authentication }: typeof settingsFile.Type,
+  { host, port }: typeof settingsFile.Type,
+  admitted: Admission,
   factory: McpServerFactory,
 ) {
-  const { issuer, resource, scope } = authentication;
-  const metadata = yield* Effect.tryPromise({
-    try: () => discoverAuthorizationServerMetadata(issuer),
-    catch: () => undefined,
-  }).pipe(Effect.orElseSucceed(() => undefined));
-  if (typeof metadata?.jwks_uri !== "string") {
-    return yield* refused(
-      `The OAuth issuer ${issuer} did not answer with its configuration. Check authentication.issuer and that the server can reach it.`,
-    );
-  }
-  const keys = createRemoteJWKSet(new URL(metadata.jwks_uri));
-  const hostnames = [resource.hostname];
-  const discovery = {
-    oauthMetadata: metadata,
-    resourceServerUrl: resource,
-    scopesSupported: [scope],
-  };
-  const gate = requireBearerAuth({
-    requiredScopes: [scope],
-    resourceMetadataUrl: getOAuthProtectedResourceMetadataUrl(resource),
-    verifier: {
-      // eslint-disable-next-line agent-code-guard/async-keyword -- The MCP SDK's authorization API is promise-based.
-      verifyAccessToken: async (token) => {
-        const verified = await jwtVerify(token, keys, {
-          issuer,
-          audience: resource.href,
-          algorithms: ["RS256"],
-        }).catch(() => undefined);
-        if (!verified?.payload.sub) {
-          throw new OAuthError(OAuthErrorCode.InvalidToken, "Invalid token");
-        }
-        const { sub, scope: granted, exp } = verified.payload;
-        return {
-          token,
-          clientId: "",
-          scopes: typeof granted === "string" ? granted.split(" ") : [],
-          expiresAt: exp,
-          extra: { issuer, subject: sub },
-        };
-      },
-    },
-  });
   const handler = createMcpHandler(factory);
   // eslint-disable-next-line agent-code-guard/async-keyword -- The MCP SDK's Node handler takes a promise-based fetch function.
   const fetch = async (request: Request) => {
-    const answered =
-      hostHeaderValidationResponse(request, hostnames) ??
-      originValidationResponse(request, hostnames) ??
-      oauthMetadataResponse(request, discovery);
+    const answered = admitted.answer(request);
     if (answered !== undefined) {
       return answered;
     }
     if (new URL(request.url).pathname !== "/mcp") {
       return new Response(null, { status: 404 });
     }
-    const authInfo = await gate(request);
+    const authInfo = await admitted.owner(request);
     return authInfo instanceof Response
       ? authInfo
       : await handler.fetch(request, { authInfo });
@@ -266,6 +166,10 @@ const HELP_MESSAGE = [
   "SHARNESS_DECISION_PROVIDER_KEY: API key of the message policy's decision provider",
   "Standard OTEL_* variables configure telemetry.",
 ].join("\n");
+
+/** Printed at every start that verifies no caller. */
+const DEVELOPMENT_WARNING =
+  'sharnessd verifies no caller: authentication is "development", so whoever reaches this port acts as the owner its bearer token names. Do not expose it.';
 
 /** Printed for a startup failure that names no setting of its own. */
 const UNEXPLAINED_FAILURE =
@@ -326,20 +230,27 @@ const serve = Effect.gen(function* () {
     ),
   );
   const settings = yield* loadSettings();
-  const { authentication, serverAgent, norms } = settings;
-  const factory = yield* serverFactory(url, {
-    issuer: authentication.issuer,
-    subject: serverAgent.subject,
-    name: serverAgent.name,
-    firewall: makeFirewall({
+  const { serverAgent, norms } = settings;
+  const admitted = yield* admission(settings.authentication);
+  if (settings.authentication === "development") {
+    yield* Console.error(DEVELOPMENT_WARNING);
+  }
+  const server = yield* openServer(
+    url,
+    serverAgent.name,
+    makeFirewall({
       policy: settings.messagePolicy,
       historyLimit: settings.maximumHistoryRecords,
       notice: `Your message was not accepted: it breaks a rule this agent applies to incoming messages.${norms === undefined ? "" : " Call read_norms to see which messages it accepts."}`,
       structureCheck: norms?.structureCheck,
     }),
+  );
+  const factory = yield* mcpServerFactory(server, {
+    issuer: admitted.issuer,
+    subject: serverAgent.subject,
     norms: norms?.documents,
   });
-  yield* listen(settings, factory);
+  yield* listen(settings, admitted, factory);
   yield* Console.log(
     `sharnessd listening on http://${settings.host}:${settings.port}/mcp (package ${packageVersion})`,
   );
@@ -363,6 +274,7 @@ NodeRuntime.runMain(
   }).pipe(
     Effect.catchTag(
       "SettingsError",
+      "IssuerError",
       "NormsConfigurationError",
       "MessagePolicyConfigurationError",
       "DatabasePreparationError",

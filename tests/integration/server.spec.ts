@@ -253,6 +253,39 @@ it(
   PROCESS_TEST_TIMEOUT_MS,
 );
 
+it(
+  "under development authentication, admits each request as the owner its bearer token names, warns that it verifies no caller, and refuses a web page that is not on this machine",
+  processTrace(
+    Effect.gen(function* () {
+      const sharnessd = yield* sharedServer();
+      yield* sharnessd.configure({ authentication: "development" });
+      const running = yield* sharnessd.start();
+      const client = yield* HttpClient.HttpClient;
+      const statusOf = (headers: Readonly<Record<string, string>>) =>
+        HttpClientRequest.post(sharnessd.endpoint).pipe(
+          HttpClientRequest.setHeaders(headers),
+          client.execute,
+          Effect.map((response) => response.status),
+        );
+
+      expect(yield* statusOf({})).toBe(401);
+      expect(
+        yield* statusOf({
+          authorization: "Bearer bob",
+          origin: "https://elsewhere.example",
+        }),
+      ).toBe(403);
+      const server = yield* sharnessd.signInNamed(SERVER_AGENT_OWNER);
+      expect(server.name).toBe(SERVER_AGENT_NAME);
+      const bob = yield* sharnessd.signInNamed("bob");
+      expect(bob.name).toMatch(/^agent-[0-9a-f]{24}$/u);
+      expect((yield* sharnessd.signInNamed("bob")).name).toBe(bob.name);
+      expect(running.logs()).toContain("verifies no caller");
+    }).pipe(Effect.provide(FetchHttpClient.layer)),
+  ),
+  PROCESS_TEST_TIMEOUT_MS,
+);
+
 /** The agent's inbox entries after `cursor`, read again until there is one. Without a cursor the read starts from now. */
 const readInbox = (agent: SignedIn, cursor?: string) =>
   callTool(agent, "receive_messages", { cursor }).pipe(

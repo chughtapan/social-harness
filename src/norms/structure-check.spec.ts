@@ -3,7 +3,7 @@
 import { Effect, Either, FastCheck as fc, Option, Schema } from "effect";
 import { randomBytes } from "node:crypto";
 import { expect, it } from "vitest";
-import type { EarlierMessage } from "../firewall.js";
+import type { CheckedMessage } from "../firewall.js";
 import { AgentName, Message, MsgId } from "../messages.js";
 import { compileNorm } from "./compiler.js";
 import { structureCheck } from "./structure-check.js";
@@ -61,7 +61,7 @@ const unknownId = Schema.decodeUnknownSync(MsgId)(`msg_${"A".repeat(43)}`);
  */
 function attempt(
   norm: Norm,
-  history: EarlierMessage[],
+  history: CheckedMessage[],
   taken: {
     readonly author: AgentName;
     readonly text: string;
@@ -107,7 +107,7 @@ function message(
 function check(
   norm: Norm,
   candidate: Message,
-  history: readonly EarlierMessage[] = [],
+  history: readonly CheckedMessage[] = [],
   now = 0,
 ) {
   return Effect.runSync(structureCheck([norm])(candidate, history, now));
@@ -162,7 +162,7 @@ interface Model {
 
 /** The message a step replies to: none, one no history holds, or an earlier step's. */
 function replyOf(
-  history: readonly EarlierMessage[],
+  history: readonly CheckedMessage[],
   taken: Step,
 ): Option.Option<MsgId> {
   if (taken.reply === "none") {
@@ -261,7 +261,7 @@ function advanceModel(
 it("permits exactly the acts the turn rules allow, whoever sends them and whichever message they reply to", () => {
   fc.assert(
     fc.property(fc.array(step, { maxLength: 12 }), (steps) => {
-      const history: EarlierMessage[] = [];
+      const history: CheckedMessage[] = [];
       const model: Model = {
         open: false,
         members: new Map(),
@@ -306,7 +306,7 @@ it("permits an act with a delay and a limit only once its fact is that old and w
 (content poll :by (Sender Receiver) :when held :max ${maximum}
   :after held :delay wait :unit seconds)
 `);
-        const history: EarlierMessage[] = [];
+        const history: CheckedMessage[] = [];
         const start = 1_000;
         const due = start + wait * 1000;
         attempt(timed, history, {
