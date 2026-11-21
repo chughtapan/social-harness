@@ -50,7 +50,8 @@ export interface Server {
    * Sends one message in `client`'s conversation, from the server agent when
    * `author` is its name and from the client otherwise. A message the
    * firewall refuses, and one the server agent addresses to a client that
-   * has not written to it, fails the send.
+   * has not written to it, fails the send. A client's failure says only what
+   * a sender may know.
    */
   readonly send: (
     author: AgentName,
@@ -91,10 +92,11 @@ const refusalText: Readonly<Record<FirewallRefusalReason, string>> = {
 };
 
 /**
- * A send the server agent's firewall refused, whichever agent sent it.
- * `rule` and `detail` are those of a structure check. The message states each deciding rule's feedback as
- * an error, or the reason when there is none, then the check. Feedback is a
- * plain sentence: this message alone marks it as an error.
+ * The server agent's own send that its firewall refused, as the server agent
+ * reads it. `rule` and `detail` are those of a structure check. The message
+ * states each deciding rule's feedback as an error, or the reason when there
+ * is none, then the check. Feedback is a plain sentence: this message alone
+ * marks it as an error.
  */
 class FirewallRefusal extends Data.TaggedError("FirewallRefusal")<{
   readonly reason: "firewall-refused";
@@ -112,6 +114,34 @@ class FirewallRefusal extends Data.TaggedError("FirewallRefusal")<{
         : this.feedback.map((text) => `Error: ${text}`)),
       `Check: ${this.checkId}${rule}; ${this.refusal}.`,
     ].join(" ");
+  }
+}
+
+/**
+ * A client's send that the server agent's firewall refused, as the client
+ * reads it. A client is not trusted with the check behind a refusal: it reads
+ * the feedback rules give a sender, and no check, rule, reason or
+ * diagnostics.
+ */
+class ClientRefusal extends Data.TaggedError("ClientRefusal")<{
+  readonly reason: "refused";
+  readonly feedback: readonly string[];
+}> {
+  override get message(): string {
+    const said =
+      this.feedback.length === 0
+        ? ["The message was not accepted."]
+        : this.feedback;
+    return said.map((text) => `Error: ${text}`).join(" ");
+  }
+}
+
+/** What a client reads when the server could not check its message: nothing of why. */
+class ServerUnavailable extends Data.TaggedError("ServerUnavailable")<{
+  readonly reason: "unavailable";
+}> {
+  override get message(): string {
+    return "The server is unavailable. Try again later.";
   }
 }
 
@@ -176,14 +206,7 @@ export const openServer = Effect.fn("openServer")(function* (
         if (decision.record !== undefined) {
           yield* database.record(decision.record);
         }
-        return yield* new FirewallRefusal({
-          reason: "firewall-refused",
-          checkId: decision.checkId,
-          refusal: decision.reason,
-          rule: decision.rule,
-          feedback: decision.feedback,
-          detail: decision.detail,
-        });
+        return yield* refusalFor(outgoing, decision);
       }
       yield* database.store(message, decision.record);
       yield* PubSub.publish(readable, message.recipient);
@@ -264,6 +287,33 @@ export const openServer = Effect.fn("openServer")(function* (
   };
   return server;
 });
+
+/**
+ * A refused send as its sender reads it: the whole refusal for the server
+ * agent, whose firewall it is, and for a client only the feedback, or that
+ * the server is unavailable when its message could not be checked.
+ */
+function refusalFor(
+  toServerAgent: boolean,
+  decision: Extract<
+    Effect.Effect.Success<ReturnType<Firewall["check"]>>,
+    { readonly kind: "refused" }
+  >,
+) {
+  if (toServerAgent) {
+    return new FirewallRefusal({
+      reason: "firewall-refused",
+      checkId: decision.checkId,
+      refusal: decision.reason,
+      rule: decision.rule,
+      feedback: decision.feedback,
+      detail: decision.detail,
+    });
+  }
+  return decision.reason === "check-unavailable"
+    ? new ServerUnavailable({ reason: "unavailable" })
+    : new ClientRefusal({ reason: "refused", feedback: decision.feedback });
+}
 
 /** The first `limit` of `stored` as entries, the place of the last of them, and whether more were stored. */
 function pageOf(stored: readonly StoredMessage[], limit: number) {

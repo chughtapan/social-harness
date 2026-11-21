@@ -321,7 +321,7 @@ function registerClientTools(at: Registration, client: AgentName) {
     "send_message",
     {
       description:
-        "Send a message to the server agent. Returns the message id. A refusal names the rule to correct. Read its reply with receive_messages.",
+        "Send a message to the server agent. Returns the message id. A refusal says what to correct. Read its reply with receive_messages.",
       input: Schema.Struct(sentFields),
       output: SendResult,
     },

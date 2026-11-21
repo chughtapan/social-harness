@@ -366,23 +366,25 @@ it("reads the inbox a page of fifty at a time after a cursor, the same page agai
     });
   }));
 
-it("fails a send that breaks a rule with the rule's feedback, whichever agent sent it, and keeps the decision but not the message", () =>
+it("fails a send that breaks a rule, telling the server agent the whole refusal and a client only the rule's feedback, and keeps the decision but not the message", () =>
   Effect.gen(function* () {
     const { alice, bob } = yield* aliceAndBob({
       policy: policy(privateViolation),
     });
     yield* send(bob, { text: "hello" });
 
-    for (const refused of [
-      send(bob, { text: "private" }),
-      send(alice, { to: bob.name, text: "private" }),
-    ]) {
-      expect(yield* Effect.flip(refused)).toMatchObject({
-        reason: "firewall-refused",
-        refusal: "rule-violation",
-        feedback: [privacy.feedback],
-      });
-    }
+    expect(yield* Effect.flip(send(bob, { text: "private" }))).toEqual({
+      reason: "refused",
+      feedback: [privacy.feedback],
+      message: `Error: ${privacy.feedback}`,
+    });
+    expect(
+      yield* Effect.flip(send(alice, { to: bob.name, text: "private" })),
+    ).toMatchObject({
+      reason: "firewall-refused",
+      refusal: "rule-violation",
+      feedback: [privacy.feedback],
+    });
 
     const refusedBy = { decision: "refused", reason: "rule-violation" };
     expect(
@@ -396,15 +398,16 @@ it("fails a send that breaks a rule with the rule's feedback, whichever agent se
     expect(yield* inboxOf(bob)).toEqual([]);
   }));
 
-it("fails a client's send and stores nothing when the check of its message could not run", () =>
+it("tells a client only that the server is unavailable, and stores nothing, when the check of its message could not run", () =>
   Effect.gen(function* () {
     const { alice, bob } = yield* aliceAndBob({
       policy: policy({ decide: () => Effect.succeed({ answers: {} }) }),
     });
 
-    expect(yield* send(bob, { text: "Hello" }).pipe(Effect.flip)).toMatchObject(
-      { reason: "firewall-refused", refusal: "check-unavailable" },
-    );
+    expect(yield* send(bob, { text: "Hello" }).pipe(Effect.flip)).toEqual({
+      reason: "unavailable",
+      message: "The server is unavailable. Try again later.",
+    });
 
     expect(
       (yield* callTool(alice, "read_firewall_decisions")).decisions,
@@ -422,7 +425,7 @@ const exchange = Either.getOrThrow(
   ]),
 );
 
-it("refuses what an agent that holds norms does not accept, plain text and an act out of turn alike, and the conversation goes on", () =>
+it("refuses what an agent that holds norms does not accept, plain text and an act out of turn alike, telling the client only what to correct, and the conversation goes on", () =>
   Effect.gen(function* () {
     const { alice, bob } = yield* aliceAndBob({
       norms: exchange,
@@ -430,10 +433,11 @@ it("refuses what an agent that holds norms does not accept, plain text and an ac
     });
 
     for (const text of ["Hello, can you help?", "(close :ontology exchange)"]) {
-      expect(yield* send(bob, { text }).pipe(Effect.flip)).toMatchObject({
-        reason: "firewall-refused",
-        refusal: "rule-violation",
-      });
+      const refusal = yield* send(bob, { text }).pipe(Effect.flip);
+      expect(refusal.reason).toBe("refused");
+      expect(new Set(Object.keys(refusal))).toEqual(
+        new Set(["reason", "feedback", "message"]),
+      );
     }
     yield* send(bob, { text: "(open :ontology exchange)" });
     expect(yield* inboxOf(alice)).toHaveLength(1);
