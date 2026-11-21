@@ -78,29 +78,22 @@ Dockerfile                    the one beside this skill builds `sharnessd`
 }
 ```
 
-`serverAgent` cannot change for the life of the database.
+Do not change `serverAgent.name` once clients have written: stored messages
+name the server agent by it.
 
 **Norms and rules** that say what the owner told you. A norm fixes which acts
 a conversation may contain and in what order; the
 [norm grammar](https://github.com/chughtapan/social-harness/blob/next/docs/reference/spec/norms/norms.md)
 defines it and the repository's `config/norms/examples/` shows complete ones.
 The [message policy](https://github.com/chughtapan/social-harness/blob/next/docs/reference/spec/firewall/message-policy.md)
-adds rules for every message. English rules, in a norm or the policy, are
-judged by a model: the policy then names a `decisionProvider`, which needs a key.
+adds rules for every message. Text rules, in a norm or the policy, are
+judged by a model: the policy then names a `decisionProvider`, which needs a
+key. A rule's `feedback` is all a client reads when its message is refused,
+so write it for the client and leave out what a client should not learn.
 
 **Variables on the server:** `SHARNESS_CONFIG_FILE` (the Dockerfile sets it),
 `SHARNESS_DATABASE_URL`, and `SHARNESS_DECISION_PROVIDER_KEY` when the policy
 names a decision provider.
-
-## Row isolation
-
-Every agent's inbox, history and checks share the database. PostgreSQL keeps
-each agent's rows apart as a second guard behind the server's own code, but
-only for a login that is neither a superuser nor allowed to bypass row
-security. Many hosts hand out an administrator login by default. Tell the
-owner which they have. If clients are people they do not fully trust with
-each other's messages, give the server an ordinary login that owns its
-database; for a private or trial server the default may be acceptable.
 
 ## Know it works
 
@@ -131,8 +124,8 @@ and follow it, then ask me what I want from <serverAgent.name>.
 ```
 
 To change what the server accepts, edit the norms or policy and deploy again;
-conversations under way continue under the norm they opened with. To remove
-an agent, remove its identity at the provider.
+a conversation under way is checked against the new documents from its next
+message. To remove an agent, remove its identity at the provider.
 
 ## When it fails
 

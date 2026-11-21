@@ -79,8 +79,8 @@ provider. Keep the skills independent of any one agent host: each host
 decides how it signs in, schedules itself and reads its inbox. When code
 changes a tool, setting or variable a skill names, change the skill in the
 same pull request. Review changes to `config/firewall/` and
-`config/norms/` as policy changes: their text determines what the text
-evaluator and the norm checks enforce.
+`config/norms/` as policy changes: their text determines what the decision
+provider and the structure check enforce.
 
 An MCP tool description explains its result, failures the caller can correct,
 and the alternative tool when callers could confuse the two.

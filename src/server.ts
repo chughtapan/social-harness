@@ -92,11 +92,11 @@ const refusalText: Readonly<Record<FirewallRefusalReason, string>> = {
 };
 
 /**
- * The server agent's own send that its firewall refused, as the server agent
- * reads it. `rule` and `detail` are those of a structure check. The message
- * states each deciding rule's feedback as an error, or the reason when there
- * is none, then the check. Feedback is a plain sentence: this message alone
- * marks it as an error.
+ * A send the server agent's firewall refused, as the server agent reads its
+ * own and as the daemon logs every one. `rule` and `detail` are those of a
+ * structure check. The message states each deciding rule's feedback as an
+ * error, or the reason when there is none, then the check. Feedback is a
+ * plain sentence: this message alone marks it as an error.
  */
 class FirewallRefusal extends Data.TaggedError("FirewallRefusal")<{
   readonly reason: "firewall-refused";
@@ -174,7 +174,8 @@ export const openServer = Effect.fn("openServer")(function* (
    * A check reads the conversation's earlier messages, so the conversation's
    * lock is held from that read until the message is stored, while other
    * conversations do not wait. No transaction is open while a check runs. A
-   * refused message is not stored.
+   * refused message is not stored. A failure is logged whole before a client
+   * reads its part of it.
    */
   const send = Effect.fn("send")(
     function* (
@@ -206,7 +207,7 @@ export const openServer = Effect.fn("openServer")(function* (
         if (decision.record !== undefined) {
           yield* database.record(decision.record);
         }
-        return yield* refusalFor(outgoing, decision);
+        return yield* refusalOf(decision);
       }
       yield* database.store(message, decision.record);
       yield* PubSub.publish(readable, message.recipient);
@@ -214,6 +215,12 @@ export const openServer = Effect.fn("openServer")(function* (
     },
     Effect.scoped,
     logFailedSend,
+    (sending, author) =>
+      author === name
+        ? sending
+        : Effect.catchTag(sending, "FirewallRefusal", (refusal) =>
+            Effect.fail(asClientReads(refusal)),
+          ),
   );
 
   /** The server agent's inbox holds every client's messages; a client's holds the server agent's messages to it. */
@@ -288,31 +295,32 @@ export const openServer = Effect.fn("openServer")(function* (
   return server;
 });
 
-/**
- * A refused send as its sender reads it: the whole refusal for the server
- * agent, whose firewall it is, and for a client only the feedback, or that
- * the server is unavailable when its message could not be checked.
- */
-function refusalFor(
-  toServerAgent: boolean,
+/** The firewall's refusal of a message as its send's failure. */
+function refusalOf(
   decision: Extract<
     Effect.Effect.Success<ReturnType<Firewall["check"]>>,
     { readonly kind: "refused" }
   >,
 ) {
-  if (toServerAgent) {
-    return new FirewallRefusal({
-      reason: "firewall-refused",
-      checkId: decision.checkId,
-      refusal: decision.reason,
-      rule: decision.rule,
-      feedback: decision.feedback,
-      detail: decision.detail,
-    });
-  }
-  return decision.reason === "check-unavailable"
+  return new FirewallRefusal({
+    reason: "firewall-refused",
+    checkId: decision.checkId,
+    refusal: decision.reason,
+    rule: decision.rule,
+    feedback: decision.feedback,
+    detail: decision.detail,
+  });
+}
+
+/**
+ * A refusal as the client whose message it refused reads it: only the
+ * feedback, or that the server is unavailable when the message could not be
+ * checked.
+ */
+function asClientReads(refusal: FirewallRefusal) {
+  return refusal.refusal === "check-unavailable"
     ? new ServerUnavailable({ reason: "unavailable" })
-    : new ClientRefusal({ reason: "refused", feedback: decision.feedback });
+    : new ClientRefusal({ reason: "refused", feedback: refusal.feedback });
 }
 
 /** The first `limit` of `stored` as entries, the place of the last of them, and whether more were stored. */

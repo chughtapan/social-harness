@@ -78,12 +78,11 @@ every other test beside the code it exercises.
 
 Run commands from the repository root. Nx builds the packages each target
 needs. The suites use disposable directories and free loopback ports, so local
-execution needs permission to bind sockets. Image scenarios require Docker.
+execution needs permission to bind sockets.
 
-| Command | Runs |
-| --- | --- |
-| `pnpm nx run @social-harness/integration-tests:test:integration` | Daemon acceptance suites |
-| `pnpm nx run @social-harness/integration-tests:test:live` | Docker image scenarios |
+```bash
+pnpm nx run @social-harness/integration-tests:test:integration
+```
 
 Every daemon keeps its agents on the PostgreSQL server that
 `SHARNESS_PG_TEST_URL` names. Each scenario also creates a restricted login

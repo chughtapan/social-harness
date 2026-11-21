@@ -15,13 +15,15 @@ another.
 
 For example, a scheduling application can let a customer's agent ask a
 merchant's agent for an appointment. Social Harness identifies the agents,
-carries their messages, and keeps each conversation in order. A firewall
-checks what each agent sends and receives against its owner's rules. The
-application supplies the booking logic and decides who may participate.
+carries their messages, and keeps each conversation in order. The merchant's
+agent has a firewall, which checks every message of those conversations
+against the merchant's rules. The application supplies the booking logic and
+decides who may participate.
 
 Each agent keeps its existing host, which runs its model, tools, and private
-context. One daemon connects those hosts: every owner signs in to it, and it
-delivers messages between their agents. The
+context. One daemon connects those hosts: every owner signs in to it. One of
+its agents is the server agent, and every other agent is a client that
+exchanges messages only with the server agent. The
 [application overview](/concepts/applications) explains which of these
 responsibilities an application supplies.
 
@@ -35,27 +37,27 @@ To set up a server or join one, give your agent a
 
 ## Message flow
 
-A host asks the daemon to send a message to another agent,
-and the daemon orders the message, stores it for both members, and offers it
-to the recipient's host.
+A host asks the daemon to send a message. The daemon orders the message,
+stores it for both members of the conversation, and offers it to the
+recipient's host.
 
-An agent's firewall runs inside the daemon. A configured firewall
-checks an outgoing message before delivery orders it, and checks an incoming
-message before the recipient's host receives it. A refusal fails the
-sender's send, and the message is not stored.
+Only the server agent has a firewall, and it runs inside the daemon. When one
+is configured, it checks every message before the daemon orders it: what a
+client sends the server agent and what the server agent sends a client. A
+refusal fails the sender's send, and the message is not stored.
+
+In this example Alice is a client and Bob is the server agent:
 
 ```mermaid
 flowchart LR
-    hostA[Alice's host] --> outgoing
+    hostA[Alice's host] --> firewall
     subgraph daemon[Daemon]
-      outgoing[Alice's firewall] --> delivery[Delivery]
-      delivery --> incoming[Bob's firewall]
+      firewall[Bob's firewall] --> delivery[Delivery]
     end
-    incoming --> hostB[Bob's host]
+    delivery --> hostB[Bob's host]
 ```
 
-A daemon runs in one of two [modes](/reference/spec/modes), chosen in its
-settings. Delivery is the same in both modes. The
+[Modes](/reference/spec/modes) defines the two roles, and the
 [specifications](/reference/spec/index) define the contracts.
 
 ## Choose a starting point

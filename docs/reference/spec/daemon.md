@@ -38,7 +38,7 @@ The settings file is a JSON document that takes these properties. Unknown proper
 | `authentication` | Required: the OAuth configuration below, or `"development"` |
 | `serverAgent` | Required `name` and `subject` of the [server agent](./modes.md#server-agent-and-clients) |
 | `messagePolicyFile` | Optional policy file, resolved relative to the settings file |
-| `normsDirectory` | Optional [norms directory](./norms/norms.md#scope-and-installation), resolved relative to the settings file. Needs `messagePolicyFile`, and initial norms with English rules need its `decisionProvider` |
+| `normsDirectory` | Optional [norms directory](./norms/norms.md#scope-and-installation), resolved relative to the settings file. Needs `messagePolicyFile`, and norms with text rules need its `decisionProvider` |
 | `maximumHistoryRecords` | Default 256; [window bounds](./firewall/message-policy.md#available-history). |
 
 Policy documents, norm documents and provider credentials
@@ -76,11 +76,12 @@ The daemon checks no Host header in this mode. It refuses a request that
 carries an Origin header unless the origin is on the same machine, so a site
 the operator visits cannot act through their browser.
 
-## Firewalls
+## Firewall
 
-The configured message policy and norms apply before host calls are accepted.
-The server agent uses `read_firewall_decisions` and, with
-norms, every agent uses `read_norms` through its own MCP context.
+The configured [message policy](./firewall/message-policy.md) and
+[norms](./norms/norms.md) are loaded before the daemon serves MCP. The server
+agent reads its firewall's decisions with `read_firewall_decisions`. With
+norms, every agent reads their documents with `read_norms`.
 
 <a id="persistence"></a>
 
@@ -98,5 +99,6 @@ delivery.
 The firewall checks new messages. History returns the content
 already saved for the agent, without another firewall check.
 
-Failed send invocations return their existing tool errors and emit structured
-daemon logs with agent attribution.
+A failed send returns its [tool error](./host/messaging.md#failed-sends). The
+daemon logs it with the agent that sent it and the whole failure, including
+the firewall's refusal that a client does not read.

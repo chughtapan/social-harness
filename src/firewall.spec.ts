@@ -310,7 +310,7 @@ it.each(directions)(
           decision: "refused",
           peer: bob,
           reason: "rule-violation",
-          decidedBy: [{ ruleId: privacy.id, advice: privacy.feedback }],
+          decidedBy: [{ ruleId: privacy.id, feedback: privacy.feedback }],
           checkedRuleIds: [privacy.id],
         },
       });

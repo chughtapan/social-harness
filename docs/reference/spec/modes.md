@@ -15,7 +15,7 @@ only with it.
 | Party | What it does | Trusted for |
 | --- | --- | --- |
 | Identity provider | An OAuth 2.0 authorization server that owners sign in to | Saying who a token belongs to |
-| Daemon | Admits owners, names their agents, checks each agent's messages against its firewall, orders and stores messages | The author of each message, the order within a conversation, delivery, and custody of content |
+| Daemon | Admits owners, names their agents, checks every message against the server agent's firewall, orders and stores messages | The author of each message, the order within a conversation, delivery, and custody of content |
 
 An owner who does not trust the daemon's operator should not use that daemon.
 A daemon that misbehaves can read, drop, reorder or forge messages. Nothing in
@@ -27,27 +27,26 @@ use the same daemon.
 
 ## Sending
 
-A message names its author, its recipient and a message id, and
-carries text. When an agent sends, the daemon, in one transaction:
+A message names its author, its recipient and a message id, and carries
+text. A conversation is its two members: the server agent and one client.
+When an agent sends, the daemon:
 
-1. Refuses the message unless the author is the calling agent and the
-   recipient is an agent on this daemon.
-2. Gives the message the next position in its conversation. A conversation is
-   its author and recipient: two agents.
-3. Saves the message in the author's history and in the recipient's history
-   and inbox.
+1. Records the calling agent as the author. A client's recipient is the
+   server agent, and the server agent names a client that has written to it.
+2. Has the server agent's [firewall](./firewall/message-policy.md) check the
+   message with the conversation's earlier messages. A refused message fails
+   its send and is not stored.
+3. Gives the message the next position in its conversation and saves it for
+   both members, in one transaction.
 
-A failure changes nothing for either member. The send returns once the message is
-ordered.
+A failure changes nothing for either member. The send returns once the
+message is stored.
 
-The server agent's firewall checks a message before the daemon orders it, and a
-refused message fails its send. See
-[message policy](./firewall/message-policy.md).
+The sends of one conversation are checked and stored one at a time, so both
+members see the conversation in the same order.
 
-Both members see a conversation in the same order.
-
-Messages, positions and inboxes are in the daemon's database, so a
-restart loses nothing that a send returned for.
+Messages and their positions are in the daemon's database, so a restart loses
+nothing that a send returned for.
 
 ## Server agent
 
@@ -72,10 +71,6 @@ Clients sign in through the configured
 [authentication](./daemon.md#mcp-authentication), and every other owner's
 agent is a client.
 
-A send follows the [sending contract](#sending) with
-one more refusal: the message's author and recipient must be the server agent
-and one client.
-
 ### What a client can do
 
 A client's tools name no other agent, so it cannot address another client:
@@ -95,5 +90,10 @@ The server agent has the full catalog, with `send_message` taking `to` and
 
 Only the server agent has a firewall and holds norms. It checks what a client
 sends it and what it sends a client, so a client runs no check of its own.
-When a client's message breaks a rule, the client's send fails with the
-rule's feedback.
+
+A client is not trusted with the server agent's policy. When its message
+breaks a rule, its send fails with the rule's feedback and nothing else of
+the check. When the message could not be checked, the client reads only that
+the server is unavailable.
+[Refused messages](./firewall/message-policy.md#refused-messages) states what
+each sender reads.

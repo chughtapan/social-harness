@@ -109,12 +109,12 @@ it.for(runs)(
     )(context),
 );
 
-/** A norm document with no English rule. */
+/** A norm document with no text rule. */
 const unruledNorm = `(norm ping :initiator Asker :participant Answerer)
 (content ask :by Asker :starts true :ends true)
 `;
 
-/** The same norm with an English rule, which needs a decision provider. */
+/** The same norm with a text rule, which needs a decision provider. */
 const ruledNorm = `${unruledNorm}(rule :act ask "The question is polite.")
 `;
 

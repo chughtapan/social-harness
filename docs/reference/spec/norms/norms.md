@@ -2,23 +2,24 @@
 title: Shared norms
 description: Configure message structure, conversation rules and text checks with pre-agreed norm documents.
 read_when:
-  - You are supplying a communication norm to two agents
+  - You are supplying a communication norm to a server agent and its clients
   - You need the norm document grammar and failure behavior
   - You are comparing ordinary chat with instructed or enforced communication
 ---
 
 A shared norm defines which messages participants may send, when they may
-send them, and what their fields may contain. Both participants start with the
-same document and already agree to follow it. The first exchange is a task
-act from that document. Discovery and agreement are outside this contract.
+send them, and what their fields may contain. The server agent holds the norm
+documents, a client reads them with `read_norms`, and both already agree to
+follow them. The first exchange is a task act from one of those documents.
+Discovery and agreement are outside this contract.
 
-A norm compiles to configuration for the existing
-[message firewall](../firewall/message-policy.md#structured-contracts).
+A norm compiles to a structure check and text rules for the server agent's
+[message firewall](../firewall/message-policy.md#norms).
 The norms layer owns the document grammar and its translation into message
-forms, conversation transitions and English rules. Structural checks validate
-each message, protocol checks validate its place in the conversation, and
-lightweight decision models judge its free text. Selecting an English rule
-by its declared act is not a violation finding.
+forms, conversation transitions and text rules. The structure check validates
+each message's form and its place in the conversation, and the decision
+provider judges the text rules. Selecting a text rule by its declared act is
+not a violation finding.
 
 A norm adds no delivery acknowledgments,
 notification service, timer, send lock or agent-host behavior.
@@ -39,7 +40,7 @@ A source SHA-256 digest identifies
 the exact document bytes. After a restart every instance uses the installed
 documents.
 
-A peer message cannot install policy.
+A message cannot install a norm.
 
 ## Document grammar
 
@@ -142,15 +143,15 @@ must declare the source fields. This source constraint does not change general
 `:when` conditions, which remain instance-wide. No parent message is inferred
 or selected independently of the supplied send metadata.
 
-### English rules
+### Text rules
 
-A `rule` has one quoted English text. Optional `:act` restricts it to one
+A `rule` has one quoted text. Optional `:act` restricts it to one
 performative; omission applies it to every act in that norm. Optional
 `:feedback` is the text the sender of an act the rule refuses reads.
 
 The provider judges the current message using its verified author,
 preceding bounded conversation, declared form, current facts, norm description
-and applicable English rules. It checks the conduct described by those rules,
+and applicable text rules. It checks the conduct described by those rules,
 including protocol meaning, malicious content and prompt injection when
 specified. The [provider answers contract](../firewall/message-policy.md#provider-answers)
 owns uncertainty and provider failures. Structural validity supplies no
@@ -176,28 +177,30 @@ Opening acts may omit it; continuations require it. No reference is inferred.
 Parameter names must be distinct. Metadata values are strings or symbols.
 Field values retain their declared primitive types. Lists carry choice strings.
 Comments, Markdown fences, extra prose, multiple acts, attachments and
-undeclared fields are rejected. Multiple text parts are read as one text
-joined with newlines and must satisfy the same grammar.
+undeclared fields are rejected.
 
 ## State, refusal and recovery
 
-Protocol context combines retained conversation messages with the local
-firewall's saved checks. Only allowed acts advance it. A saved outgoing
-check does not advance state before its message appears in transport
-history. A refused message is not retained, so a later message cannot reference it.
+Each check replays the conversation's stored messages in order, each with the
+time of the firewall's check of it, to find the instance in progress. Only an
+allowed act advances the instance. A refused message is not stored, so a
+later message cannot reference it.
 
-Each check uses a snapshot. Replay processes retained order, rechecks structural and
-protocol guards at the time of the original check, and keeps incompatible acts
-as allowed but non-advancing conflicts. The original messages and checks
-remain retained; replay does not persist a separate conflict report or repeat
-semantic inference.
+Replay judges each stored message's form and place again, at the time of its
+original check, and asks the decision provider nothing. A stored message that
+does not fit stays in the conversation without advancing the instance: one
+sent before the norm documents changed, or while the server agent had no
+message policy.
 
-A refused act's send fails with an error describing the failed structural, role or
-transition check. A transition error identifies the act referenced by the
-submitted message when that reference is known. Structured diagnostics retain
-the check identifier, stage, norm, digest and field when available. Refusals
-do not select a replacement act or reference, expose internal conditions, or
-instruct the agent to restart an instance.
+A refused act's send fails with an explanation of the failed structural, role
+or transition check. A transition explanation names the act the submitted
+message replies to when that reference is known. The server agent's failure
+also holds diagnostics: the stage that refused the act (`structural`,
+`protocol`, or `semantic` when a text rule refused an act that fits), the
+norm, its digest and the field when they are known. A client reads the
+explanation alone. A refusal does not select a replacement act or
+reference, expose internal conditions, or instruct the agent to restart an
+instance.
 
 No implicit rewind, reopening or cancellation occurs.
 

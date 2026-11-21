@@ -39,8 +39,8 @@ export class TextRule extends Schema.Class<TextRule>("TextRule")({
  * What one completed check concluded, as its caller saves it, without message
  * content: whether the message the agent sent or received was `allowed` or
  * `refused`, and its peer. `time` is Unix milliseconds.
- * `decidedBy[].advice` contains the feedback of each rule that decided a
- * refused message.
+ * `decidedBy` names each rule that decided a refused message, with its
+ * feedback.
  * `checkedRuleIds` lists the rules the check judged: a rule that does not
  * apply to the message's direction is not listed.
  */
@@ -55,7 +55,7 @@ export const checkRecordSchema = Schema.Struct({
   decidedBy: Schema.Array(
     Schema.Struct({
       ruleId: Schema.NonEmptyString,
-      advice: Schema.optional(Schema.NonEmptyString),
+      feedback: Schema.optional(Schema.NonEmptyString),
     }),
   ),
   checkedRuleIds: Schema.Array(Schema.NonEmptyString),
@@ -264,13 +264,13 @@ function conclude(
   }
   const decidedBy = deciding.map(({ rule }) => ({
     ruleId: rule.id,
-    advice: rule.feedback,
+    feedback: rule.feedback,
   }));
   return refused(checked, {
     reason: violated.length === 0 ? "unresolved-evidence" : "rule-violation",
     decidedBy,
     checkedRuleIds,
-    feedback: decidedBy.flatMap(({ advice }) => advice ?? []),
+    feedback: decidedBy.flatMap(({ feedback }) => feedback ?? []),
     detail,
   });
 }

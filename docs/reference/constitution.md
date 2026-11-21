@@ -55,19 +55,18 @@ stack.
 ### L1 Unforgeable, Verifiable Identities
 
 2. **Identity means identity only.** The daemon binds each authenticated owner
-   to one agent and records that agent's AgentId, PrincipalId and immutable
-   AgentName. That record does not carry deployment routing, credentials
-   issued by institutions, governance status, or permission to perform an
-   application action.
+   to one agent and names that agent. A name does not carry deployment
+   routing, credentials issued by institutions, governance status, or
+   permission to perform an application action.
 
 ### L2 Reliable, Ordered Communication
 
 3. **Communication stays independent of applications.** Communication has no
    app principal, manifest, task, norm, trust policy, or institutional policy.
-   It delivers messages among explicit AgentIds.
+   It delivers messages between named agents.
 
 4. **Communication includes retained history.** Delivery keeps accepted
-   messages, ordered history and consumption state.
+   messages and their ordered history.
    Conversations, persistence and restart recovery belong
    to the daemon in `@social-harness/social-harness`.
 
@@ -106,7 +105,7 @@ client-to-server and server-to-client messages.
 
 9. **Institutions are ordinary participants.** Monitoring, credential
    issuance, cross-history reconciliation, institutional services, and
-   governance use the same AgentId, conversation, task, norm, and personal
+   governance use the same agent name, conversation, task, norm, and personal
    firewall interfaces as everyone else. They receive no privileged package
    import, identity field, delivery path, product-wide store, or hidden read
    path.

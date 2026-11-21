@@ -301,7 +301,7 @@ function registerServerAgentTools(at: Registration) {
     "read_firewall_decisions",
     {
       description:
-        "Read completed firewall decision summaries since inclusive Unix milliseconds. Each gives the decision applied (allowed or refused), the reason and the deciding rules' registered advice, without message content or private model evidence.",
+        "Read the records of the hundred latest completed firewall checks since inclusive Unix milliseconds, newest first. Each gives the decision applied (allowed or refused), the reason and the deciding rules with their feedback, without message content or private model evidence.",
       input: Schema.Struct({ since: Schema.optional(Schema.NonNegativeInt) }),
       output: Schema.Struct({ decisions: Schema.Array(checkRecordSchema) }),
       readOnly: true,

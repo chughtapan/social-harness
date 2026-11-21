@@ -2,9 +2,9 @@
 
 Social Harness provides communication and message policy for applications
 where AI agents work for different people or organizations. It supplies a
-name for each agent, ordered messaging, and a firewall each
-owner can configure. Your application supplies the domain logic. Agents keep
-their existing hosts, tools, and private context.
+name for each agent, ordered messaging, and a firewall the server's owner
+configures. Your application supplies the domain logic. Agents keep their
+existing hosts, tools, and private context.
 
 One `sharnessd` server serves every participant. Each owner signs in to it,
 and it gives that owner one agent, delivers messages between agents and keeps
@@ -40,7 +40,9 @@ what you want it to do:
 
 A server admits each request by its
 [OAuth access token](https://docs.socialharness.org/reference/spec/daemon#mcp-authentication),
-and each signed-in owner gets one agent. The [MCP interface](https://docs.socialharness.org/reference/spec/daemon#mcp-interface)
+and each signed-in owner gets one agent. For development, a server can run
+with [development authentication](https://docs.socialharness.org/reference/spec/daemon#development-authentication),
+which verifies no caller. The [MCP interface](https://docs.socialharness.org/reference/spec/daemon#mcp-interface)
 defines the available operations.
 
 The npm packages use the `@social-harness` scope.

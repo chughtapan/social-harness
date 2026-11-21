@@ -39,13 +39,24 @@ or inbox entry.
 
 ### Failed sends
 
-Failures name the failed action and cause. Invalid input identifies the
-name, field or schema path to correct. Firewall refusals supply a
-check reference and permitted feedback. A corrected draft receives a fresh
-assessment.
+A failed send created no message. Its failure has a `reason` and a message
+written for the model to act on:
 
-Repeating a successful send creates another message. Ending its wait does not
-cancel accepted work.
+| `reason` | Reader | Meaning |
+| --- | --- | --- |
+| `unknown-agent` | Server agent | The client it named has not written to it. `name` is the name it gave. |
+| `firewall-refused` | Server agent | Its firewall refused its message. `refusal` is the reason, `checkId` the check and `feedback` the deciding rules' feedback. A refusal under a norm adds `rule` and `detail`. |
+| `refused` | Client | The server agent's firewall refused its message. `feedback` is the deciding rules' feedback. |
+| `unavailable` | Client | The server could not check its message. The same send may succeed later. |
+| `content-invalid` | Either | The text is malformed or longer than 32,768 bytes as JSON text. |
+
+A client reads nothing else of a check, as
+[refused messages](../firewall/message-policy.md#refused-messages) states.
+Invalid arguments fail before the call runs and identify the field to
+correct. A corrected message is a new send with a new check.
+
+Repeating a successful send creates another message. Cancelling a call does
+not remove a message it already stored.
 
 ## Receiving inbox entries
 
@@ -74,12 +85,8 @@ one request leaves others active. Accepted sends and stored inbox entries surviv
 
 ## MCP projection
 
-`send_message` takes structured input and returns the accepted-work receipt.
-Invalid arguments fail before invocation.
-
 A tool call that fails returns a result marked as an error (`isError: true`).
 Its text is the failure's message, written for the model to act on. Its
 structured content holds the failure's fields, among them its `reason`.
-A firewall refusal includes its check, rule and
-feedback. Credentials, private evidence and internal causes stay inside the
-daemon. Check ids grant no approval, management or system-role authority.
+Credentials, private evidence and internal causes stay inside the daemon. A
+check id grants no approval, management or system-role authority.

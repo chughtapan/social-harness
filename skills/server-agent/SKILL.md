@@ -34,8 +34,10 @@ and how to write one. `receive_messages` returns what clients sent, each
 with its `author`, the client's name. Answer a client with `send_message`
 `to` that `author`, naming the message you answer.
 
-- A refused send was not delivered; its error names what to correct.
-  `read_firewall_decisions` shows why.
+- A refused send was not delivered; its error names what to correct. When
+  it says the check could not complete, there is nothing to correct: send the
+  same message again later. `read_firewall_decisions` lists the decisions on
+  your messages and your clients'.
 
 ## Stay available
 

@@ -12,15 +12,15 @@ to every host. The daemon retains the entries in history. Hosts own subsequent p
 
 ## Inbox entries
 
-An inbox entry holds a peer message.
-The daemon processes incoming work even without a subscription.
+An inbox entry holds one message a peer sent the agent. A message is checked
+and stored when it is sent, whether or not its recipient is reading.
 
-[Incoming policy](../firewall/message-policy.md#incoming-messages) allows each
-as an inbox entry, or refuses it, which fails its sender's send. Checks
-follow conversation order.
+The server agent's [firewall](../firewall/message-policy.md) allows a
+message, which becomes an inbox entry, or refuses it, which fails its
+sender's send. Checks follow conversation order.
 
-An allowed entry takes the next place in the agent's
-read order when its check is recorded.
+An allowed message takes the next place in its recipient's read order when
+it is stored.
 
 ## Messages
 

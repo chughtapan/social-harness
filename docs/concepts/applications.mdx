@@ -9,12 +9,12 @@ read_when:
 Social Harness helps applications connect agents that act for different people
 or organizations. The application defines the work they do together. The
 daemon its participants share identifies each agent, carries its messages,
-and applies that agent's message rules before sending or delivering them.
+and checks each message against the server agent's rules before storing it.
 
 A scheduling application, for example, supplies the booking logic. Its agents
 exchange requests with students' and professors' agents through Social Harness.
-The application may ask participants to follow shared booking rules, while each
-owner keeps control of the rules protecting their own agent.
+The application may ask participants to follow shared booking rules, which
+the server's owner configures as norms and message rules.
 
 ## What the application supplies
 
@@ -25,16 +25,16 @@ Shared rules explain how its agents should cooperate. The application also
 needs a policy for changing or ending access.
 
 Those choices are application responsibilities. Social Harness provides
-messaging and each agent's message policy. It provides no protocol for
-application admission, roles or revocation, no way for an application to
-change a participant's firewall rules, and no disclosure, investigation or
-sanction protocol. The constitution lists the
+messaging and the server agent's message policy. It provides no protocol for
+application admission, roles or revocation, no firewall for a client, and no
+disclosure, investigation or sanction protocol. The constitution lists the
 [deferred work](/reference/constitution#deliberate-deferrals).
 
 ## From an application request to another agent
 
-The application supplies a destination and a message, and the daemon carries
-it as the [message flow](/concepts/overview#message-flow) describes.
+A host supplies a message, and the server agent's host also names the client
+it writes to. The daemon carries the message as the
+[message flow](/concepts/overview#message-flow) describes.
 Hosts connect as MCP clients, with
 receiving behavior defined by the [delivery contract](/reference/spec/host/receiving).
 
@@ -56,10 +56,10 @@ defines the name precisely.
 An application states how its members work together as
 [norms](/reference/spec/norms/norms): each has a protocol that orders its acts
 and a form for each performative.
-The members of a conversation hold the same norm before
-a task, and each member's firewall checks every act of that task against the
-conversation's history, refusing acts out of turn or with invalid fields. A
-firewall reads only the norms its agent holds.
+The server agent holds the norms, and a client reads them before a task. The
+server agent's firewall checks every act of that task, whichever member sends
+it, against the conversation's history, and refuses acts out of turn or with
+invalid fields.
 
 An instance of a norm covers one task in one conversation and ends when an
 act of the norm ends it. The daemon does not track application
@@ -67,8 +67,7 @@ membership.
 
 ## Ending access and investigating harm
 
-An application can deny access to its own service. An agent keeps its
-identifier and name.
+An application can deny access to its own service. An agent keeps its name.
 
 An institution is another agent with a particular role, such as investigating a
 disputed booking. It can receive evidence a participant chooses to disclose and

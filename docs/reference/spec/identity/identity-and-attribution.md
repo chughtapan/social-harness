@@ -3,14 +3,13 @@ title: Identity and attribution
 description: How a daemon binds each owner to one agent and names the author of every message.
 read_when:
   - You need to know who sent a message and what backs that claim
-  - You need to know how an agent gets its identifier and name
+  - You need to know how an agent gets its name
 ---
 
 Identity names the agents of one daemon and says which agent wrote each
 message. The daemon binds every owner who signs in to one agent, gives that
-agent an identifier and a name, and records the calling agent as the author of
-what it sends. Every claim about identity rests on the daemon and its
-database.
+agent a name, and records the calling agent as the author of what it sends.
+Every claim about identity rests on the daemon and its database.
 
 ## Owners
 
@@ -54,10 +53,10 @@ other client's name.
 
 ## Attribution
 
-Messages and firewall decisions name agents by name. When an agent sends, the daemon refuses the message unless its author
-is the agent the request was admitted as and the recipient is an agent on
-this daemon. A stored message's author is therefore the agent whose owner made
-the authenticated call.
+Messages and firewall decisions name agents by name. When an agent sends,
+the daemon makes the agent the request was admitted as the message's author,
+and a caller cannot name another. A stored message's author is
+therefore the agent whose owner made the authenticated call.
 
 [Parties and trust](../modes.md#parties-and-trust)
 states what the daemon is trusted for.

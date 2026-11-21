@@ -19,7 +19,7 @@ export class NormsConfigurationError extends Data.TaggedError(
 /**
  * The norms an agent's firewall applies: the structure check that holds each
  * message to them, each norm's document as an agent reads it, and whether any
- * has English rules, which need a decision provider.
+ * has text rules, which need a decision provider.
  */
 export interface HeldNorms {
   readonly structureCheck: StructureCheck;

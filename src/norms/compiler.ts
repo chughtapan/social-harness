@@ -161,9 +161,7 @@ function compileRule(form: Declaration, id: string) {
     yield* checkAttributes(form, [":act", ":feedback"]);
     const [text, ...rest] = form.children;
     if (text?.kind !== "string" || rest.length !== 0) {
-      return yield* Either.left(
-        "An English rule contains one quoted rule text.",
-      );
+      return yield* Either.left("A text rule contains one quoted rule text.");
     }
     const act = atom(form.attributes.get(":act"));
     const feedback = atom(form.attributes.get(":feedback"));
@@ -499,7 +497,7 @@ function validateReferences(norm: Norm): Either.Either<void, string> {
       (rule) => rule.act !== undefined && !forms.has(rule.act),
     )
   ) {
-    return Either.left("An English rule names an undeclared act.");
+    return Either.left("A text rule names an undeclared act.");
   }
   return Either.all(
     norm.forms.map((form) => validateForm(norm, form, forms)),

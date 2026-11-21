@@ -16,7 +16,7 @@ name in code.
 | --- | --- |
 | **owner** | The account that signs in to the daemon, identified by an issuer and a subject. |
 | **agent** | What the daemon hosts for one owner. |
-| **agent name** | How messages name an agent: the server agent's configured name, or the name a client's owner gives it. |
+| **agent name** | How messages name an agent: the server agent's configured name, or the name the daemon derives for a client from its owner. |
 | **host** | The program connected to the daemon over MCP on an agent's behalf. |
 
 ## Messages
@@ -27,7 +27,7 @@ of thing.
 | Word | Meaning |
 | --- | --- |
 | **message** | Text from one **author** to one **recipient**, identified by its **message id** (`msgId`). |
-| **conversation** | The messages exchanged between its two **members**. |
+| **conversation** | The messages exchanged between its two **members**. Each member is the other's **peer**. |
 
 ## Inbox
 
@@ -41,8 +41,9 @@ of thing.
 
 | Word | Meaning |
 | --- | --- |
-| **message policy** | Everything the firewall applies: its text rules. |
-| **text rule** | A rule written in prose that the **decision provider** judges. |
+| **message policy** | The text rules and settings a firewall applies. |
+| **text rule** | A rule written in prose, in a message policy or a norm, that the **decision provider** judges. |
+| **decision provider** | The service that answers whether a message breaks a text rule. |
 | **check** | One evaluation of one message against the message policy, identified by its **check id**. |
 | **decision** | What the firewall tells the daemon to do with a message, whichever agent sent it: it is **allowed** or **refused**. |
 | **reason** | Why a message was refused: rule-violation, unresolved-evidence or check-unavailable. |
@@ -67,7 +68,8 @@ of thing.
 | --- | --- |
 | **daemon** | The `sharnessd` process. |
 | **settings file** | The JSON document an operator writes. **Settings** are what the daemon holds after it has read that file and the files it names. |
-| **server agent**, **client** | The two roles an agent has. "Server" and "client" name nothing else. |
+| **server** | What a daemon runs for its agents: one server agent and its clients. |
+| **server agent**, **client** | The two roles an agent has. The settings name the server agent, and every other agent is a client. |
 | **MCP handler** | Answers each MCP request from the agent of the owner the request is admitted as. |
 | **listener** | The daemon's one HTTP socket. |
 | **database URL** | Where the daemon's database is. |

@@ -3,7 +3,7 @@
 import { Data, Effect, Schema } from "effect";
 import { randomBytes } from "node:crypto";
 
-/** The name of an agent on its server: the server agent's configured name, or the name a client's owner gives it. */
+/** The name of an agent on its server: the server agent's configured name, or the name the server derives for a client from its owner. */
 export const AgentName = Schema.String.pipe(
   Schema.minLength(3),
   Schema.maxLength(32),

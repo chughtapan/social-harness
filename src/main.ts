@@ -105,7 +105,7 @@ const loadSettings = Effect.fn("loadSettings")(function* () {
         );
   if (norms?.hasTextRules === true && messagePolicy?.provider === undefined) {
     return yield* refused(
-      "The configured norms have English rules, which need a messagePolicyFile with a decisionProvider to check them",
+      "The configured norms have text rules, which need a messagePolicyFile with a decisionProvider to check them",
     );
   }
   return {
