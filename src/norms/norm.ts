@@ -173,6 +173,15 @@ export function initialNormsHaveRules(installed: InstalledNorms): boolean {
   return installed.some((norm) => norm.textRules.length > 0);
 }
 
+/**
+ * Whether `text` may name a norm, an act or a field: a lowercase letter, then
+ * lowercase letters, digits or hyphens, 64 characters at most. Roles and facts
+ * may also use capitals.
+ */
+export function isLowercaseName(text: string): boolean {
+  return /^[a-z][a-z0-9-]{0,63}$/u.test(text);
+}
+
 /** Reads a message as one act: the whole text is one parenthesized act. */
 export function readAct(message: Message): Either.Either<Act, NormProblem> {
   return readSExpressions(message.text, false).pipe(
@@ -181,13 +190,13 @@ export function readAct(message: Message): Either.Either<Act, NormProblem> {
       if (form?.kind !== "list" || extra.length !== 0) {
         return Either.left(
           structural(
-            "Error: Reply does not contain exactly one parenthesized speech act.",
+            "Reply does not contain exactly one parenthesized speech act.",
           ),
         );
       }
       const [head, ...parameters] = form.values;
       return head?.kind !== "symbol" ||
-        !/^[a-z][a-z0-9-]{0,63}$/u.test(head.value) ||
+        !isLowercaseName(head.value) ||
         parameters.length % 2 !== 0
         ? Either.left(
             structural(
@@ -209,12 +218,12 @@ export function checkStructure(
     return Either.left({
       stage: "protocol",
       reason: "rule-violation",
-      detail: `Error: ${act.name} is not valid for the active norm ${norm.name}.`,
+      detail: `${act.name} is not valid for the active norm ${norm.name}.`,
     });
   }
   if (form === undefined) {
     return Either.left(
-      structural(`Error: ${act.name} is not a valid act in ${act.norm}.`),
+      structural(`${act.name} is not a valid act in ${act.norm}.`),
     );
   }
   const failures = [
@@ -225,19 +234,17 @@ export function checkStructure(
       if (value === undefined) {
         return field.optional
           ? []
-          : [
-              `Error: ${field.name} is required for ${act.name} in ${act.norm}.`,
-            ];
+          : [`${field.name} is required for ${act.name} in ${act.norm}.`];
       }
       return accepts(field, value)
         ? []
-        : [`Error: ${field.name} is not valid for ${act.name} in ${act.norm}.`];
+        : [`${field.name} is not valid for ${act.name} in ${act.norm}.`];
     }),
     ...Object.keys(act.fields)
       .filter((stated) => form.fields.every((field) => field.name !== stated))
       .map(
         (stated) =>
-          `Error: ${stated} is not a valid field of ${act.name} in ${act.norm}.`,
+          `${stated} is not a valid field of ${act.name} in ${act.norm}.`,
       ),
   ];
   return failures.length === 0
@@ -352,7 +359,8 @@ function readParameters(
       const value = parameters[index + 1];
       if (
         key?.kind !== "symbol" ||
-        !/^:[a-z][a-z0-9-]{0,63}$/u.test(key.value) ||
+        !key.value.startsWith(":") ||
+        !isLowercaseName(key.value.slice(1)) ||
         value === undefined
       ) {
         return yield* Either.left(
@@ -364,7 +372,7 @@ function readParameters(
       const field = key.value.slice(1);
       if (fields.has(field)) {
         return yield* Either.left(
-          structural(`Error: ${field} appears more than once.`, field),
+          structural(`${field} appears more than once.`, field),
         );
       }
       fields.set(field, yield* readValue(value));

@@ -301,7 +301,7 @@ function checkProtocol(
     if (!senderPermitted(form, author, role, anchor)) {
       return yield* Either.left(
         violation(
-          `Error: ${act.name} is not permitted for ${norm.name} role ${role ?? "unassigned"}.`,
+          `${act.name} is not permitted for ${norm.name} role ${role ?? "unassigned"}.`,
         ),
       );
     }
@@ -368,7 +368,7 @@ function invalidTransition(
       ? undefined
       : view.referenceActs?.get(message.replyToMsgId);
   const after = preceding === undefined ? "" : ` after ${preceding}`;
-  return violation(`Error: ${act.name} is not valid${after} for ${norm.name}.`);
+  return violation(`${act.name} is not valid${after} for ${norm.name}.`);
 }
 
 /** Whether the message's reply reference suits `form`; `invalid` refuses a continuation that replies outside the instance. */
@@ -384,7 +384,7 @@ function checkReference(
       ? Either.void
       : Either.left(
           violation(
-            "Error: replyToMsgId is required for a continuation act.",
+            "replyToMsgId is required for a continuation act.",
             "replyToMsgId",
           ),
         );
@@ -395,7 +395,7 @@ function checkReference(
   if (!known) {
     return Either.left(
       violation(
-        "Error: replyToMsgId does not identify a preceding message in this conversation.",
+        "replyToMsgId does not identify a preceding message in this conversation.",
         "replyToMsgId",
       ),
     );

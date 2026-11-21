@@ -120,6 +120,22 @@ export interface EarlierMessage {
 }
 
 /**
+ * What a refusal says of the structure check behind it, as a host reads it in
+ * a failed send: the norm the message was read as an act of, with the digest
+ * of its document, the act, and the stage that refused it. A message the
+ * structure check passed and a text rule refused has the stage `semantic`.
+ * `explanation` and `field` are those of a problem the structure check found.
+ */
+export interface StructureDetail {
+  readonly norm?: string;
+  readonly digest?: string;
+  readonly act?: string;
+  readonly stage: "structural" | "protocol" | "semantic";
+  readonly explanation?: string;
+  readonly field?: string;
+}
+
+/**
  * Judges whether a message may follow the earlier messages of its
  * conversation, before the text rules do. A refusal gives its explanation as
  * `feedback`, the rule the decision names, its diagnostics as `detail` and
@@ -137,14 +153,14 @@ export type StructureCheck = (
       readonly reason: "rule-violation" | "unresolved-evidence";
       readonly ruleId: string;
       readonly feedback: string;
-      readonly detail?: unknown;
+      readonly detail?: StructureDetail;
       readonly reply?: string;
     }
   | {
       readonly kind: "passed";
       readonly textRules: readonly TextRule[];
       readonly protocol?: unknown;
-      readonly detail?: unknown;
+      readonly detail?: StructureDetail;
       readonly replyTo?: (feedback: string) => string;
     }
 >;
@@ -169,7 +185,7 @@ type CheckResult =
       readonly reason: FirewallRefusalReason;
       readonly rule?: string;
       readonly feedback: readonly string[];
-      readonly detail?: unknown;
+      readonly detail?: StructureDetail;
       readonly reply?: { readonly text: string; readonly record: CheckRecord };
       readonly record?: CheckRecord;
     };
@@ -241,7 +257,7 @@ interface Refusal extends Pick<CheckRecord, "decidedBy" | "checkedRuleIds"> {
   readonly reason: FirewallRefusalReason;
   readonly rule?: string;
   readonly feedback: readonly string[];
-  readonly detail?: unknown;
+  readonly detail?: StructureDetail;
   readonly reply?: string;
 }
 
@@ -378,7 +394,7 @@ function conclude(
     readonly answers?: readonly Answer[];
     readonly gap: boolean;
     readonly checkedRuleIds: readonly string[];
-    readonly detail?: unknown;
+    readonly detail?: StructureDetail;
     readonly replyTo?: (feedback: string) => string;
     readonly notice?: string;
   },

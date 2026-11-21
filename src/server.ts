@@ -41,6 +41,7 @@ import {
   type Firewall,
   type FirewallRefusalReason,
   LocalGuidance,
+  type StructureDetail,
 } from "./firewall.js";
 import {
   AgentName,
@@ -252,7 +253,8 @@ const refusalText: Readonly<Record<FirewallRefusalReason, string>> = {
 /**
  * A send the server agent's firewall refused. `rule` and `detail` are those
  * of a structure check. The message states each deciding rule's feedback as
- * an error, or the reason when there is none, then the check.
+ * an error, or the reason when there is none, then the check. Feedback is a
+ * plain sentence: this message alone marks it as an error.
  */
 class FirewallRefusal extends Data.TaggedError("FirewallRefusal")<{
   readonly reason: "firewall-refused";
@@ -260,16 +262,14 @@ class FirewallRefusal extends Data.TaggedError("FirewallRefusal")<{
   readonly refusal: FirewallRefusalReason;
   readonly rule?: string;
   readonly feedback: readonly string[];
-  readonly detail?: unknown;
+  readonly detail?: StructureDetail;
 }> {
   override get message(): string {
     const rule = this.rule === undefined ? "" : `, rule ${this.rule}`;
     return [
       ...(this.feedback.length === 0
         ? [`Error: ${refusalText[this.refusal]}`]
-        : this.feedback.map((text) =>
-            text.startsWith("Error:") ? text : `Error: ${text}`,
-          )),
+        : this.feedback.map((text) => `Error: ${text}`)),
       `Check: ${this.checkId}${rule}; ${this.refusal}.`,
     ].join(" ");
   }
@@ -280,7 +280,7 @@ const refusalOf = (refused: {
   readonly reason: FirewallRefusalReason;
   readonly rule?: string;
   readonly feedback: readonly string[];
-  readonly detail?: unknown;
+  readonly detail?: StructureDetail;
 }) =>
   new FirewallRefusal({
     reason: "firewall-refused",

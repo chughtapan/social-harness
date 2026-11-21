@@ -12,6 +12,7 @@ import { join } from "node:path";
 import {
   decodeNorm,
   type InstalledNorms,
+  isLowercaseName,
   type MessageForm,
   type Norm,
   readSExpressions,
@@ -95,10 +96,7 @@ export function compileNorm(source: string): Compiled<Norm> {
     ]);
     const initiator = atom(header.attributes.get(":initiator"));
     const participant = atom(header.attributes.get(":participant"));
-    if (
-      header.name === undefined ||
-      !/^[a-z][a-z0-9-]{0,63}$/u.test(header.name)
-    ) {
+    if (header.name === undefined || !isLowercaseName(header.name)) {
       return yield* Either.left(
         "A norm names two distinct roles and a lowercase norm name.",
       );
@@ -333,7 +331,7 @@ function compileField(form: Declaration) {
     if (
       allowed === undefined ||
       form.name === undefined ||
-      !/^[a-z][a-z0-9-]{0,63}$/u.test(form.name)
+      !isLowercaseName(form.name)
     ) {
       return yield* Either.left(
         "A field needs a lowercase name and a supported primitive type.",
@@ -580,7 +578,7 @@ function validateForm(
     return Either.left("A recipient sender selector names an undeclared fact.");
   }
   if (
-    !/^[a-z][a-z0-9-]{0,63}$/u.test(form.act) ||
+    !isLowercaseName(form.act) ||
     [...form.when, ...form.terminates].some((fact) => !facts.has(fact))
   ) {
     return Either.left(

@@ -645,7 +645,7 @@ describe("Firewall structure check", () => {
     reason: "rule-violation",
     ruleId: "shape",
     feedback: "Send a greeting first.",
-    detail: { step: 1 },
+    detail: { stage: "structural" },
   } as const;
 
   it.each([
@@ -670,7 +670,7 @@ describe("Firewall structure check", () => {
           reason: "rule-violation",
           rule: "shape",
           feedback: [refusal.feedback],
-          detail: { step: 1 },
+          detail: refusal.detail,
           record: {
             decidedBy: [{ ruleId: "shape" }],
             checkedRuleIds: ["shape"],

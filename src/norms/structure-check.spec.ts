@@ -543,13 +543,11 @@ it("names exactly the fields an act is missing, adds or gets wrong", () => {
       };
       const expected = named.flatMap((state) =>
         failureOf(state).map(
-          (failure) => `Error: ${state.name} ${failure} open in sample.`,
+          (failure) => `${state.name} ${failure} open in sample.`,
         ),
       );
       const stated =
-        result.kind === "refused"
-          ? result.feedback.split(/(?<=\.) (?=Error: )/u)
-          : [];
+        result.kind === "refused" ? result.feedback.split(/(?<=\.) /u) : [];
       expect(new Set(stated)).toEqual(new Set(expected));
       expect(stated).toHaveLength(expected.length);
     }),
