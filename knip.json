@@ -22,13 +22,6 @@
       "project": [
         "**/*.ts"
       ]
-    },
-    "images/daemon": {
-      "ignoreDependencies": [
-        "@social-harness/social-harness",
-        "@effect/platform-node",
-        "effect"
-      ]
     }
   }
 }

@@ -108,7 +108,6 @@ jobs:
       - name: Build the daemon image for amd64
         run: |
           docker buildx build --platform linux/amd64 --load \
-            --file images/daemon/Dockerfile \
             --tag ghcr.io/social-harness/daemon:ci .
       - name: Smoke-test the daemon executable
         run: docker run --rm ghcr.io/social-harness/daemon:ci --help

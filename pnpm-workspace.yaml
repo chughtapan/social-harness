@@ -5,7 +5,6 @@
 # tsc is TypeScript 7 (@typescript/native); "typescript" is the TypeScript 6 API, which typescript-eslint (<6.1.0) and other tools load.
 packages:
   - "tests/*"
-  - "images/daemon"
 
 catalog:
   "@chughtapan/safer-architecture-lsp": 0.3.2
@@ -17,10 +16,10 @@ catalog:
   "@effect/sql-pg": ^0.53.0
   "@effect/vitest": ^0.30.0
   "@eslint-community/eslint-plugin-eslint-comments": ^4.7.1
-  "@modelcontextprotocol/client": https://pkg.pr.new/@modelcontextprotocol/client@5ebb589
-  "@modelcontextprotocol/express": https://pkg.pr.new/@modelcontextprotocol/express@5ebb589
-  "@modelcontextprotocol/node": https://pkg.pr.new/@modelcontextprotocol/node@5ebb589
-  "@modelcontextprotocol/server": https://pkg.pr.new/@modelcontextprotocol/server@5ebb589
+  "@modelcontextprotocol/client": https://pkg.pr.new/modelcontextprotocol/typescript-sdk/@modelcontextprotocol/client@5ebb589
+  "@modelcontextprotocol/express": https://pkg.pr.new/modelcontextprotocol/typescript-sdk/@modelcontextprotocol/express@5ebb589
+  "@modelcontextprotocol/node": https://pkg.pr.new/modelcontextprotocol/typescript-sdk/@modelcontextprotocol/node@5ebb589
+  "@modelcontextprotocol/server": https://pkg.pr.new/modelcontextprotocol/typescript-sdk/@modelcontextprotocol/server@5ebb589
   "@opentelemetry/api": ^1.9.0
   "@opentelemetry/exporter-trace-otlp-proto": ^0.223.0
   "@opentelemetry/resources": ^2.12.0

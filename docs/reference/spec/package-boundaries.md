@@ -24,5 +24,5 @@ on it, private application components, simulators, evaluation applications or Nx
 ## What the package installs
 
 `@social-harness/social-harness` installs the `sharnessd` command and ships
-`config/` and `skills/`. It has no library entry: a host talks to the daemon
+`examples/` and `skills/`. It has no library entry: a host talks to the daemon
 with an MCP client and imports nothing from the package.

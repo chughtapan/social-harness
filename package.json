@@ -20,7 +20,7 @@
     "dist",
     "!dist/tsconfig.tsbuildinfo",
     "skills",
-    "config",
+    "examples",
     "LICENSE",
     "NOTICE"
   ],
@@ -49,7 +49,7 @@
       "default": [
         "{projectRoot}/src/**/*",
         "{projectRoot}/tests/support/**/*",
-        "{projectRoot}/config/**/*",
+        "{projectRoot}/examples/**/*",
         "{projectRoot}/skills/**/*",
         "{projectRoot}/tsconfig.json",
         "{projectRoot}/safer-architecture.config.json",

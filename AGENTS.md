@@ -41,8 +41,8 @@ owner's agent and delivers their messages. npm packages use the `@social-harness
 Executables use `sharness*`, environment variables use `SHARNESS_*`, and
 protocol namespaces use `org.social-harness/*`.
 
-The daemon image lives under
-`images/`; private product overlays stay in deployment. Image publication follows
+The daemon image is built from the root
+`Dockerfile`; private product overlays stay in deployment. Image publication follows
 [Publication and versions](docs/reference/spec/releases.md#publication-and-versions).
 
 `main` is the only track; npm publication membership and versioning follow
@@ -57,7 +57,7 @@ same authority order drift, and the drift is invisible.
 
 ## The `@social-harness/social-harness` package
 
-The repository root is this package: `src/`, `config/` and `skills/`. It
+The repository root is this package: `src/`, `examples/` and `skills/`. It
 implements the agent daemon and its MCP interface for hosts. Read
 [what the package installs](docs/reference/spec/package-boundaries.md#what-the-package-installs)
 and the contract for the area you change:
@@ -90,7 +90,7 @@ supply, and what to ask the owner; it does not script the steps or assume a
 provider. Keep the skills independent of any one agent host: each host
 decides how it signs in, schedules itself and reads its inbox. When code
 changes a tool, setting or variable a skill names, change the skill in the
-same pull request. Review changes to `config/norms/` as policy changes: their
+same pull request. Review changes to `examples/` as policy changes: their
 text determines what the structure check and the decision provider enforce.
 
 An MCP tool description explains its result, failures the caller can correct,
