@@ -7,7 +7,7 @@
  * saves.
  */
 
-import { Clock, Effect, Exit, Schema, Struct } from "effect";
+import { Clock, Effect, Schema, Struct } from "effect";
 import { randomBytes } from "node:crypto";
 import type { Norms, Role, TextRule } from "./norms/index.js";
 import {
@@ -103,9 +103,9 @@ interface Refusal extends Pick<CheckRecord, "refusedBy" | "checkedRuleIds"> {
  * allows every message and records nothing.
  *
  * A check runs the norms' structure check on its message first, with the
- * earlier messages; that check's refusal refuses the message. The
- * `provider` then answers whether the message breaks each text rule the
- * structure check gave it. A violation refuses, and so does
+ * earlier messages; that check's refusal refuses the message as a
+ * violation. The `provider` then answers whether the message breaks each
+ * text rule the structure check gave it. A violation refuses, and so does
  * an unsure answer. A provider that gives no usable answer, and rules
  * without a provider, make the check unavailable.
  */
@@ -134,9 +134,9 @@ export function makeFirewall(applies: {
         ),
       ).pipe(Effect.withSpan("structureCheck"));
       if (found.kind === "refused") {
-        const { reason, ruleId, feedback } = found;
+        const { ruleId, feedback } = found;
         return refuse(candidate, {
-          reason,
+          reason: "violation",
           feedback: [feedback],
           refusedBy: [{ ruleId }],
           checkedRuleIds: [ruleId],
@@ -156,7 +156,6 @@ export function makeFirewall(applies: {
         Effect.catchTag("DecisionProviderError", () =>
           Effect.succeed(checkUnavailable()),
         ),
-        markCheckActivity(sender),
         Effect.withSpan("judgeTextRules"),
         permits.withPermits(1),
       );
@@ -266,32 +265,4 @@ function recordOf(
 /** A check id correlates a check without granting lookup authority. */
 function mintCheckId() {
   return `chk_${randomBytes(32).toString("hex")}`;
-}
-
-/** Pairs a pending and a settled span around one check, even when it fails or is cancelled. */
-function markCheckActivity(sender: Role) {
-  return <A, E, R>(work: Effect.Effect<A, E, R>): Effect.Effect<A, E, R> =>
-    Effect.uninterruptibleMask((restore) =>
-      activitySpan("retry.pending", { id: sender }).pipe(
-        Effect.zipRight(restore(work)),
-        Effect.onExit((exit) => {
-          const outcome = Exit.isInterrupted(exit) ? "interrupted" : "failed";
-          return activitySpan("retry.settled", {
-            id: sender,
-            outcome: Exit.isSuccess(exit) ? "checked" : outcome,
-          });
-        }),
-      ),
-    );
-}
-
-/** A span that marks one end of a firewall check. */
-function activitySpan(
-  name: string,
-  attributes: Readonly<Record<string, string>>,
-): Effect.Effect<void> {
-  return Effect.withSpan(Effect.void, name, {
-    captureStackTrace: false,
-    attributes: { kind: "firewall-check", ...attributes },
-  });
 }

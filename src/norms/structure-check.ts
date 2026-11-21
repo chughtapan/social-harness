@@ -9,7 +9,6 @@
 import { Either } from "effect";
 import {
   type Act,
-  type Delay,
   type EarlierAct,
   type Field,
   type FieldValue,
@@ -46,8 +45,8 @@ export interface TextRule {
 }
 
 /**
- * What the structure check finds of one message. A refusal gives its reason,
- * the rule it is recorded under and, as `feedback`, what does not fit. A pass gives the
+ * What the structure check finds of one message. A refusal gives the rule it
+ * is recorded under and, as `feedback`, what does not fit. A pass gives the
  * text rules a decision provider judges the message against, and the
  * `instance` as the provider reads it with them: its norm, the act's
  * performative and fields, and the facts that are set.
@@ -55,7 +54,6 @@ export interface TextRule {
 export type Finding =
   | {
       readonly kind: "refused";
-      readonly reason: Problem["reason"];
       readonly ruleId: string;
       readonly feedback: string;
     }
@@ -66,16 +64,13 @@ export type Finding =
     };
 
 /**
- * Why a message does not pass: the stage that failed, the reason, and the
- * feedback its sender reads. The `form` stage reads the message alone: its
- * text is an act of one of the server's norms whose fields fit their form.
- * The `protocol` stage reads the conversation: the act is one its sender may
- * send next. The reason is a `violation`, or `unsure` for a turn rule the
- * stored conversation cannot settle.
+ * Why a message does not pass: the stage that failed, and the feedback its
+ * sender reads. The `form` stage reads the message alone: its text is an act
+ * of one of the server's norms whose fields fit their form. The `protocol`
+ * stage reads the conversation: the act is one its sender may send next.
  */
 interface Problem {
   readonly stage: "form" | "protocol";
-  readonly reason: "violation" | "unsure";
   readonly feedback: string;
 }
 
@@ -165,7 +160,6 @@ export function structureCheck(
 function refusal(problem: Problem, norm?: Norm): Finding {
   return {
     kind: "refused",
-    reason: problem.reason,
     ruleId: `${norm?.name ?? "norm"}-${problem.stage}`,
     feedback: problem.feedback,
   };
@@ -288,13 +282,11 @@ function checkProtocol(
     if (!permitsSender(form, sent, setter)) {
       return yield* Either.left(notTheirs);
     }
-    if (!isEnabled(form, instance)) {
-      return yield* Either.left(outOfTurn);
-    }
-    if (form.delay !== undefined) {
-      yield* checkDelay(instance, form.delay, sent.checkedAt, outOfTurn);
-    }
-    return yield* checkRelations(instance, fitted, chain, outOfTurn);
+    return isEnabled(form, instance) &&
+      !isDelayed(instance, form, sent.checkedAt) &&
+      satisfiesRelations(instance, fitted, chain)
+      ? undefined
+      : yield* Either.left(outOfTurn);
   });
 }
 
@@ -422,62 +414,45 @@ function replyChain(instance: Instance, replyToMsgId?: string) {
   return chain;
 }
 
-/** Whether an act's delay has passed at `now`. A delay whose fact is not set, or was set by an act without its number of seconds, settles nothing. */
-function checkDelay(
-  instance: Instance,
-  delay: Delay,
-  now: number,
-  outOfTurn: Problem,
-): Either.Either<void, Problem> {
+/**
+ * Whether the form's delay has yet to pass at `now`: the act that set the
+ * delay's fact was checked fewer seconds ago than its field says. A
+ * well-formed norm always gives that act and that number.
+ */
+function isDelayed(instance: Instance, { delay }: Form, now: number) {
+  if (delay === undefined) {
+    return false;
+  }
   const setter = instance.facts.get(delay.fact);
   const seconds = setter?.act.fields[delay.secondsField];
-  if (setter === undefined || typeof seconds !== "number") {
-    return Either.left(
-      unsettled("The declared delay has no retained numeric anchor."),
-    );
-  }
-  return now < setter.checkedAt + seconds * 1000
-    ? Either.left(outOfTurn)
-    : Either.void;
+  return (
+    setter === undefined ||
+    typeof seconds !== "number" ||
+    now < setter.checkedAt + seconds * 1000
+  );
 }
 
-/** Whether the act satisfies every relation of its form, against the earlier acts the reply chain contains. */
-function checkRelations(
+/**
+ * Whether the act satisfies every relation of its form: it states the
+ * relation's field, the reply chain contains the earlier act the source
+ * names, and the two fields compare as the operator requires.
+ */
+function satisfiesRelations(
   instance: Instance,
   { form, act }: Fitted,
   chain: ReadonlySet<string>,
-  outOfTurn: Problem,
-): Either.Either<void, Problem> {
-  return Either.gen(function* () {
-    for (const { field, operator, source } of form.relations) {
-      const expected = yield* sourceValue(instance, source, chain, outOfTurn);
-      const actual = act.fields[field];
-      if (actual === undefined || !isSatisfied(operator, actual, expected)) {
-        return yield* Either.left(outOfTurn);
-      }
-    }
+) {
+  return form.relations.every(({ field, operator, source }) => {
+    const actual = act.fields[field];
+    const expected = earlierAct(instance, source.act, chain)?.act.fields[
+      source.field
+    ];
+    return (
+      actual !== undefined &&
+      expected !== undefined &&
+      isSatisfied(operator, actual, expected)
+    );
   });
-}
-
-/** The value a relation compares its field with: the source's field of the earlier act it names, which the reply chain must contain. An optional field the act left out settles nothing. */
-function sourceValue(
-  instance: Instance,
-  source: Relation["source"],
-  chain: ReadonlySet<string>,
-  outOfTurn: Problem,
-): Step<FieldValue> {
-  const fields = earlierAct(instance, source.act, chain)?.act.fields;
-  if (fields === undefined) {
-    return Either.left(outOfTurn);
-  }
-  const value = fields[source.field];
-  return value === undefined
-    ? Either.left(
-        unsettled(
-          "A declared relation needs an earlier field that is missing.",
-        ),
-      )
-    : Either.right(value);
 }
 
 /** Whether `actual` is what a relation's operator requires against `expected`. */
@@ -616,15 +591,10 @@ function within(value: number, minimum?: number, maximum?: number) {
 
 /** The problem of a message whose text is no act that fits its form. */
 function formProblem(feedback: string): Problem {
-  return { stage: "form", reason: "violation", feedback };
+  return { stage: "form", feedback };
 }
 
 /** The problem of an act its sender may not send next. */
 function protocolProblem(feedback: string): Problem {
-  return { stage: "protocol", reason: "violation", feedback };
-}
-
-/** The problem of an act whose turn rule the stored conversation cannot settle. */
-function unsettled(feedback: string): Problem {
-  return { stage: "protocol", reason: "unsure", feedback };
+  return { stage: "protocol", feedback };
 }

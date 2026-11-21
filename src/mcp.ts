@@ -6,8 +6,8 @@
 
 import {
   type AuthInfo,
+  createMcpHandler,
   McpServer,
-  type McpServerFactory,
   type StandardSchemaWithJSON,
 } from "@modelcontextprotocol/server";
 import { EventsExtension } from "@modelcontextprotocol/server/ext/events";
@@ -68,15 +68,16 @@ const WEBHOOK_TTL_MILLISECONDS = 30 * 60_000;
 const INBOX_EVENT = "org.social-harness/inbox.pending";
 
 /**
- * The factory the MCP SDK builds each request's server with, over an open
- * `server`. A request's `authInfo` names its owner in `extra.issuer` and
- * `extra.subject`: the owner `admits.issuer` and `admits.subject` name has
- * the server agent, and every other owner has a client, named from its
- * issuer and subject. `norms` are the server's norms, whose
- * documents every agent reads with `read_norms`. A tool call runs on the
- * runtime this effect ran in and is interrupted when its request is aborted.
+ * The MCP handler of an open `server`: it answers each MCP request with the
+ * tools of the agent the request is admitted as. A request's `authInfo`
+ * names its owner in `extra.issuer` and `extra.subject`: the owner
+ * `admits.issuer` and `admits.subject` name has the server agent, and every
+ * other owner has a client, named from its issuer and subject. `norms` are
+ * the server's norms, whose documents every agent reads with `read_norms`. A
+ * tool call runs on the runtime this effect ran in and is interrupted when
+ * its request is aborted.
  */
-export const mcpServerFactory = Effect.fn("serverFactory")(function* (
+export const mcpHandler = Effect.fn("mcpHandler")(function* (
   server: Server,
   admits: {
     readonly issuer: string;
@@ -120,7 +121,7 @@ export const mcpServerFactory = Effect.fn("serverFactory")(function* (
       }),
   });
 
-  const factory: McpServerFactory = ({ authInfo }) => {
+  return createMcpHandler(({ authInfo }) => {
     const caller = callerOf(authInfo);
     const mcp = new McpServer(
       { name: "sharnessd", version: packageVersion },
@@ -134,11 +135,13 @@ export const mcpServerFactory = Effect.fn("serverFactory")(function* (
       registerClientTools(at, caller);
     }
     return mcp;
-  };
-  return factory;
+  });
 });
 
-/** What a request's tools are registered with: the SDK server of the request, the server whose operations they run, and the runner of their calls. */
+/** What answers each MCP request from the agent of the owner the request is admitted as. */
+export type McpHandler = Effect.Effect.Success<ReturnType<typeof mcpHandler>>;
+
+/** What a request's tools are registered with: the SDK's MCP object for the request, the server whose operations they run, and the runner of their calls. */
 interface Registration {
   readonly mcp: McpServer;
   readonly server: Server;
@@ -221,8 +224,8 @@ function registerSharedTools(
       {
         description: `${
           caller === server.name
-            ? "List the norms this server publishes, each with its complete document: which of client and server sends each act, when, and what each field contains. You are the server, and your messages and your clients' must follow the same norms."
-            : "List the norms the server publishes, each with its complete document: which of client and server sends each act, when, and what each field contains. You are the client, and only a message that follows them is sent."
+            ? "List the norms this server publishes, each with its complete document: which of client and server sends each act, when, and what each field contains. The norms call you server: your messages and your clients' must follow the same norms."
+            : "List the norms the server publishes, each with its complete document: which of client and server sends each act, when, and what each field contains. The norms call you client: only a message that follows them is sent."
         } ${ACT_SYNTAX}`,
         input: noArguments,
         output: Schema.Struct({ norms: Schema.Array(normDocument) }),

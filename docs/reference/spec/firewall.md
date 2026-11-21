@@ -174,4 +174,4 @@ has no message content, message id or provider answer.
 | Reason | Rules in `refusedBy` |
 | --- | --- |
 | `violation` | The violated text rules, or the structure check's rule. |
-| `unsure` | The text rules with an unsure answer, or the rule of a structure check that could not settle the message. |
+| `unsure` | The text rules with an unsure answer. |

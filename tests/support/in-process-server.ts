@@ -8,12 +8,11 @@ import {
   Client,
   StreamableHTTPClientTransport,
 } from "@modelcontextprotocol/client";
-import { createMcpHandler } from "@modelcontextprotocol/server";
 import { Effect } from "effect";
 import type { Norms } from "../../src/norms/index.js";
 import type { Answering } from "./decision-provider.js";
 import { type Firewall, makeFirewall } from "../../src/firewall.js";
-import { mcpServerFactory } from "../../src/mcp.js";
+import { mcpHandler } from "../../src/mcp.js";
 import { AgentName } from "../../src/messages.js";
 import { openServer } from "../../src/server.js";
 import { openTestDatabase } from "./database.js";
@@ -56,12 +55,11 @@ export const inProcessServer = Effect.fn("inProcessServer")(function* (
         historyLimit: options.historyLimit,
       }),
   ).pipe(Effect.orDie);
-  const factory = yield* mcpServerFactory(
+  const handler = yield* mcpHandler(
     server,
     { issuer, subject: "alice" },
     options.norms,
   );
-  const handler = createMcpHandler(factory);
   return {
     sql: database.sql,
     signInAs: (

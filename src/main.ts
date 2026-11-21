@@ -12,10 +12,6 @@ import * as NodeSdk from "@effect/opentelemetry/NodeSdk";
 import { FileSystem } from "@effect/platform";
 import { NodeFileSystem, NodeRuntime } from "@effect/platform-node";
 import { toNodeHandler } from "@modelcontextprotocol/node";
-import {
-  createMcpHandler,
-  type McpServerFactory,
-} from "@modelcontextprotocol/server";
 import { diag, DiagConsoleLogger, DiagLogLevel } from "@opentelemetry/api";
 import { OTLPTraceExporter } from "@opentelemetry/exporter-trace-otlp-proto";
 import { BatchSpanProcessor } from "@opentelemetry/sdk-trace-base";
@@ -39,7 +35,7 @@ import {
   jevDecisionProvider,
 } from "./decision-provider.js";
 import { makeFirewall } from "./firewall.js";
-import { mcpServerFactory, packageVersion } from "./mcp.js";
+import { type McpHandler, mcpHandler, packageVersion } from "./mcp.js";
 import { AgentName } from "./messages.js";
 import { compileNorms } from "./norms/index.js";
 import { openServer } from "./server.js";
@@ -158,9 +154,8 @@ const loadSettings = Effect.fn("loadSettings")(function* () {
 const listen = Effect.fn("listen")(function* (
   { host, port }: typeof settingsFile.Type,
   admitted: Admission,
-  factory: McpServerFactory,
+  handler: McpHandler,
 ) {
-  const handler = createMcpHandler(factory);
   // eslint-disable-next-line agent-code-guard/async-keyword -- The MCP SDK's Node handler takes a promise-based fetch function.
   const fetch = async (request: Request) => {
     const answered = admitted.answer(request);
@@ -280,12 +275,12 @@ const serve = Effect.gen(function* () {
       historyLimit: settings.historyLimit,
     }),
   );
-  const factory = yield* mcpServerFactory(
+  const handler = yield* mcpHandler(
     server,
     { issuer: admitted.issuer, subject: serverAgent.subject },
     norms,
   );
-  yield* listen(settings, admitted, factory);
+  yield* listen(settings, admitted, handler);
   yield* Console.log(
     `sharnessd listening on http://${settings.host}:${settings.port}/mcp (package ${packageVersion})`,
   );

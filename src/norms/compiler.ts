@@ -2,7 +2,8 @@
  * @file Compiles a norm document: the Lisp frontend reads it as a norm, and
  * the norm must be well formed. The well-formedness rules read the norm
  * alone, whatever frontend produced it, so that the structure check never
- * meets a form that refers to something its norm lacks.
+ * meets a form that refers to something its norm lacks, or a turn rule it
+ * cannot settle.
  */
 
 import { Array, Either, Option } from "effect";
@@ -65,8 +66,8 @@ function brokenRule(norm: Norm): Option.Option<string> {
  * The first rule one form breaks in its norm, where `facts` are the facts
  * some form sets. Its fields are distinct and their bounds ordered. Every
  * fact it reads is one of `facts`. A form that starts an instance needs
- * nothing earlier. Its delay and each of its relations refer to fields of
- * the right types.
+ * nothing earlier. Its delay and each of its relations refer to fields the
+ * structure check will find.
  */
 function brokenFormRule(
   norm: Norm,
@@ -107,8 +108,8 @@ function brokenFormRule(
         "An act that starts an instance names its senders by role and cannot depend on an earlier act.",
       ],
       [
-        delay !== undefined && !hasSecondsField(norm, delay),
-        "A delay names a required nonnegative integer field on every act that sets its fact.",
+        delay !== undefined && !canWait(norm, form, delay),
+        "A delay waits on a fact of its act's :when, and names a required nonnegative integer field of every act that sets that fact.",
       ],
     ]),
     () =>
@@ -160,28 +161,33 @@ function canStart(form: Form): boolean {
   );
 }
 
-/** Whether some form sets a delay's fact, and every form that does requires the delay's field as a nonnegative integer. */
-function hasSecondsField(norm: Norm, delay: Delay): boolean {
-  const setters = norm.forms.filter((form) => form.sets.includes(delay.fact));
+/**
+ * Whether the structure check can always settle `delay` when it reaches it:
+ * the form waits on the delay's fact, so the fact is set, and every form
+ * that sets the fact requires the delay's field as a nonnegative integer.
+ */
+function canWait(norm: Norm, form: Form, delay: Delay): boolean {
   return (
-    setters.length !== 0 &&
-    setters.every((setter) => {
-      const field = fieldOf(setter, delay.secondsField);
-      return (
-        field?.type === "integer" &&
-        !field.optional &&
-        field.minimum !== undefined &&
-        field.minimum >= 0
-      );
-    })
+    form.when.includes(delay.fact) &&
+    norm.forms
+      .filter((setter) => setter.sets.includes(delay.fact))
+      .every((setter) => {
+        const field = fieldOf(setter, delay.secondsField);
+        return (
+          field?.type === "integer" &&
+          !field.optional &&
+          field.minimum !== undefined &&
+          field.minimum >= 0
+        );
+      })
   );
 }
 
 /**
- * The first rule a relation breaks. Its field and its source's field are
- * declared, on every form the source may name, with the types its operator
- * compares: `equals` two fields of one type, `member` a string with a list,
- * `subset` two lists.
+ * The first rule a relation breaks. Its field is declared, and its source's
+ * field is required on every form the source may name, so an earlier act
+ * always states it. The types are those its operator compares: `equals` two
+ * fields of one type, `member` a string with a list, `subset` two lists.
  */
 function brokenRelationRule(
   norm: Norm,
@@ -189,8 +195,8 @@ function brokenRelationRule(
   { operator, field, source }: Relation,
 ): Option.Option<string> {
   const compared = fieldOf(form, field)?.type;
-  const sources = formsOf(norm, source.act).map(
-    (earlier) => fieldOf(earlier, source.field)?.type,
+  const sources = formsOf(norm, source.act).map((earlier) =>
+    fieldOf(earlier, source.field),
   );
   const expected = {
     equals: [compared, compared],
@@ -201,11 +207,12 @@ function brokenRelationRule(
     [
       compared === undefined ||
         sources.length === 0 ||
-        sources.includes(undefined),
-      "A relation refers to undeclared acts or fields.",
+        sources.some((declared) => declared?.optional !== false),
+      "A relation compares a declared field with a required field of every earlier act its source may name.",
     ],
     [
-      compared !== expected[0] || sources.some((type) => type !== expected[1]),
+      compared !== expected[0] ||
+        sources.some((declared) => declared?.type !== expected[1]),
       "An equals relation compares a field with one of its type, a member relation a string with a list, and a subset relation a list with a list.",
     ],
   ]);

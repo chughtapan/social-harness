@@ -87,7 +87,7 @@ These verbs each have one meaning:
 | **candidate** | The message under check. |
 | **structure check** | The first part of a check: it **passes** a message whose text is an act its sender may send next, and refuses any other. Its two **stages** are `form`, which reads the message alone, and `protocol`, which reads the conversation. |
 | **text rule** | The requirement that a string or list field contain only what its description says. |
-| **decision provider** | The service that **judges** a message against text rules. It **answers** each one compliant or violation, and an answer it gives too little probability is **unsure**. Its name is the settings' and its own; the decision is the firewall's. |
+| **decision provider** | The service that **judges** a message against text rules, named for the decision model it runs. It **answers** each rule compliant or violation, and an answer it gives too little probability is **unsure**. What happens to the message is the firewall's decision. |
 | **history window** | The latest earlier messages the decision provider reads. |
 | **decision** | What the firewall decides for a message, whichever member sent it: it is **allowed** or **refused**. |
 | **reason** | Why a message was refused: `violation` of a rule, an `unsure` answer, or a check that was `unavailable`. |
@@ -103,7 +103,7 @@ judges and answers. The firewall checks, and decides to allow or refuse.
 | --- | --- |
 | **daemon** | The `sharnessd` process. |
 | **settings file** | The JSON document an operator writes. **Settings** are what the daemon uses once it has read that file and the files it names. |
-| **server** | What a daemon runs for its agents: one server agent and its clients. |
+| **server** | What a daemon runs for its agents: one server agent and its clients. The word alone never means the server agent, though a norm writes that agent's role as `server`. |
 | **MCP handler** | Answers each MCP request from the agent of the owner the request is admitted as. |
 | **listener** | The daemon's one HTTP socket. |
 | **database URL** | Where the daemon's database is. |

@@ -3,8 +3,8 @@
 Social Harness lets AI agents that work for different people or
 organizations communicate under structured norms. A server publishes its
 norms: which acts its agents exchange, in what order, and what each field
-contains. Social Harness enforces that both the client and the server follow
-them, so a message that does not is never sent. It also names each agent and
+contains. Social Harness enforces that both the client and the server agent
+follow them, so a message that does not is never sent. It also names each agent and
 keeps every conversation in order. Your application supplies the domain
 logic. Agents keep their existing hosts, tools, and private context.
 

@@ -46,7 +46,7 @@ monitoring protocols, and revocable access control remain future work.
 Items are grouped by the layer that owns them. Items 1 and 10 govern the whole
 stack.
 
-1. **One daemon holds communication and agent state.** One trusted daemon and
+1. **One daemon keeps communication and agent state.** One trusted daemon and
    its SQL database name the agents, deliver their messages and keep their
    history. Every conversation is the server agent and one client.
    Each agent retains its own communication state, inbox and durable history.
@@ -65,7 +65,7 @@ stack.
    app principal, manifest, task, norm, trust policy, or institutional policy.
    It delivers messages between named agents.
 
-4. **Communication includes retained history.** Delivery keeps accepted
+4. **Communication includes retained history.** Delivery keeps stored
    messages and their ordered history.
    Conversations, persistence and restart recovery belong
    to the daemon in `@social-harness/social-harness`.
@@ -89,7 +89,7 @@ client-to-server and server-to-client messages.
 ### L4 Shared Collaboration Norms
 
 7. **Norms build on communication.** The server's operator installs a norm,
-   and the server agent's firewall judges every act against the
+   and the server agent's firewall checks every act against the
    conversation's ordered history. Further task and norm vocabularies,
    including contracts, compose over ordered messages without changing
    delivery or identity.

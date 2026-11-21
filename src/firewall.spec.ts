@@ -1,12 +1,7 @@
 /** @file A check maps each text rule's answer to a decision and what its caller saves, whichever member sent the message, and Jev's failures make a check unavailable. */
 
-import * as NodeSdk from "@effect/opentelemetry/NodeSdk";
 import { FetchHttpClient } from "@effect/platform";
-import { effect as it, live, scopedLive } from "@effect/vitest";
-import {
-  InMemorySpanExporter,
-  SimpleSpanProcessor,
-} from "@opentelemetry/sdk-trace-base";
+import { effect as it, live } from "@effect/vitest";
 import {
   Effect,
   FastCheck as fc,
@@ -396,51 +391,9 @@ it.prop(
   { fastCheck: { numRuns: 20 } },
 );
 
-describe("Firewall check activity", () => {
-  scopedLive.prop(
-    "exports a pending span and then a settled span for each check, naming which member sent its message",
-    [fc.array(fc.constantFrom(...senders), { minLength: 1, maxLength: 4 })],
-    ([checked]) =>
-      Effect.gen(function* () {
-        const exporter = new InMemorySpanExporter();
-        const exported = yield* Effect.forEach(
-          checked,
-          (sender) => check(sender),
-          { concurrency: 1 },
-        ).pipe(
-          Effect.map(() => exporter.getFinishedSpans()),
-          Effect.withSpan("checks"),
-          Effect.provide(
-            NodeSdk.layer(() => ({
-              spanProcessor: new SimpleSpanProcessor(exporter),
-            })),
-          ),
-        );
-
-        expect(
-          exported
-            .filter(({ name }) => name.startsWith("retry."))
-            .map(({ name, attributes }) => ({ name, ...attributes })),
-        ).toEqual(
-          checked.flatMap((id) => [
-            { name: "retry.pending", kind: "firewall-check", id },
-            {
-              name: "retry.settled",
-              kind: "firewall-check",
-              id,
-              outcome: "checked",
-            },
-          ]),
-        );
-      }),
-    { fastCheck: { numRuns: 12 } },
-  );
-});
-
 describe("Firewall structure check", () => {
   const refusal = {
     kind: "refused",
-    reason: "violation",
     ruleId: "shape",
     feedback: "Send a greeting first.",
   } as const;

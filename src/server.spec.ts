@@ -509,7 +509,7 @@ it("prepares an empty database and leaves a prepared one as it is", () =>
   Effect.gen(function* () {
     const database = yield* openTestDatabase();
     yield* prepareTables(database.sql);
-    yield* database.sql`INSERT INTO firewall_checks (decided_at, record) VALUES (1, 'kept')`;
+    yield* database.sql`INSERT INTO firewall_checks (checked_at, record) VALUES (1, 'kept')`;
     yield* prepareTables(database.sql);
     expect(yield* database.sql`SELECT record FROM firewall_checks`).toEqual([
       { record: "kept" },
@@ -517,7 +517,18 @@ it("prepares an empty database and leaves a prepared one as it is", () =>
     expect(yield* database.sql`SELECT * FROM messages`).toEqual([]);
   }));
 
-it("rejects a database that holds other tables without changing their records", () =>
+it("rejects a database whose tables another version of the server created", () =>
+  Effect.gen(function* () {
+    const database = yield* openTestDatabase();
+    yield* prepareTables(database.sql);
+    yield* database.sql`ALTER TABLE firewall_checks RENAME COLUMN checked_at TO decided_at`;
+
+    expect(yield* prepareTables(database.sql).pipe(Effect.flip)).toMatchObject({
+      reason: "schema",
+    });
+  }));
+
+it("rejects a database that has other tables without changing their records", () =>
   Effect.gen(function* () {
     const database = yield* openTestDatabase();
     yield* database.sql`CREATE TABLE retained (value TEXT NOT NULL)`;

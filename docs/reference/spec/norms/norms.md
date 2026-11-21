@@ -38,7 +38,7 @@ data.
 
 ## Example
 
-A client books a meeting with the server:
+A client books a meeting with the server agent:
 
 ```lisp
 ; A client books a meeting with the server.
@@ -312,12 +312,16 @@ written.
    relation's source is in the `sets` of some form.
 7. A form that starts an instance names its senders by role, and has no fact
    in `when`, no delay and no relation.
-8. For a delay, every form that sets the delay's fact declares the delay's
-   `secondsField` as a required integer whose `minimum` is zero or more.
+8. For a delay, the form waits on the delay's fact in `when`, and every form
+   that sets that fact declares the delay's `secondsField` as a required
+   integer whose `minimum` is zero or more. A check that reaches the delay
+   therefore always finds the act that set the fact and its number of
+   seconds.
 9. For a relation, the form declares the relation's field, and every form
-   the source may name declares the source's field. A source that names a
-   performative names one form, and one that names a fact names every form
-   that sets the fact. The types fit the operator:
+   the source may name declares the source's field as a required field, so
+   an earlier act always states it. A source that names a performative names
+   one form, and one that names a fact names every form that sets the fact.
+   The types fit the operator:
 
    | Operator | The form's field | The source's field |
    | --- | --- | --- |
@@ -408,11 +412,7 @@ not state the relation's field, or when its operator is not satisfied.
 Setting a fact again replaces the act a source that names the fact finds, so
 an old offer cannot authorize a selection after a new one.
 
-Two cases settle nothing. At step 13, the delay's fact is not set. At step
-14, the earlier act is in the chain and left out the source's optional field.
-Each refuses the message at the protocol stage like any other failed step,
-but with the reason `unsure`. Every other refusal on this page has the
-reason `violation`.
+Every refusal on this page has the reason `violation`.
 
 ### Effects of an act that passed
 

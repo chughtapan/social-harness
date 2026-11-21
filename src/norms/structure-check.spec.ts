@@ -327,7 +327,6 @@ it("refuses every text that is not an act of one of the server's norms", () => {
     fc.property(fc.string({ minLength: 1 }), (text) => {
       expect(check(exchange, message(client, text))).toMatchObject({
         kind: "refused",
-        reason: "violation",
         ruleId: "norm-form",
       });
     }),

@@ -27,8 +27,9 @@ Startup requires:
 | `SHARNESS_DECISION_PROVIDER_KEY` | The decision provider's API key, when the settings name a provider |
 
 Start the daemon with `sharnessd`. Standard `OTEL_*` environment
-variables configure tracing. A missing or invalid settings file or a database
-that has other tables refuses startup.
+variables configure tracing. A missing or invalid settings file refuses
+startup, and so does a database that has other tables or the tables of
+another version of the server.
 
 The settings file is a JSON document that takes these properties. Unknown properties are refused.
 
