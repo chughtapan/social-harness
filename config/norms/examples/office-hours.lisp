@@ -11,7 +11,7 @@
 (content accept-proposal :by client :when offered
   :terminates offered :initiates hold-due
   (field available :type list :min-items 1
-    :description "An offered slot the client can attend, copied exactly from the latest offer.")
+    :description "One slot of the latest offer, copied exactly.")
   (relation subset available (previous propose options)))
 (content reject-proposal :by client :when offered
   :terminates offered :initiates offer-due)

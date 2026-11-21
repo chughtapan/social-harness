@@ -62,35 +62,31 @@ interface FittedAct extends HeldAct {
 }
 
 /**
- * The structure check of a server that holds `installed`. It replays the
+ * The structure check of a server that holds `norms`. It replays the
  * earlier messages to find the instance in progress, then reads the message
  * as an act of that instance or, when none is, of the norm it names. An act
  * that fits passes with a text rule for each described string field it states. Any
  * other message is refused under a rule named for the norm of the instance
  * in progress and the stage that failed. Without norms every message passes.
  */
-export function structureCheck(installed: readonly Norm[]): StructureCheck {
+export function structureCheck(norms: readonly Norm[]): StructureCheck {
   return (sender, message, earlier, now) =>
     Effect.sync(
       (): Result =>
-        installed.length === 0
+        norms.length === 0
           ? { kind: "passed", textRules: [] }
-          : checkMessage(
-              installed,
-              { message, role: sender, at: now },
-              earlier,
-            ),
+          : checkMessage(norms, { message, role: sender, at: now }, earlier),
     ).pipe(Effect.withSpan("structureCheck"));
 }
 
 /** What the structure check says of `sent`, after the `earlier` messages of its conversation. */
 function checkMessage(
-  installed: readonly Norm[],
+  norms: readonly Norm[],
   sent: Sent,
   earlier: readonly CheckedMessage[],
 ): Result {
-  const view = projectProtocol(installed, earlier, sent);
-  const held = readHeldAct(view, installed, sent.message);
+  const view = projectProtocol(norms, earlier, sent);
+  const held = readHeldAct(view, norms, sent.message);
   return Either.match(
     Either.flatMap(held, (read) => fitAct(view, read, sent)),
     {
@@ -167,7 +163,7 @@ function pass(view: ProtocolView, { act, norm, form }: FittedAct): Result {
  * under check, when the same agent wrote it, and the other role otherwise.
  */
 function projectProtocol(
-  installed: readonly Norm[],
+  norms: readonly Norm[],
   earlier: readonly CheckedMessage[],
   next: Sent,
 ): ProtocolView {
@@ -179,7 +175,7 @@ function projectProtocol(
     const act =
       checkedAt === undefined
         ? undefined
-        : replayed(view, installed, { message, role, at: checkedAt });
+        : replayed(view, norms, { message, role, at: checkedAt });
     if (act !== undefined) {
       view = advance(view, act);
     }
@@ -190,8 +186,8 @@ function projectProtocol(
 }
 
 /** The act of an earlier message, as the view permitted it at the time of the firewall's check, or nothing when the message is no such act. */
-function replayed(view: ProtocolView, installed: readonly Norm[], sent: Sent) {
-  return readHeldAct(view, installed, sent.message).pipe(
+function replayed(view: ProtocolView, norms: readonly Norm[], sent: Sent) {
+  return readHeldAct(view, norms, sent.message).pipe(
     Either.flatMap((held) => fitAct(view, held, sent)),
     Either.map((fitted) => ({ ...fitted, ...sent })),
     Either.getOrUndefined,
@@ -204,12 +200,12 @@ function replayed(view: ProtocolView, installed: readonly Norm[], sent: Sent) {
  */
 function readHeldAct(
   view: ProtocolView,
-  installed: readonly Norm[],
+  norms: readonly Norm[],
   message: Message,
 ): Checked<HeldAct> {
   return Either.flatMap(readAct(message), (act) => {
     const norm =
-      view.instance?.norm ?? installed.find((held) => held.name === act.norm);
+      view.instance?.norm ?? norms.find((held) => held.name === act.norm);
     return norm === undefined
       ? Either.left({
           stage: "structural",

@@ -12,7 +12,7 @@
 
 (content accept-proposal :by client :when (negotiating offered) :initiates accepted
   (field available :type list :min-items 1 :max-items 3
-    :description "An offered slot the client can attend, copied exactly from the current offer.")
+    :description "One slot of the current offer, copied exactly.")
   (relation subset available (previous (fact offered) options)))
 
 (content reject-proposal :by client :when (negotiating offered) :terminates accepted)
