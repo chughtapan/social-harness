@@ -1,7 +1,7 @@
 /**
  * @file The server agent's firewall. It checks every message of a
  * conversation when it is sent, whichever member sends it: the structure
- * check reads the message as an act of the norms the server publishes, a
+ * check reads the message as an act of the server's norms, a
  * decision provider judges it against the text rules those norms give it,
  * and the check decides whether the message is sent and what its caller
  * saves.
@@ -50,7 +50,7 @@ export type RefusalReason = NonNullable<CheckRecord["reason"]> | "unavailable";
 
 /**
  * A message with the time this firewall checked it, in Unix milliseconds. A
- * message sent while the server published no norms has no check.
+ * message sent while the server had no norms has no check.
  */
 export interface CheckedMessage {
   readonly message: Message;
@@ -59,7 +59,7 @@ export interface CheckedMessage {
 
 /**
  * A message that may be sent. `record` is what the caller saves of the
- * decision; a server that publishes no norms has none.
+ * decision; a server without norms has none.
  */
 interface Allowed {
   readonly kind: "allowed";
@@ -99,13 +99,13 @@ interface Refusal extends Pick<CheckRecord, "refusedBy" | "checkedRuleIds"> {
 }
 
 /**
- * The firewall of a server that publishes `norms`. A server without norms
+ * The firewall of a server whose norms are `norms`. A server without norms
  * allows every message and records nothing.
  *
  * A check runs the norms' structure check on its message first, with the
- * earlier messages; that check's refusal refuses the message as a
- * violation. The `provider` then answers whether the message breaks each
- * text rule the structure check gave it. A violation refuses, and so does
+ * earlier messages; that check's refusal refuses the message. The
+ * `provider` then answers whether the message breaks each text rule the
+ * structure check gave it. A violation refuses, and so does
  * an unsure answer. A provider that gives no usable answer, and rules
  * without a provider, make the check unavailable.
  */
@@ -134,9 +134,9 @@ export function makeFirewall(applies: {
         ),
       ).pipe(Effect.withSpan("structureCheck"));
       if (found.kind === "refused") {
-        const { ruleId, feedback } = found;
+        const { reason, ruleId, feedback } = found;
         return refuse(candidate, {
-          reason: "violation",
+          reason,
           feedback: [feedback],
           refusedBy: [{ ruleId }],
           checkedRuleIds: [ruleId],

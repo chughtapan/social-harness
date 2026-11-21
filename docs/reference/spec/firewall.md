@@ -1,6 +1,6 @@
 ---
 title: Message firewall
-description: How the server agent's firewall enforces the norms the server publishes on every message.
+description: How the server agent's firewall enforces the server's norms on every message.
 read_when:
   - You need to know what a firewall decision allows or refuses
   - You need to know what the sender of a refused message reads
@@ -8,8 +8,8 @@ read_when:
 
 The message firewall checks every message of the server agent's conversations
 when it is sent: what a client sends the server agent, and what the server
-agent sends a client. It enforces the [norms](./norms/norms.md) the server
-publishes. It receives a message, which member sent it and the earlier
+agent sends a client. It enforces the server's [norms](./norms/norms.md). It
+receives a message, which member sent it and the earlier
 messages of its conversation. It returns a decision, the rules that refused
 a refused message, and the feedback its sender reads.
 
@@ -25,7 +25,8 @@ host owns models, tools and the agent's private context.
 
 A check has two parts, in order:
 
-1. The structure check reads the message as an act of a published norm. It
+1. The structure check reads the message as an act of one of the server's
+   norms. It
    passes an act that fits its form and is its sender's to send next in the
    conversation's protocol, and refuses any other message.
 2. The decision provider judges an act that passed against its text rules:
@@ -173,4 +174,4 @@ has no message content, message id or provider answer.
 | Reason | Rules in `refusedBy` |
 | --- | --- |
 | `violation` | The violated text rules, or the structure check's rule. |
-| `unsure` | The text rules with an unsure answer. |
+| `unsure` | The text rules with an unsure answer, or the rule of a structure check that could not settle the message. |

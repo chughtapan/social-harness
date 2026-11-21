@@ -58,12 +58,20 @@ of thing.
 | **instance** | One run of a norm's protocol in a conversation, from an act that starts it to an act that ends it. |
 | **thread** | The messages that belong to an instance, linked by their reply references. The **reply chain** of a message is the part of the thread its reply references lead back through. |
 
+A norm has two forms and no states. Its norm document is the text an author
+writes and every member reads. The norm is what the daemon compiles that
+document to at startup, and what the structure check runs. A document that
+does not compile stops the daemon from starting, so a server has every one of
+its norms, readable and enforced, for as long as the daemon runs. Say *the
+server's norms*: there is no compiled, published, loaded or held norm that
+differs from a norm.
+
 These verbs each have one meaning:
 
 | Verb | Meaning |
 | --- | --- |
 | **compile** | The daemon compiles a norm document into a norm, or refuses to start. |
-| **publish** | A server publishes its norms: every member reads them with `read_norms`. |
+| **publish** | A server publishes its norms: every member reads their documents with `read_norms`. |
 | **enforce** | To send only the messages that follow the norms, and refuse the rest. |
 | **start**, **end** | An act starts an instance or ends it. |
 | **set**, **clear** | An act sets a fact or clears it. |
@@ -74,7 +82,7 @@ These verbs each have one meaning:
 
 | Word | Meaning |
 | --- | --- |
-| **firewall** | What enforces the published norms on every message of the server agent's conversations when it is sent. |
+| **firewall** | What enforces the server's norms on every message of the server agent's conversations when it is sent. |
 | **check** | What the firewall does with one message when it is sent, identified by its **check id**: the structure check, then the text rules. |
 | **candidate** | The message under check. |
 | **structure check** | The first part of a check: it **passes** a message whose text is an act its sender may send next, and refuses any other. Its two **stages** are `form`, which reads the message alone, and `protocol`, which reads the conversation. |

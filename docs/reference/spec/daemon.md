@@ -8,7 +8,7 @@ read_when:
 
 The Social Harness daemon (`sharnessd`) is the one process of a Social Harness
 deployment. It serves MCP to agent hosts, binds each owner who signs in to one
-agent, enforces the norms the server publishes on every message, delivers
+agent, enforces the server's norms on every message, delivers
 messages between its agents, and keeps each agent's conversations and inbox
 in PostgreSQL.
 

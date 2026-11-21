@@ -1,4 +1,4 @@
-/** @file A norm document compiles to the norm it declares, one that declares something its grammar lacks compiles to nothing, and a norms directory loads as the norms of its documents. */
+/** @file A norm document compiles to the norm it declares, one that declares something its grammar lacks compiles to nothing, and several documents compile to a server's norms. */
 
 import { FileSystem } from "@effect/platform";
 import { NodeContext } from "@effect/platform-node";
@@ -164,36 +164,6 @@ vitestIt.each(["member", "subset"])(
   },
 );
 
-/** A norm whose `poll` waits a delay after `hold` and repeats its topic. */
-const waiting = `(norm waiting)
-(act hold :by client :starts true :sets held
-  (field wait :type integer :minimum 0)
-  (field topic :type string))
-(act poll :by client :when held :after held :delay wait :unit seconds :ends true
-  (field copy :type string)
-  (relation equals copy (previous hold topic)))
-`;
-
-vitestIt.each([
-  [
-    "a delay after a fact its act does not wait on",
-    ":when held :after held",
-    ":after held",
-  ],
-  [
-    "a relation that reads an optional field of an earlier act",
-    "(field topic :type string)",
-    "(field topic :type string :optional true)",
-  ],
-])(
-  "refuses a document with %s, which a check could not settle",
-  (...[, settled, unsettled]) => {
-    expect(refused(waiting)).toBe(false);
-    expect(waiting).toContain(settled);
-    expect(refused(waiting.replace(settled, unsettled))).toBe(true);
-  },
-);
-
 vitestIt(
   "reads quoted text with escapes, parentheses and semicolons as one string, and skips comments",
   () => {
@@ -228,7 +198,7 @@ vitestIt(
       compileNorms([documentOf("second"), documentOf("first")]),
     );
 
-    expect(norms.published).toEqual(
+    expect(norms.documents).toEqual(
       ["second", "first"].map((name) => ({
         name,
         description: "",
@@ -240,13 +210,14 @@ vitestIt(
 );
 
 vitestIt.each([
-  ["two of one norm", [documentOf("ask"), documentOf("ask")]],
+  ["no document", []],
+  ["two documents of one norm", [documentOf("ask"), documentOf("ask")]],
   [
-    "one that names a sender that is neither role",
+    "a document that names a sender that is neither role",
     [documentOf("ask").replace(":by client", ":by absent")],
   ],
-  ["one that is not closed", [`${documentOf("ask")}(`]],
-])("compiles no norms when the documents include %s", (...[, documents]) => {
+  ["a document that is not closed", [`${documentOf("ask")}(`]],
+])("compiles no norms from %s", (...[, documents]) => {
   expect(
     Either.match(compileNorms(documents), {
       onLeft: () => "none",

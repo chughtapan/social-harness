@@ -1,8 +1,8 @@
 #!/usr/bin/env node
 /**
  * @file The `sharnessd` executable: it reads the settings file, compiles the
- * norms the server publishes, opens the server behind the firewall that
- * enforces them on every message, and serves its MCP tools over HTTP to the
+ * server's norms from their documents, opens the server behind the firewall
+ * that enforces them on every message, and serves its MCP tools over HTTP to the
  * owners the authentication admits. `--help` prints the
  * usage, no argument serves until the process is stopped, and any other
  * arguments print the usage to standard error. A startup failure prints one
@@ -69,9 +69,9 @@ const settingsFile = Schema.Struct({
 });
 
 /**
- * The norms of every `.lisp` document directly in `directory`, compiled in
- * name order, or the refusal of a directory that cannot be read or whose
- * documents state no norms.
+ * The norms of the `.lisp` documents directly in `directory`, compiled in
+ * name order, or the failure of a directory that cannot be read, has no
+ * such document or has one that does not compile.
  */
 const normsIn = Effect.fn("normsIn")(function* (directory: string) {
   const filesystem = yield* FileSystem.FileSystem;
@@ -86,15 +86,15 @@ const normsIn = Effect.fn("normsIn")(function* (directory: string) {
     Effect.mapError(({ message }) => message),
     Effect.flatMap(compileNorms),
     Effect.mapError((reason) =>
-      settingsError(`The configured norms directory is invalid: ${reason}`),
+      settingsError(`The norms directory is invalid: ${reason}`),
     ),
   );
 });
 
 /**
- * The settings as the process uses them: the settings file, with the
- * compiled norms in place of their directory and the decision provider in
- * place of its setting. The norms directory resolves against the settings
+ * The settings as the process uses them: the settings file, with the norms
+ * in place of their directory and the decision provider in place of its
+ * setting. The norms directory resolves against the settings
  * file's own directory, whatever the working directory. The provider is Jev
  * under the named model and limits, with the key in the environment
  * variable `SHARNESS_DECISION_PROVIDER_KEY`.
@@ -123,7 +123,7 @@ const loadSettings = Effect.fn("loadSettings")(function* () {
       : yield* normsIn(resolve(settingsDirectory, file.normsDirectory));
   if (norms?.hasTextRules === true && file.decisionProvider === undefined) {
     return yield* settingsError(
-      "The configured norms describe string or list fields, which need a decisionProvider to judge them",
+      "The norms describe string or list fields, which need a decisionProvider to judge them",
     );
   }
   const setting = file.decisionProvider;

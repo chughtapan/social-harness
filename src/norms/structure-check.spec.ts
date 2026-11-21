@@ -322,11 +322,12 @@ const exchange = normFrom(`
 (act close :by server :when opened :ends true)
 `);
 
-it("refuses every text that is not an act of a published norm", () => {
+it("refuses every text that is not an act of one of the server's norms", () => {
   fc.assert(
     fc.property(fc.string({ minLength: 1 }), (text) => {
       expect(check(exchange, message(client, text))).toMatchObject({
         kind: "refused",
+        reason: "violation",
         ruleId: "norm-form",
       });
     }),

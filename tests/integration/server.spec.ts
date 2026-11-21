@@ -135,6 +135,7 @@ it(
       yield* write("nested/norms/ping.lisp", describedNorm);
       yield* write("nested/norms/notes.json", "not a norm document");
       yield* write("broken/ping.lisp", "(norm ping :unheard x)");
+      yield* write("empty/notes.json", "not a norm document");
       const refusals: ReadonlyArray<
         readonly [Readonly<Record<string, unknown>>, string]
       > = [
@@ -148,8 +149,9 @@ it(
         [{ historyLimit: 0 }, "settings file"],
         [{ historyLimit: 1025 }, "settings file"],
         [{ decisionProvider: {} }, "settings file"],
-        [{ normsDirectory: "nested/norms" }, "configured norms"],
+        [{ normsDirectory: "nested/norms" }, "norms describe"],
         [{ normsDirectory: "broken" }, "norms directory"],
+        [{ normsDirectory: "empty" }, "no norm document"],
       ];
       const settings = yield* fs.readFileString(
         join(sharnessd.directory, "settings.json"),

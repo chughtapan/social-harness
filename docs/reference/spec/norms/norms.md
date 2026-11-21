@@ -2,7 +2,7 @@
 title: Norm language
 description: The language a server's norms are written in. Its syntax, the norm a document denotes, when a norm is well formed, and how each message is checked against it.
 read_when:
-  - You are writing the norms a server publishes
+  - You are writing a server's norms
   - You are writing acts, or need to know why one was refused
   - You are changing the norm compiler or the structure check
 ---
@@ -20,18 +20,21 @@ message against it.
 
 ```mermaid
 flowchart LR
-    document[Norm document] -- Lisp frontend --> norm[Norm]
-    norm -- well-formedness --> published[Published norm]
-    text[Message text] -- Lisp frontend --> act[Act]
-    published --> check[Structure check]
+    document[Norm document] -- compile --> norm[Norm]
+    text[Message text] -- read --> act[Act]
+    norm --> check[Structure check]
     act --> check
     conversation[Earlier messages] --> check
     check --> passed[Passed, with text rules]
     check --> refused[Refused, with feedback]
 ```
 
-The frontend is the only part that knows Lisp. The well-formedness rules and
-the structure check read a norm and an act as data.
+A norm has these two forms and no others: the document its author writes and
+every member reads, and the norm the daemon compiles it to at startup.
+Compiling reads the document with the Lisp frontend and requires the result
+to be well formed. The frontend is the only part that knows Lisp. The
+well-formedness rules and the structure check read a norm and an act as
+data.
 
 ## Example
 
@@ -309,16 +312,12 @@ written.
    relation's source is in the `sets` of some form.
 7. A form that starts an instance names its senders by role, and has no fact
    in `when`, no delay and no relation.
-8. For a delay, the form waits on the delay's fact in `when`, and every form
-   that sets that fact declares the delay's `secondsField` as a required
-   integer whose `minimum` is zero or more. A check that reaches the delay
-   therefore always finds the act that set the fact and its number of
-   seconds.
+8. For a delay, every form that sets the delay's fact declares the delay's
+   `secondsField` as a required integer whose `minimum` is zero or more.
 9. For a relation, the form declares the relation's field, and every form
-   the source may name declares the source's field as a required field, so
-   an earlier act always states it. A source that names a performative names
-   one form, and one that names a fact names every form that sets the fact.
-   The types fit the operator:
+   the source may name declares the source's field. A source that names a
+   performative names one form, and one that names a fact names every form
+   that sets the fact. The types fit the operator:
 
    | Operator | The form's field | The source's field |
    | --- | --- | --- |
@@ -326,17 +325,18 @@ written.
    | `member` | String | List |
    | `subset` | List | List |
 
-A norms directory must also give each norm a different name.
+A norms directory has at least one document, and gives each norm a
+different name.
 
 ## Checking a message
 
 The structure check checks one message at a time. Its inputs are the
-published norms, the message with its sender's role and optional
+server's norms, the message with its sender's role and optional
 `replyToMsgId`, the time of the check, and the conversation's stored
 messages, each with the time of its own check. Times are Unix milliseconds.
 It passes an act and names its [text rules](#text-rules), or refuses the
-message with [feedback](#refusals). A server that publishes no norm passes
-every message.
+message with [feedback](#refusals). A server without norms runs no
+structure check.
 
 ### State of a conversation
 
@@ -364,7 +364,7 @@ alone, and the protocol stage reads the conversation.
 | Step | The message is refused when | Stage |
 | --- | --- | --- |
 | 1 | Its text is not an [act](#acts). | Form |
-| 2 | No instance is in progress and `:norm` is not the name of a published norm. | Form |
+| 2 | No instance is in progress and `:norm` is not the name of one of the server's norms. | Form |
 | 3 | An instance is in progress and `:norm` is not the name of the instance's norm. | Protocol |
 | 4 | The norm declares no form for the performative. | Form |
 | 5 | A required field is missing, a stated field is not declared, or a value is not of its field's type or within its bounds. The feedback names every such field. | Form |
@@ -408,7 +408,11 @@ not state the relation's field, or when its operator is not satisfied.
 Setting a fact again replaces the act a source that names the fact finds, so
 an old offer cannot authorize a selection after a new one.
 
-Every refusal on this page has the reason `violation`.
+Two cases settle nothing. At step 13, the delay's fact is not set. At step
+14, the earlier act is in the chain and left out the source's optional field.
+Each refuses the message at the protocol stage like any other failed step,
+but with the reason `unsure`. Every other refusal on this page has the
+reason `violation`.
 
 ### Effects of an act that passed
 
@@ -432,8 +436,8 @@ stored messages in order. Each stored message is checked again by the steps
 above, as its sender, at the time of its original check. A message that
 passes has its effects. A message that does not pass has none, though it may
 still join the thread. That is a message stored before the norm documents
-changed, or one stored while the server published no norms, which has no
-check time.
+changed, or one stored while the server had no norms, which has no check
+time.
 
 A refused message is not stored, so it leaves no trace in the state and a
 later message cannot reply to it. Nothing rewinds, restarts or cancels an
@@ -494,9 +498,10 @@ restart an instance.
 ## Publishing norms
 
 The daemon's `normsDirectory` setting names a directory. The daemon compiles
-every `.lisp` file directly inside it before it serves, and publishes the
-norms they denote. `read_norms` returns each norm's name, description and
-document. No rule file or built-in agreement is installed beside them, and a
+every `.lisp` file directly inside it before it serves, and refuses to start
+when there is none or one does not compile. The norms they compile to are
+the server's norms until the daemon stops: `read_norms` returns each norm's
+name, description and document, and the firewall enforces every one. No rule file or built-in agreement is installed beside them, and a
 message cannot install a norm.
 
 Documents are compiled at startup. After a restart every conversation is

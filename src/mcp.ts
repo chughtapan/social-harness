@@ -17,7 +17,7 @@ import { createHash } from "node:crypto";
 import packageJson from "../package.json" with { type: "json" };
 import { checkRecordSchema } from "./firewall.js";
 import { AgentName, MsgId, wellFormedString } from "./messages.js";
-import { ACT_SYNTAX, type Norms, publishedNorm } from "./norms/index.js";
+import { ACT_SYNTAX, normDocument, type Norms } from "./norms/index.js";
 import {
   ConversationPage,
   Cursor,
@@ -72,7 +72,7 @@ const INBOX_EVENT = "org.social-harness/inbox.pending";
  * `server`. A request's `authInfo` names its owner in `extra.issuer` and
  * `extra.subject`: the owner `admits.issuer` and `admits.subject` name has
  * the server agent, and every other owner has a client, named from its
- * issuer and subject. `norms` are the norms the server publishes, whose
+ * issuer and subject. `norms` are the server's norms, whose
  * documents every agent reads with `read_norms`. A tool call runs on the
  * runtime this effect ran in and is interrupted when its request is aborted.
  */
@@ -225,10 +225,10 @@ function registerSharedTools(
             : "List the norms the server publishes, each with its complete document: which of client and server sends each act, when, and what each field contains. You are the client, and only a message that follows them is sent."
         } ${ACT_SYNTAX}`,
         input: noArguments,
-        output: Schema.Struct({ norms: Schema.Array(publishedNorm) }),
+        output: Schema.Struct({ norms: Schema.Array(normDocument) }),
         readOnly: true,
       },
-      () => Effect.succeed({ norms: norms.published }),
+      () => Effect.succeed({ norms: norms.documents }),
     );
   }
 }

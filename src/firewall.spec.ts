@@ -351,7 +351,7 @@ it.prop(
     }),
 );
 
-it("allows every message on a server that publishes no norms, with nothing to save", () =>
+it("allows every message on a server without norms, with nothing to save", () =>
   Effect.gen(function* () {
     const firewall = makeFirewall({});
     const message = yield* fromBob;
@@ -440,6 +440,7 @@ describe("Firewall check activity", () => {
 describe("Firewall structure check", () => {
   const refusal = {
     kind: "refused",
+    reason: "violation",
     ruleId: "shape",
     feedback: "Send a greeting first.",
   } as const;
