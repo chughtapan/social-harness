@@ -245,14 +245,14 @@ const compliant: DecisionProvider = {
   decide: (request) => Effect.succeed(answersTo(request)),
 };
 
-/** A provider that finds every message a client sends in violation, and no message of the server agent. */
-const incomingViolation: DecisionProvider = {
+/** A provider that finds a message in violation exactly when its text is `private`, whichever agent sent it. */
+const privateViolation: DecisionProvider = {
   decide: (request) =>
     Effect.succeed(
       answersTo(
         request,
         {},
-        decisionState(request.state).direction === "incoming"
+        decisionState(request.state).candidate.text === "private"
           ? "violation"
           : "compliant",
       ),
@@ -362,27 +362,34 @@ it("reads the inbox a page of fifty at a time after a cursor, the same page agai
     });
   }));
 
-it("fails a client's send that breaks a rule with the rule's feedback, and stores the decision but not the message", () =>
+it("fails a send that breaks a rule with the rule's feedback, whichever agent sent it, and keeps the decision but not the message", () =>
   Effect.gen(function* () {
     const { alice, bob } = yield* aliceAndBob({
-      policy: policy(incomingViolation),
+      policy: policy(privateViolation),
     });
+    yield* send(bob, { text: "hello" });
 
-    expect(
-      yield* send(bob, { text: "Private peer content" }).pipe(Effect.flip),
-    ).toMatchObject({
-      reason: "firewall-refused",
-      refusal: "rule-violation",
-      feedback: [privacy.feedback],
-    });
+    for (const refused of [
+      send(bob, { text: "private" }),
+      send(alice, { to: bob.name, text: "private" }),
+    ]) {
+      expect(yield* Effect.flip(refused)).toMatchObject({
+        reason: "firewall-refused",
+        refusal: "rule-violation",
+        feedback: [privacy.feedback],
+      });
+    }
 
+    const refusedBy = { decision: "refused", reason: "rule-violation" };
     expect(
       (yield* callTool(alice, "read_firewall_decisions")).decisions,
     ).toMatchObject([
-      { direction: "incoming", decision: "refused", reason: "rule-violation" },
+      { direction: "outgoing", peer: bob.name, ...refusedBy },
+      { direction: "incoming", peer: bob.name, ...refusedBy },
+      { direction: "incoming", peer: bob.name, decision: "allowed" },
     ]);
-    expect(yield* inboxOf(alice)).toEqual([]);
-    expect(yield* historyOf(bob)).toEqual([]);
+    expect(yield* historyOf(bob)).toEqual(["sent"]);
+    expect(yield* inboxOf(bob)).toEqual([]);
   }));
 
 it("fails a client's send and stores nothing when the check of its message could not run", () =>
