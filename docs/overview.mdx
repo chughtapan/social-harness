@@ -3,49 +3,40 @@ title: Overview
 description: Build applications where agents of different owners communicate under norms a server publishes and enforces.
 read_when:
   - You are deciding whether Social Harness fits your agents
-  - You want to understand how Social Harness participants work together
   - You are building an application used by agents from different owners
+  - You need the trust assumptions behind the messaging guarantees
 ---
 
-Social Harness lets autonomous agents that act for different people or
-organizations communicate under structured norms. Those people and
-organizations are the agents' principals. Their agents need to work together
-even when they have different interests or cannot trust one another.
+Social Harness lets AI agents that work for different people or
+organizations exchange messages under rules that are enforced.
 
-A server publishes its norms: which acts its agents exchange, in what order,
-and what each field contains. Social Harness enforces that both the client and
-the server agent follow them, so a message that does not is never sent.
+A server publishes **norms**. A norm says which structured messages, called
+acts, the two sides may send, in what order, and what each field may contain.
+Social Harness checks every message against the norms before it is sent..
 
-For example, a scheduling application can let a customer's agent ask a
-merchant's agent for an appointment. The merchant's server publishes a
-booking norm. Social Harness identifies the agents, enforces that norm on
-each of their messages, carries the messages, and keeps each conversation in
-order. The application supplies the booking logic and decides who may
-participate.
+For example, a merchant runs a server with a booking norm. A customer's agent
+asks the merchant's agent for an appointment. Social Harness 
+checks each message against the booking norm. The merchant decides the booking
+logic and decides who may take part.
 
-Each agent keeps its existing host, which runs its model, tools, and private
-context. One daemon connects those hosts: every owner signs in to it. One of
-its agents is the server agent, and every other agent is a client that
-exchanges messages only with the server agent.
+## How it fits together
 
-The daemon is the only process, and its operator is trusted with every
-message. Agents on different daemons cannot message each other. The
-[constitution](#trust-and-progress)
-states what the daemon is trusted for.
+- **Host.** Each agent keeps its own host, the program that runs its model,
+  tools and private context. A host connects to the daemon over MCP.
+- **Daemon.** One process, `sharnessd`, runs a server: one server agent and its
+  clients. Each
+  owner signs in to it and gets one agent.
+- **Server agent and clients.** One agent is the server agent. Every other
+  agent is a client. A client talks only to the server agent, so a
+  conversation always has two members.
+- **Firewall.** The firewall runs inside the daemon and enforces the norms. It
+  checks what a client sends the server agent and what the server agent sends
+  a client.
 
-To set up a server or join one, give your agent a
-[skill](https://github.com/chughtapan/social-harness/tree/next/skills).
-
-## Message flow
-
-A host asks the daemon to send a message. The daemon orders the message,
-stores it for both members of the conversation, and offers it to the
-recipient's host.
-
-The server agent's firewall runs inside the daemon and enforces the norms. It
-checks every message before the daemon orders it: what a client sends the
-server agent and what the server agent sends a client. A refusal fails the
-sender's send with what does not fit the norm, and the message is not stored.
+A host asks the daemon to send a message. The firewall checks it. If it
+passes, the daemon stores it in order and makes it available to the
+recipient's host. If it is refused, the send fails with feedback that says
+what does not fit the norm, and the message is not stored.
 
 In this example Alice is a client and Bob is the server agent:
 
@@ -58,56 +49,41 @@ flowchart LR
     delivery --> hostB[Bob's host]
 ```
 
-The [daemon specification](/spec#owners-and-agents) defines the two
-roles.
+To set up a server or join one, give your agent a
+[skill](https://github.com/chughtapan/social-harness/tree/next/skills). The
+[specification](/spec) defines the daemon, messaging and the firewall, and
+the [norm language](/norms) defines how norms are written and checked.
 
 ## What the application supplies
 
-An application decides who may use its service, what roles participants have,
-and which domain actions they may perform. It authenticates its human users
-when needed and decides which agent may act for each account or session.
-Shared rules explain how its agents should cooperate. The application also
-needs a policy for changing or ending access.
+Social Harness provides messaging and enforces a server's norms. The
+application supplies everything else:
 
-Those choices are application responsibilities. Social Harness provides
-messaging and the enforcement of a server's norms. It provides no protocol for
-application admission, roles or revocation, no firewall for a client, and no
-disclosure, investigation or sanction protocol. The constitution lists the
-[deferred work](#deliberate-deferrals).
+- who may use its service, and what roles they have;
+- how it authenticates its human users, and which agent may act for each
+  account;
+- the norms that say how its agents work together;
+- how access is changed or ended.
 
-## Joining and accepting shared rules
+The daemon knows an owner only as an account at the identity provider. It
+does not establish which person or organization the account belongs to, and
+it does not track application membership. An application that denies someone
+access does so in its own service; the agent keeps its name on the daemon.
 
-An agent exists for each owner that signs in to the daemon. The daemon gives
-the agent a name. It knows the
-owner only as an account at the identity provider and does not establish
-which person or organization that account belongs to. The application must
-establish the account-to-agent relationship it relies on. The
-[daemon specification](/spec#owners-and-agents)
-defines the name precisely.
+Social Harness has no protocol for admission, roles or revocation, no
+firewall for a client, and no disclosure, investigation or sanction protocol.
+[Deliberate deferrals](#deliberate-deferrals) lists the deferred work.
 
-An application states how its participants work together as
-[norms](/norms). The server publishes
-the norms, and a client reads them before a task.
-
-An instance of a norm covers one task in one conversation and ends when an
-act of the norm ends it. The daemon does not track application
-membership.
-
-## Ending access and investigating harm
-
-An application can deny access to its own service. An agent keeps its name.
-
-An institution is an agent with a particular role, such as investigating a
-disputed booking. As the server agent of its own server, it can receive
-evidence a participant chooses to disclose and return an attributed finding. Each application or participant decides how to
-use that finding. Social Harness supplies each member's conversation
+An institution, such as an agent that investigates a disputed booking, is an
+ordinary agent. As the server agent of its own server it can receive evidence
+that a participant chooses to disclose and return a finding. Each application
+decides how to use that finding. The evidence is each member's conversation
 history, whose accuracy rests on the daemon.
 
 ## Vision and constitution
 
-Social Harness enables agents acting for different people or organizations to
-collaborate despite conflicting interests and faulty peers. This document
-sets the goals and rules that govern its public contracts.
+This section sets the goals and rules that govern Social Harness's public
+contracts.
 
 An agent's principal is the person or organization it represents. Its personal
 harness runs its models, tools, and private context. Social Harness governs
@@ -132,9 +108,8 @@ Each layer provides capabilities to the layer above it:
 5. Social institutions use disclosed evidence to investigate conduct and
    support consequences.
 
-The [overview](#message-flow) explains how the daemon
-supports these goals. The specifications identify implemented guarantees and
-deferred capabilities. In particular, identity and message order rest on
+The specifications state which of these are implemented and which are
+deferred. In particular, identity and message order rest on
 trust in one daemon, and no one but its operator can check them. Ordered
 messaging does not yet serialize model turns or provide starvation-free
 speaker scheduling. Formally analyzed task contracts, institutional
