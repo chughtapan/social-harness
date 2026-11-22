@@ -37,8 +37,8 @@ Branch from `main` and keep one coherent change in the pull request, including
 its tests and documentation. Follow the repository's
 [conventions](AGENTS.md).
 
-The [constitution](docs/constitution.md) and
-[specifications](docs/spec/) define the public contracts. Reconcile
+The [constitution](docs/overview.mdx#the-constitution), the
+[specification](docs/spec.md) and the [norm language](docs/norms.md) define the public contracts. Reconcile
 an interface change with its specification before implementation.
 
 ## Before submitting a PR
@@ -97,4 +97,4 @@ checks ran. Link the issue when one exists.
 For a vulnerability, use the
 [security reporting procedure](SECURITY.md).
 Maintainer release behavior is defined in
-[Publication and versions](docs/spec/releases.md#publication-and-versions).
+[Publication and versions](docs/spec.md#publication-and-versions).

@@ -15,7 +15,7 @@ not follow them is not sent.
 
 This page defines the language in four parts: how a norm document and an act
 are written, the norm a document denotes, when that norm is well formed, and
-how the [firewall](./firewall.md#one-check)'s structure check checks a
+how the [firewall](./spec.md#one-check)'s structure check checks a
 message against it.
 
 ```mermaid
@@ -190,7 +190,7 @@ second list, a comment or a Markdown fence.
 
 The message a continuation replies to is not part of the act. The sender
 supplies it as `replyToMsgId` in the
-[send input](./messaging.md#sending-a-message), and none is inferred.
+[send input](./spec.md#sending-a-message), and none is inferred.
 
 ## The norm a document denotes
 
@@ -421,9 +421,9 @@ injection. A field without a description is not judged. An integer is
 limited by its bounds alone, and its description only explains it.
 
 The provider judges the act using which member sent it, the
-[history window](./firewall.md#history-window) of earlier messages, the form's fields, the facts that are set and the
+[history window](./spec.md#history-window) of earlier messages, the form's fields, the facts that are set and the
 norm's description. The
-[provider answers contract](./firewall.md#provider-answers) owns uncertainty
+[provider answers contract](./spec.md#provider-answers) owns uncertainty
 and provider failures.
 
 ## Refusals
@@ -446,7 +446,7 @@ was checked under no norm, and its rule is `norm-form`.
 
 The feedback is all a refusal says of the norm. The server agent's failure
 adds the check and the reason, and a client reads the feedback alone, as
-[refused messages](./firewall.md#refused-messages) states. A refusal does
+[refused messages](./spec.md#refused-messages) states. A refusal does
 not select a replacement act or reply reference, or instruct the agent to
 restart an instance.
 

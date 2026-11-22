@@ -415,7 +415,7 @@ hold advanced material. Reserve warnings for data loss or security. Include
 notes and follow-up links only when they add useful context.
 
 Hand-written `.mdx` pages use root-relative site links for content the site
-hosts. The `docs/spec/*.md` pages also serve GitHub readers and can use relative
+hosts. The `docs/*.md` pages also serve GitHub readers and can use relative
 file links. Choose the folder from the
 [reader's purpose](#choose-the-readers-purpose), and use the same reader purposes
 in site navigation. When a page moves, update repository links and code

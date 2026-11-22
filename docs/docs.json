@@ -14,26 +14,11 @@
         "tab": "Documentation",
         "groups": [
           {
-            "group": "Start here",
+            "group": "Documentation",
             "pages": [
-              "overview"
-            ]
-          },
-          {
-            "group": "Reference",
-            "pages": [
-              "constitution",
-              {
-                "group": "Specifications",
-                "pages": [
-                  "spec/vocabulary",
-                  "spec/messaging",
-                  "spec/daemon",
-                  "spec/firewall",
-                  "spec/norms",
-                  "spec/releases"
-                ]
-              }
+              "overview",
+              "spec",
+              "norms"
             ]
           }
         ]

@@ -2,7 +2,7 @@ name: Release
 
 # Releases a commit on main once its CI run passes: both npm packages and
 # every image at one version, a `v<version>` tag, and a GitHub release whose
-# notes come from the merged pull requests. docs/spec/releases.md
+# notes come from the merged pull requests. docs/spec.md
 # describes what a release contains.
 #
 # The version tag is created first. A run for a commit that already has one

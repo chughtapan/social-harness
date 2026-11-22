@@ -22,15 +22,15 @@ protocol namespaces use `org.social-harness/*`.
 
 The daemon image is built from the root
 `Dockerfile`; private product overlays stay in deployment. Image publication follows
-[Publication and versions](docs/spec/releases.md#publication-and-versions).
+[Publication and versions](docs/spec.md#publication-and-versions).
 
 `main` is the only track; npm publication membership and versioning follow
-[Publication and versions](docs/spec/releases.md#publication-and-versions).
+[Publication and versions](docs/spec.md#publication-and-versions).
 Releases follow the same section: a merge releases after CI passes. Release
 notes are built from pull request titles, so a title says what changed for a
 user.
 
-**The constitution is `docs/constitution.md` → The constitution.** It is canonical
+**The constitution is `docs/overview.mdx` → The constitution.** It is canonical
 there and paraphrased nowhere, this file included: two copies at the top of the
 same authority order drift, and the drift is invisible.
 
@@ -40,10 +40,9 @@ The repository root is this package: `src/`, `examples/` and `skills/`. It
 implements the agent daemon and its MCP interface for hosts. Read the
 contract for the area you change:
 
-- [Host messaging and receiving](docs/spec/messaging.md).
-- [Daemon settings, agents and MCP interface](docs/spec/daemon.md).
-- [Norm language](docs/spec/norms.md) and the
-  [firewall](docs/spec/firewall.md) that enforces norms.
+- [The specification](docs/spec.md): the daemon and its settings, messaging
+  and the firewall.
+- [The norm language](docs/norms.md).
 
 `src/norms/` is laid out as a compiler. `lisp.ts` is the frontend and the
 only module that knows the syntax. `norm.ts` is the norm it reads documents
@@ -112,7 +111,7 @@ Dockerfile `FROM`, or the manifest of something built outside the workspace.
 ## Code
 
 - Name a type, a field, a function or a tool argument with the word
-  [the vocabulary](docs/spec/vocabulary.md) gives its subject. A new
+  [the vocabulary](docs/spec.md#vocabulary) gives its subject. A new
   concept gets its word there first.
 - Symbol questions (where is X defined, who calls it, what type is
   this) → LSP. Grep/Explore only for breadth or text search.
@@ -155,8 +154,8 @@ runs safer-architecture-lsp against it.
 
 ## Docs
 
-Read this file and `docs/constitution.md`, then the applicable public specification
-under `docs/spec/`. Reconcile a boundary change with its public
+Read this file and the constitution, then the applicable section of
+`docs/spec.md` or `docs/norms.md`. Reconcile a boundary change with its public
 specification; do not leave a binding interface specification only in chat,
 agent state, or records outside this repository.
 
