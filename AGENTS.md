@@ -30,10 +30,6 @@ Releases follow the same section: a merge releases after CI passes. Release
 notes are built from pull request titles, so a title says what changed for a
 user.
 
-**The constitution is `docs/overview.mdx` → The constitution.** It is canonical
-there and paraphrased nowhere, this file included: two copies at the top of the
-same authority order drift, and the drift is invisible.
-
 ## The `@social-harness/social-harness` package
 
 The repository root is this package: `src/`, `examples/` and `skills/`. It
