@@ -18,6 +18,7 @@ import {
   isName,
   type Norm,
   type Relation,
+  type Shape,
 } from "./norm.js";
 
 /** One rule applied to a norm: whether the norm breaks it, and the rule's text. The text never quotes the document. */
@@ -88,8 +89,8 @@ function brokenFormRule(
         "Field names must be unique within a form.",
       ],
       [
-        !form.fields.every(hasOrderedBounds),
-        "Field bounds must be ordered; length and item bounds are nonnegative integers.",
+        !form.fields.every(isWellShaped),
+        "Field bounds must be ordered; length and item bounds are nonnegative integers; a record's fields have distinct names.",
       ],
       [
         max !== undefined && !(Number.isInteger(max) && max > 0),
@@ -125,34 +126,62 @@ function brokenFormRule(
   );
 }
 
-/** Whether a field's lower bound is at most its upper bound. For a string or a list, the bounds must also be whole numbers of zero or more. */
-function hasOrderedBounds(field: Field): boolean {
-  const { low, high, counted } = boundsOf(field);
+/**
+ * Whether a shape is well formed. Its lower bound is at most its upper
+ * bound, and for a string or a list both are whole numbers of zero or more.
+ * A record's field names are valid and unique. A list's item and a record's
+ * fields are well formed in turn.
+ */
+function isWellShaped(shape: Shape): boolean {
+  const { low, high, counted } = boundsOf(shape);
   const ordered = low === undefined || high === undefined || low <= high;
   const whole = [low, high]
     .flatMap((bound) => bound ?? [])
     .every((bound) => Number.isInteger(bound) && bound >= 0);
-  return ordered && (whole || !counted);
+  if (!ordered || (counted && !whole)) {
+    return false;
+  }
+  if (shape.type === "list") {
+    return shape.item === undefined || isWellShaped(shape.item);
+  }
+  if (shape.type !== "record") {
+    return true;
+  }
+  const names = shape.fields.map((field) => field.name);
+  return (
+    names.every(isName) &&
+    new Set(names).size === names.length &&
+    shape.fields.every(isWellShaped)
+  );
 }
 
-/** A field's lower and upper bound. `counted` is true for a string or a list, whose bounds count code points or items. */
-function boundsOf(field: Field): {
+/** A shape's lower and upper bound. `counted` is true for a string or a list, whose bounds count code points or items. */
+function boundsOf(shape: Shape): {
   readonly low?: number;
   readonly high?: number;
   readonly counted: boolean;
 } {
-  switch (field.type) {
+  switch (shape.type) {
     case "string":
-      return { low: field.minLength, high: field.maxLength, counted: true };
+      return { low: shape.minLength, high: shape.maxLength, counted: true };
     case "integer":
-      return { low: field.minimum, high: field.maximum, counted: false };
+    case "number":
+      return { low: shape.minimum, high: shape.maximum, counted: false };
     case "list":
-      return { low: field.minItems, high: field.maxItems, counted: true };
+      return { low: shape.minItems, high: shape.maxItems, counted: true };
+    case "boolean":
+    case "record":
+      return { counted: false };
     default: {
-      const exhaustive: never = field;
+      const exhaustive: never = shape;
       return exhaustive;
     }
   }
+}
+
+/** The type of a list's items, which are strings when it declares no item. */
+function itemTypeOf(shape: Shape): string | undefined {
+  return shape.type === "list" ? (shape.item?.type ?? "string") : undefined;
 }
 
 /** Whether a form can start an instance: it names its senders by role and has no `when` fact, delay or relation. */
@@ -194,23 +223,35 @@ function canWait(norm: Norm, form: Form, delay: Delay): boolean {
  * The relation's field must be declared on the form. The source's field must
  * be required on every form the source can refer to, so the earlier act
  * always has it. The field types must suit the operator: `equals` compares
- * two fields of the same type, `member` a string with a list, and `subset`
- * two lists.
+ * two fields of the same type, `member` a field with a list whose items have
+ * its type, and `subset` two lists whose items have the same type.
  */
 function brokenRelationRule(
   norm: Norm,
   form: Form,
   { operator, field, source }: Relation,
 ): Option.Option<string> {
-  const compared = fieldOf(form, field)?.type;
+  const compared = fieldOf(form, field);
   const sources = formsOf(norm, source.act).map((earlier) =>
     fieldOf(earlier, source.field),
   );
-  const expected = {
-    equals: [compared, compared],
-    member: ["string", "list"],
-    subset: ["list", "list"],
-  }[operator];
+  const suits = (declared: Field) => {
+    switch (operator) {
+      case "equals":
+        return declared.type === compared?.type;
+      case "member":
+        return itemTypeOf(declared) === compared?.type;
+      case "subset":
+        return (
+          compared?.type === "list" &&
+          itemTypeOf(declared) === itemTypeOf(compared)
+        );
+      default: {
+        const exhaustive: never = operator;
+        return exhaustive;
+      }
+    }
+  };
   return firstBroken([
     [
       compared === undefined ||
@@ -219,9 +260,8 @@ function brokenRelationRule(
       "A relation compares a declared field with a required field of every earlier act its source may name.",
     ],
     [
-      compared !== expected[0] ||
-        sources.some((declared) => declared?.type !== expected[1]),
-      "An equals relation compares a field with one of its type, a member relation a string with a list, and a subset relation a list with a list.",
+      !sources.every((declared) => declared !== undefined && suits(declared)),
+      "An equals relation compares two fields of one type, a member relation a field with a list of items of its type, and a subset relation two lists with items of one type.",
     ],
   ]);
 }

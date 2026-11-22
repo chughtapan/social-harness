@@ -353,7 +353,7 @@ A check has two parts, in order:
    next. It refuses anything else.
 2. The **decision provider** judges an act that passed against its text
    rules. There is one rule for each
-   [described string or list field](./norms.md#text-rules) the act includes.
+   [described string, list or record field](./norms.md#text-rules) the act includes.
 
 A check sees the message and the earlier messages as they were when it ran.
 It is not repeated when later messages arrive, and it cannot alter the

@@ -20,6 +20,7 @@ import {
   type Norm,
   type Relation,
   type Role,
+  type Shape,
 } from "./norm.js";
 
 /**
@@ -483,24 +484,47 @@ function isSatisfied(
   actual: FieldValue,
   expected: FieldValue,
 ) {
+  const among = (item: FieldValue) =>
+    isList(expected) && expected.some((other) => isEqual(item, other));
   switch (operator) {
     case "equals":
-      return JSON.stringify(actual) === JSON.stringify(expected);
+      return isEqual(actual, expected);
     case "member":
-      return (
-        Array.isArray(expected) && expected.some((item) => item === actual)
-      );
+      return among(actual);
     case "subset":
-      return (
-        Array.isArray(actual) &&
-        Array.isArray(expected) &&
-        actual.every((item) => expected.includes(item))
-      );
+      return isList(actual) && actual.every(among);
     default: {
       const exhaustive: never = operator;
       return exhaustive;
     }
   }
+}
+
+/** Whether two values are the same: lists in the same order, and records with the same fields in any order. */
+function isEqual(left: FieldValue, right: FieldValue): boolean {
+  if (isList(left) && isList(right)) {
+    return (
+      left.length === right.length &&
+      left.every((item, index) => {
+        const other = right[index];
+        return other !== undefined && isEqual(item, other);
+      })
+    );
+  }
+  if (!isRecord(left) || !isRecord(right)) {
+    return left === right;
+  }
+  const names = Object.keys(left);
+  return (
+    names.length === Object.keys(right).length &&
+    names.every((name) => {
+      const mine = left[name];
+      const theirs = Object.hasOwn(right, name) ? right[name] : undefined;
+      return (
+        mine !== undefined && theirs !== undefined && isEqual(mine, theirs)
+      );
+    })
+  );
 }
 
 /** Finds the earlier act a relation refers to: the act that set a fact, or the latest act with a performative. Returns undefined if it is not in the reply chain. */
@@ -576,36 +600,69 @@ function fitForm(act: Act, norm?: Norm): Step<Fitted> {
     : Either.left(formProblem(failures.join(" ")));
 }
 
-/** Whether `value` has the field's type and is within its bounds. A string's length is counted in code points. */
-function accepts(field: Field, value: FieldValue): boolean {
-  switch (field.type) {
+/** Whether `value` has the shape's type and is within its bounds. A string's length is counted in code points. */
+function accepts(shape: Shape, value: FieldValue): boolean {
+  switch (shape.type) {
     case "string":
       return (
         typeof value === "string" &&
-        within(Array.from(value).length, field.minLength, field.maxLength) &&
-        (field.format === undefined || hasFormat(value, field.format))
+        within(Array.from(value).length, shape.minLength, shape.maxLength) &&
+        (shape.format === undefined || hasFormat(value, shape.format))
       );
     case "integer":
       return (
         typeof value === "number" &&
         Number.isInteger(value) &&
-        within(value, field.minimum, field.maximum)
+        within(value, shape.minimum, shape.maximum)
       );
-    case "list":
+    case "number":
       return (
-        typeof value === "object" &&
-        value.every(
-          (item) =>
-            item !== "" &&
-            (field.format === undefined || hasFormat(item, field.format)),
-        ) &&
-        within(value.length, field.minItems, field.maxItems)
+        typeof value === "number" && within(value, shape.minimum, shape.maximum)
       );
+    case "boolean":
+      return typeof value === "boolean";
+    case "list":
+      return acceptsList(shape, value);
+    case "record":
+      return acceptsRecord(shape.fields, value);
     default: {
-      const exhaustive: never = field;
+      const exhaustive: never = shape;
       return exhaustive;
     }
   }
+}
+
+/** Whether `value` is a list within the shape's bounds whose items all have the item shape. Without a declared item, items are nonempty strings in the list's format. */
+function acceptsList(
+  shape: Extract<Shape, { readonly type: "list" }>,
+  value: FieldValue,
+): boolean {
+  const item: Shape = shape.item ?? {
+    type: "string",
+    minLength: 1,
+    format: shape.format,
+  };
+  return (
+    isList(value) &&
+    value.every((entry) => accepts(item, entry)) &&
+    within(value.length, shape.minItems, shape.maxItems)
+  );
+}
+
+/** Whether `value` is a record with every required field, no undeclared field, and a fitting value for each field it has. */
+function acceptsRecord(fields: readonly Field[], value: FieldValue): boolean {
+  return (
+    isRecord(value) &&
+    Object.keys(value).every((name) =>
+      fields.some((field) => field.name === name),
+    ) &&
+    fields.every((field) => {
+      const entry = Object.hasOwn(value, field.name)
+        ? value[field.name]
+        : undefined;
+      return entry === undefined ? field.optional : accepts(field, entry);
+    })
+  );
 }
 
 const DATE = String.raw`(\d{4})-(\d{2})-(\d{2})`;
@@ -667,4 +724,16 @@ function formProblem(feedback: string): Problem {
 
 function protocolProblem(feedback: string): Problem {
   return { stage: "protocol", feedback };
+}
+
+/** Whether a value is a list. */
+function isList(value: FieldValue): value is readonly FieldValue[] {
+  return Array.isArray(value);
+}
+
+/** Whether a value is a record, not a list or a single value. */
+function isRecord(
+  value: FieldValue,
+): value is Readonly<Record<string, FieldValue>> {
+  return typeof value === "object" && !Array.isArray(value);
 }

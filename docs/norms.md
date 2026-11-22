@@ -99,8 +99,9 @@ earlier act by following the replies back. That is why message 6 in the
 example is refused: it replies to the request, not to the offer.
 
 **What a field may contain.** A field has a type and optional limits, such as
-a length or a date format, which are checked exactly. A text or list field can also have a description in
-plain language. A decision provider judges whether the field's text is what
+a length or a date format, which are checked exactly. The types are JSON's:
+text, numbers, booleans, lists and records. A text, list or record field can
+also have a description in plain language. A decision provider judges whether the field's text is what
 the description says. That requirement is the field's *text rule*.
 
 **Checking.** When a message is sent, the structure check decides whether it
@@ -176,13 +177,16 @@ role       = "client" | "server" ;
 facts      = name | "(" , { name } , ")" ;
 truth      = "true" | "false" ;
 
-field      = "(" , "field" , name , { field-attr } , ")" ;
-field-attr = ":type" , type
-           | ":optional" , truth
-           | ":description" , string
+field      = "(" , "field" , name , { field-attr | shape } , ")" ;
+field-attr = ":optional" , truth
+           | ":description" , string ;
+item       = "(" , "item" , { shape } , ")" ;
+shape      = ":type" , type
            | ":format" , format
-           | bound , number ;
-type       = "string" | "integer" | "list" ;
+           | bound , number
+           | field
+           | item ;
+type       = "string" | "integer" | "number" | "boolean" | "list" | "record" ;
 format     = "date" | "time" | "date-time" | "duration" ;
 bound      = ":min-length" | ":max-length"
            | ":minimum" | ":maximum"
@@ -201,12 +205,19 @@ These rules add to the grammar:
 2. A declaration may use each attribute once, and only the attributes the
    grammar gives it. A misspelled attribute is an error.
 3. `:by` and `:type` are required. `:after` takes the fact to wait on, then
-   the field that holds the number of seconds. A string or a list takes
-   `:format`; a list's format applies to each of its items.
+   the field that holds the number of seconds.
 4. A field accepts only the bounds of its type: `:min-length` and
-   `:max-length` for a string, `:minimum` and `:maximum` for an integer,
-   `:min-items` and `:max-items` for a list.
-5. No field is named `norm`, because an act names its norm with `:norm`.
+   `:max-length` for a string, `:minimum` and `:maximum` for an integer or a
+   number, `:min-items` and `:max-items` for a list. A boolean and a record
+   take none.
+5. A record contains `field` declarations and nothing else. A list contains
+   at most one `item`, which gives the shape of its items. A list without an
+   item holds nonempty strings. No other type contains a declaration.
+6. A string takes `:format`. So does a list without an item, where the
+   format applies to each of its strings.
+7. A field inside a record takes no `:description`. Describe the field that
+   holds the record.
+8. No field is named `norm`, because an act names its norm with `:norm`.
 
 Repeating a role in a sender list has no effect. An empty list of facts is the
 same as leaving the attribute out. A text that does not match the grammar and
@@ -219,7 +230,9 @@ followed by keyword and value pairs.
 
 ```ebnf
 act       = "(" , name , { keyword , value } , ")" ;
-value     = string | symbol | "(" , { string | symbol } , ")" ;
+value     = string | symbol | list | record ;
+list      = "(" , { value } , ")" ;
+record    = "(" , keyword , value , { keyword , value } , ")" ;
 ```
 
 ```lisp
@@ -230,10 +243,13 @@ value     = string | symbol | "(" , { string | symbol } , ")" ;
 2. No keyword appears twice.
 3. `:norm` is required. Its value is text that names the act's norm. Every
    other pair is a field of the act.
-4. A string is text. A symbol that has the form of a number is that number, which must be finite.
-   Any other symbol is text, whatever its form, so `Tue` and `"Tue"` are the
-   same value. Every
-   item of a list is text, including one that looks like a number.
+4. Values are JSON's, without null. A string is text. A bare symbol is a
+   number if it has the form of one, which must be finite, a boolean if it
+   is `true` or `false`, and text otherwise, so `Tue` and `"Tue"` are the
+   same value. Quote text that looks like a number or a boolean.
+5. A parenthesized value whose first item is a keyword is a record, written
+   `(:name value ...)`, with each name once. Any other parenthesized value
+   is a list of values. The empty list is `()`.
 
 A message whose text does not match the grammar and these rules is not an
 act. That includes a text with anything outside the one list, such as prose,
@@ -264,11 +280,14 @@ Form     = { performative,
 Senders  = roles(Role+)            ; a member that has one of these roles
          | recipient(Fact)         ; the recipient of the message that set the fact
 
-Field    = { name, optional: Boolean, description?: String }
-           and one of
-             string  { minLength?, maxLength?, format? }
-             integer { minimum?, maximum? }
-             list    { minItems?, maxItems?, format? }
+Field    = { name, optional: Boolean, description?: String } and a Shape
+
+Shape    = string  { minLength?, maxLength?, format? }
+         | integer { minimum?, maximum? }
+         | number  { minimum?, maximum? }
+         | boolean
+         | list    { minItems?, maxItems?, format?, item?: Shape }
+         | record  { fields: Field* }
 
 Relation = { operator: equals | member | subset,
              field,
@@ -278,7 +297,7 @@ EarlierAct = performative(name)    ; the latest act of this performative
            | fact(Fact)            ; the act that set this fact
 
 Act        = { performative, norm, fields: name -> FieldValue }
-FieldValue = String | Number | String*
+FieldValue = String | Number | Boolean | FieldValue* | name -> FieldValue
 ```
 
 Each part of a document becomes one part of the norm:
@@ -294,6 +313,7 @@ Each part of a document becomes one part of the norm:
 | `:max` | `max` | No limit. |
 | `:after (f d)` | `delay` with `fact` f and `secondsField` d | No delay. |
 | `(field name …)` | A field | |
+| `(item …)` in a list | The list's `item` | The items are nonempty strings. |
 | `:optional` | `optional` | False: the field is required. |
 | `:description` of a field | `description` | None. |
 | `(relation op field (previous a f))` | A relation | |
@@ -307,11 +327,12 @@ well formed when it follows these rules:
 1. The norm, every performative, every field and every fact has a valid
    name.
 2. No two forms declare the same performative, and no two fields of a form
-   have the same name.
+   or of a record have the same name.
 3. At least one form starts an instance.
 4. A field's lower bound is not above its upper bound. The bounds of a string
    and of a list are whole numbers of zero or more. The bounds of an integer
-   are any numbers.
+   or a number are any numbers. The same holds for a list's item and for
+   each field of a record.
 5. `max` is a whole number of one or more.
 6. Every fact in a `when`, a `clears`, a `recipient`, a delay or a
    relation's source is in the `sets` of some form.
@@ -328,10 +349,9 @@ well formed when it follows these rules:
    fact. The field types must suit the operator:
 
    | Operator | The form's field | The source's field |
-   | --- | --- | --- |
-   | `equals` | Any type | The same type |
-   | `member` | String | List |
-   | `subset` | List | List |
+   | --- | --- | --- |   | `equals` | Any type | The same type |
+   | `member` | The type of the list's items | List |
+   | `subset` | List | List with items of the same type |
 
 A norms directory must have at least one document, and no two documents may
 name the same norm.
@@ -399,7 +419,10 @@ A field's value fits its type as follows:
 | --- | --- | --- |
 | `string` | Text. With a `format`, text in that format. | `minLength` and `maxLength` count code points. |
 | `integer` | A whole number. | `minimum` and `maximum` are inclusive. |
-| `list` | A list of texts, none empty. With a `format`, each in that format. | `minItems` and `maxItems` count items. |
+| `number` | Any number. | `minimum` and `maximum` are inclusive. |
+| `boolean` | `true` or `false`. | None. |
+| `list` | A list whose items each fit its `item`. Without an `item`, a list of texts, none empty, each in the list's `format` if it has one. | `minItems` and `maxItems` count items. |
+| `record` | A record with every required field, no undeclared field, and a fitting value for each field it has. | None. |
 
 The formats are those of JSON Schema:
 
@@ -417,7 +440,7 @@ source that names a fact, it is the act that set the fact.
 
 | Operator | Satisfied when |
 | --- | --- |
-| `equals` | The field has exactly the earlier value: the same text, the same number, or the same items in the same order. |
+| `equals` | The field has exactly the earlier value. Lists are equal when they have equal items in the same order, and records when they have the same fields with equal values, in any order. |
 | `member` | The field is equal to one of the earlier list's items. |
 | `subset` | Every item of the field is equal to one of the earlier list's items. |
 
@@ -462,14 +485,14 @@ an instance.
 
 ## Text rules
 
-A string or list field with a description has a text rule. When an act that
+A string, list or record field with a description has a text rule. When an act that
 passed the structure check includes such a field, the decision provider
 judges whether the field contains only what its description says. A list's
 description applies to each of its items.
 
 | Field | Rule text |
 | --- | --- |
-| String | `<field> must contain only what its description says: <description>` |
+| String or record | `<field> must contain only what its description says: <description>` |
 | List | `each item of <field> must contain only what its description says: <description>` |
 
 A rule's id is `<norm>.<performative>.<field>`, such as
@@ -481,8 +504,8 @@ Write a description as what the field contains, such as "The subject of the
 meeting." Anything else in the field breaks the rule, so a description does not need to forbid unrelated instructions or
 prompt injection. A field without a description is not judged. Where a field has a fixed shape,
 such as a date, give it a `:format`; a format is checked exactly and needs no
-decision provider. An integer
-field is limited only by its bounds; its description is not judged.
+decision provider. A number or a
+boolean is checked exactly; its description is not judged.
 
 The provider is told which member sent the act and is shown the
 [history window](./spec.md#history-window), the form's fields, the facts that

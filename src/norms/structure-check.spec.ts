@@ -2,7 +2,7 @@
 
 import { Either, FastCheck as fc, Option } from "effect";
 import { expect, it } from "vitest";
-import type { Role } from "./norm.js";
+import type { FieldValue, Role } from "./norm.js";
 import { compileNorm } from "./compiler.js";
 import { readAct } from "./lisp.js";
 import { type Sent, structureCheck } from "./structure-check.js";
@@ -19,17 +19,26 @@ type Norm = ReturnType<typeof normFrom>;
 function actText(
   name: string,
   norm: string,
-  fields: Readonly<Record<string, string | number | readonly string[]>> = {},
+  fields: Readonly<Record<string, FieldValue>> = {},
 ) {
   const stated = Object.entries(fields).map(
-    ([field, value]) =>
-      ` :${field} ${
-        typeof value === "object"
-          ? `(${value.map((choice) => JSON.stringify(choice)).join(" ")})`
-          : JSON.stringify(value)
-      }`,
+    ([field, value]) => ` :${field} ${valueText(value)}`,
   );
   return `(${name} :norm ${norm}${stated.join("")})`;
+}
+
+/** A value as an act writes it: text quoted, and a list or a record in parentheses. */
+function valueText(value: FieldValue): string {
+  if (typeof value !== "object") {
+    return JSON.stringify(value);
+  }
+  const parts =
+    value instanceof Array
+      ? value.map((item: FieldValue) => valueText(item))
+      : Object.entries(value).map(
+          ([field, item]) => `:${field} ${valueText(item)}`,
+        );
+  return `(${parts.join(" ")})`;
 }
 
 /**
@@ -466,10 +475,7 @@ const sampleOf = (fields: readonly string[]) =>
 `);
 
 /** Whether a field declared as `declaration` accepts the value an act states as `value`. */
-const accepted = (
-  declaration: string,
-  value: string | number | readonly string[],
-) =>
+const accepted = (declaration: string, value: FieldValue) =>
   check(
     sampleOf([`(field field ${declaration})`]),
     message(client, actText("open", "sample", { field: value })),
@@ -615,6 +621,39 @@ it("requires every item of a list with a format to be written in it", () => {
   expect(accepted(declared, ["2026-11-23", "2026-11-24"])).toBe(true);
   expect(accepted(declared, ["2026-11-23", "tomorrow"])).toBe(false);
 });
+
+it.each<[string, string, readonly FieldValue[], readonly FieldValue[]]>([
+  ["a number", ":type number :minimum 0", [0, 1.5], [-1, "1", true]],
+  ["a boolean", ":type boolean", [true, false], ["true", 1]],
+  [
+    "a record",
+    ":type record (field day :type string :format date) (field seats :type integer :optional true)",
+    [{ day: "2026-11-23" }, { seats: 2, day: "2026-11-23" }],
+    [{}, { day: "soon" }, { day: "2026-11-23", extra: 1 }, ["2026-11-23"]],
+  ],
+  [
+    "a list of records",
+    ":type list :min-items 1 (item :type record (field day :type string :format date))",
+    [[{ day: "2026-11-23" }]],
+    [[], [{ day: "soon" }], ["2026-11-23"]],
+  ],
+  [
+    "a list of integers",
+    ":type list (item :type integer :minimum 1)",
+    [[1, 2], []],
+    [[0], ["1"]],
+  ],
+])(
+  "requires %s to have its declared shape",
+  (...[, declared, valid, invalid]) => {
+    for (const value of valid) {
+      expect([value, accepted(declared, value)]).toEqual([value, true]);
+    }
+    for (const value of invalid) {
+      expect([value, accepted(declared, value)]).toEqual([value, false]);
+    }
+  },
+);
 
 it("requires a list of nonempty items whose count is within its bounds", () => {
   fc.assert(
