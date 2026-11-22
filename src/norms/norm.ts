@@ -65,20 +65,26 @@ export type Senders =
   | { readonly kind: "recipient"; readonly fact: string };
 
 /**
- * One field of a form. An act must include it unless it is `optional`.
- *
- * All bounds are inclusive. A string's bounds count code points and a
- * list's count items. Each list item is a nonempty string. A string with a
- * `format` must be written in that format, and so must every item of a list
- * with one.
- * `description` says what the field should contain. For a string or list
- * field, the decision provider judges the field's text against it.
+ * One field of a form or of a record. An act must include it unless it is
+ * `optional`. `description` says what the field should contain, and the
+ * decision provider judges the field's text against it.
  */
 export type Field = {
   readonly name: string;
   readonly optional: boolean;
   readonly description?: string;
-} & (
+} & Shape;
+
+/**
+ * What a value must be. The types are JSON's, with `integer` beside `number`.
+ *
+ * All bounds are inclusive. A string's bounds count code points and a list's
+ * count items. A string with a `format` must be written in that format. A
+ * list's items have the shape `item`; without one they are nonempty strings,
+ * which the list's own `format` can constrain. A record has exactly the
+ * fields it declares.
+ */
+export type Shape =
   | {
       readonly type: "string";
       readonly minLength?: number;
@@ -86,17 +92,19 @@ export type Field = {
       readonly format?: Format;
     }
   | {
-      readonly type: "integer";
+      readonly type: "integer" | "number";
       readonly minimum?: number;
       readonly maximum?: number;
     }
+  | { readonly type: "boolean" }
   | {
       readonly type: "list";
       readonly minItems?: number;
       readonly maxItems?: number;
       readonly format?: Format;
+      readonly item?: Shape;
     }
-);
+  | { readonly type: "record"; readonly fields: readonly Field[] };
 
 /**
  * The formats a string field can require, as JSON Schema defines them:
@@ -132,8 +140,13 @@ export type EarlierAct =
   | { readonly kind: "performative"; readonly performative: string }
   | { readonly kind: "fact"; readonly fact: string };
 
-/** A field's value: text, a number or a list of texts. */
-export type FieldValue = string | number | readonly string[];
+/** A field's value: any JSON value except null. */
+export type FieldValue =
+  | string
+  | number
+  | boolean
+  | readonly FieldValue[]
+  | { readonly [name: string]: FieldValue };
 
 /** One act. `fields` maps each field name the act includes to its value. */
 export interface Act {
@@ -156,14 +169,17 @@ export function fieldOf(form: Form, name: string): Field | undefined {
   return form.fields.find((field) => field.name === name);
 }
 
+/** The field types whose text the decision provider can judge. */
+const JUDGED: readonly string[] = ["string", "list", "record"];
+
 /**
- * The fields of a form that the decision provider judges: string and list
- * fields that have a description. `subject` is how the field's text rule
- * refers to it. Integer fields are never judged.
+ * The fields of a form that the decision provider judges: string, list and
+ * record fields that have a description. `subject` is how the field's text
+ * rule refers to it. Numbers and booleans are never judged.
  */
 export function judgedFields(form: Form) {
   return form.fields.flatMap((field) =>
-    field.type === "integer" || field.description === undefined
+    field.description === undefined || !JUDGED.includes(field.type)
       ? []
       : [
           {

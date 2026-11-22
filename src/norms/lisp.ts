@@ -15,12 +15,14 @@ import {
   type Field,
   type FieldValue,
   type Form,
+  type Format,
   FORMATS,
   isName,
   type Norm,
   type Relation,
   type Role,
   type Senders,
+  type Shape,
 } from "./norm.js";
 
 /** A parse result: the value, or an error message. */
@@ -51,14 +53,19 @@ const NUMBER = /^-?(?:0|[1-9]\d*)(?:\.\d+)?(?:[eE][+-]?\d+)?$/u;
  * to the description of the `read_norms` tool.
  */
 export const ACT_SYNTAX =
-  'A message is one act and nothing else: (<performative> :norm <norm> :<field> <value> ...). Quote text as a JSON string, write a list as quoted strings in parentheses such as ("first" "second"), and send an act without fields as (<performative> :norm <norm>). The act that starts an instance omits replyToMsgId in send_message; every later act supplies the id of the message it answers.';
+  'A message is one act and nothing else: (<performative> :norm <norm> :<field> <value> ...). Quote text as a JSON string, write a number or true or false bare, write a list as values in parentheses such as ("first" "second"), write a record as (:<name> <value> ...), and send an act without fields as (<performative> :norm <norm>). The act that starts an instance omits replyToMsgId in send_message; every later act supplies the id of the message it answers.';
 
 /** The bound attributes each field type accepts. */
 const bounds = {
   string: [":min-length", ":max-length"],
   integer: [":minimum", ":maximum"],
+  number: [":minimum", ":maximum"],
+  boolean: [],
   list: [":min-items", ":max-items"],
+  record: [],
 } as const;
+
+type TypeName = keyof typeof bounds;
 
 /** Parses a norm document: one `norm` declaration followed by one `act` declaration per form. */
 export function readNorm(document: string): Read<Norm> {
@@ -94,9 +101,8 @@ export function readNorm(document: string): Read<Norm> {
  * performative followed by `:field value` pairs. The `:norm` pair names the
  * act's norm.
  *
- * A value is a quoted string, a symbol or a list of those. A symbol that
- * looks like a number is a number, except inside a list, where every item
- * is text. Any other symbol is text. Comments are not allowed in a message.
+ * A value is text, a number, a boolean, a list of values or a record, as
+ * `readValue` describes. Comments are not allowed in a message.
  */
 export function readAct(text: string): Read<Act> {
   return readSExpressions(text, false).pipe(
@@ -122,46 +128,32 @@ function readParameters(
   parameters: readonly SExpression[],
 ): Read<Act> {
   return Either.gen(function* () {
-    const fields = new Map<string, FieldValue>();
-    for (let index = 0; index < parameters.length; index += 2) {
-      const key = parameters[index];
-      const value = parameters[index + 1];
-      if (
-        key?.kind !== "symbol" ||
-        !key.value.startsWith(":") ||
-        !isName(key.value.slice(1)) ||
-        value === undefined
-      ) {
-        return yield* Either.left(
-          "Parameters must have distinct :names and one value each.",
-        );
-      }
-      const field = key.value.slice(1);
-      if (fields.has(field)) {
-        return yield* Either.left(`${field} appears more than once.`);
-      }
-      fields.set(field, yield* readValue(value));
-    }
-    const norm = fields.get("norm");
+    const { norm, ...fields } = yield* readRecord(parameters);
     if (typeof norm !== "string") {
       return yield* Either.left(":norm must name the act's norm.");
     }
-    fields.delete("norm");
-    return { performative, norm, fields: Object.fromEntries(fields) };
+    return { performative, norm, fields };
   });
 }
 
+/**
+ * Reads a value. A quoted string is text. A bare symbol is a number if it
+ * looks like one, a boolean if it is `true` or `false`, and text otherwise.
+ * A list whose first item is a `:name` is a record, and any other list is a
+ * list of values.
+ */
 function readValue(node: SExpression): Read<FieldValue> {
   if (node.kind === "string") {
     return Either.right(node.value);
   }
   if (node.kind === "list") {
-    const items = node.values.flatMap((item) =>
-      item.kind === "list" ? [] : [item.value],
-    );
-    return items.length === node.values.length
-      ? Either.right(items)
-      : Either.left("A list contains strings, not lists.");
+    const first = symbol(node.values[0]);
+    return first?.startsWith(":") === true
+      ? readRecord(node.values)
+      : Either.all(node.values.map(readValue));
+  }
+  if (node.value === "true" || node.value === "false") {
+    return Either.right(node.value === "true");
   }
   if (!NUMBER.test(node.value)) {
     return Either.right(node.value);
@@ -169,6 +161,31 @@ function readValue(node: SExpression): Read<FieldValue> {
   return Number.isFinite(Number(node.value))
     ? Either.right(Number(node.value))
     : Either.left("Numbers must be finite.");
+}
+
+/** Reads `:name value` pairs as a record. Each name may appear once. */
+function readRecord(
+  pairs: readonly SExpression[],
+): Read<Readonly<Record<string, FieldValue>>> {
+  return Either.gen(function* () {
+    const fields = new Map<string, FieldValue>();
+    for (let index = 0; index < pairs.length; index += 2) {
+      const key = symbol(pairs[index]);
+      const value = pairs[index + 1];
+      if (
+        key?.startsWith(":") !== true ||
+        !isName(key.slice(1)) ||
+        value === undefined ||
+        fields.has(key.slice(1))
+      ) {
+        return yield* Either.left(
+          "Parameters must have distinct :names and one value each.",
+        );
+      }
+      fields.set(key.slice(1), yield* readValue(value));
+    }
+    return Object.fromEntries(fields);
+  });
 }
 
 /** Parses an `act` declaration into a form. Its attributes give the turn rule, and its child lists give the fields and relations. */
@@ -194,7 +211,9 @@ function readForm(form: Declaration): Read<Form> {
       performative: form.name ?? "",
       by: yield* readSenders(form),
       fields: yield* Either.all(
-        children.filter(({ kind }) => kind === "field").map(readField),
+        children
+          .filter(({ kind }) => kind === "field")
+          .map((child) => readField(child)),
       ),
       starts: yield* booleanAttribute(form, ":starts"),
       ends: yield* booleanAttribute(form, ":ends"),
@@ -242,63 +261,130 @@ function readDelay(form: Declaration): Read<Delay | undefined> {
     : Either.right({ fact, secondsField });
 }
 
-/** Parses a `field` declaration. The bound attributes it accepts depend on its type, and a field may not be named `norm`. */
-function readField(form: Declaration): Read<Field> {
+/**
+ * Parses a `field` declaration: its name, whether it is optional, its
+ * description and its shape. A field may not be named `norm`. A field inside
+ * a record takes no description, because text rules judge whole fields.
+ */
+function readField(form: Declaration, nested = false): Read<Field> {
   return Either.gen(function* () {
-    const type = symbol(form.attributes.get(":type"));
-    if (
-      form.name === undefined ||
-      (type !== "string" && type !== "integer" && type !== "list")
-    ) {
+    if (form.name === undefined || form.name === "norm") {
       return yield* Either.left(
-        "A field needs a name and the type string, integer or list.",
+        "A field needs a name, and none is named norm: an act names its norm with :norm.",
       );
     }
-    const [lower, upper] = bounds[type];
-    yield* checkAttributes(form, [
-      ":type",
-      ":optional",
-      ":description",
-      lower,
-      upper,
-      ...(type === "integer" ? [] : [":format"]),
-    ]);
-    const format = FORMATS.find(
-      (known) => known === symbol(form.attributes.get(":format")),
-    );
-    if (form.attributes.has(":format") && format === undefined) {
+    if (nested && form.attributes.has(":description")) {
       return yield* Either.left(
-        ":format takes date, time, date-time or duration.",
+        "Describe the field that holds a record, not the fields inside it.",
       );
     }
-    if (form.children.length !== 0) {
-      return yield* Either.left("A field contains no child declarations.");
-    }
-    if (form.name === "norm") {
-      return yield* Either.left(
-        "No field is named norm: an act names its norm with :norm.",
-      );
-    }
-    const described = {
+    return {
       name: form.name,
       optional: yield* booleanAttribute(form, ":optional"),
       description: yield* textAttribute(form, ":description"),
+      ...(yield* readShape(form, [":optional", ":description"])),
     };
-    const low = yield* numberAttribute(form, lower);
-    const high = yield* numberAttribute(form, upper);
+  });
+}
+
+/**
+ * Parses the shape a `field` or `item` declaration gives: its type, the
+ * bounds and format that type accepts, a record's fields and a list's item.
+ * `also` lists the other attributes the declaration may carry.
+ */
+function readShape(form: Declaration, also: readonly string[]): Read<Shape> {
+  return Either.gen(function* () {
+    const type = Object.keys(bounds).find(
+      (known): known is TypeName =>
+        known === symbol(form.attributes.get(":type")),
+    );
+    if (type === undefined) {
+      return yield* Either.left(
+        ":type takes string, integer, number, boolean, list or record.",
+      );
+    }
+    const children = yield* readChildren(form, type);
+    const formatted =
+      type === "string" || (type === "list" && children.length === 0);
+    yield* checkAttributes(form, [
+      ":type",
+      ...also,
+      ...bounds[type],
+      ...(formatted ? [":format"] : []),
+    ]);
+    const [low, high] = yield* Either.all(
+      bounds[type].map((bound) => numberAttribute(form, bound)),
+    );
     switch (type) {
       case "string":
-        return { ...described, type, minLength: low, maxLength: high, format };
+        return {
+          type,
+          minLength: low,
+          maxLength: high,
+          format: yield* readFormat(form),
+        };
       case "integer":
-        return { ...described, type, minimum: low, maximum: high };
-      case "list":
-        return { ...described, type, minItems: low, maxItems: high, format };
+      case "number":
+        return { type, minimum: low, maximum: high };
+      case "boolean":
+        return { type };
+      case "list": {
+        const [item] = children;
+        return {
+          type,
+          minItems: low,
+          maxItems: high,
+          format: yield* readFormat(form),
+          item: item === undefined ? undefined : yield* readShape(item, []),
+        };
+      }
+      case "record":
+        return {
+          type,
+          fields: yield* Either.all(
+            children.map((child) => readField(child, true)),
+          ),
+        };
       default: {
         const exhaustive: never = type;
         return exhaustive;
       }
     }
   });
+}
+
+/** Parses the child declarations a type allows: fields in a record, at most one item in a list, and none in any other type. */
+function readChildren(
+  form: Declaration,
+  type: TypeName,
+): Read<readonly Declaration[]> {
+  return Either.flatMap(
+    Either.all(form.children.map(readDeclaration)),
+    (children) => {
+      const allowed: Partial<Record<TypeName, string>> = {
+        record: "field",
+        list: "item",
+      };
+      const fits =
+        children.every(({ kind }) => kind === allowed[type]) &&
+        (type !== "list" || children.length <= 1);
+      return fits
+        ? Either.right(children)
+        : Either.left(
+            "A record contains fields, a list at most one item, and other fields nothing.",
+          );
+    },
+  );
+}
+
+/** Reads `:format`, or undefined if the declaration has none. */
+function readFormat(form: Declaration): Read<Format | undefined> {
+  const format = FORMATS.find(
+    (known) => known === symbol(form.attributes.get(":format")),
+  );
+  return form.attributes.has(":format") && format === undefined
+    ? Either.left(":format takes date, time, date-time or duration.")
+    : Either.right(format);
 }
 
 /** Parses a relation, written `(relation operator field (previous act field))`. */

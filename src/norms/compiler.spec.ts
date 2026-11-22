@@ -132,6 +132,46 @@ vitestIt.each([
 );
 
 vitestIt.each([
+  ["a record of fields", ":type record (field day :type string)", false],
+  [
+    "a list of records",
+    ":type list (item :type record (field day :type string))",
+    false,
+  ],
+  ["a number and a boolean item", ":type list (item :type boolean)", false],
+  [
+    "a description inside a record",
+    ':type record (field day :type string :description "A day.")',
+    true,
+  ],
+  [
+    "two fields of one name in a record",
+    ":type record (field day :type string) (field day :type string)",
+    true,
+  ],
+  [
+    "two items in a list",
+    ":type list (item :type string) (item :type string)",
+    true,
+  ],
+  [
+    "a format beside an item",
+    ":type list :format date (item :type string)",
+    true,
+  ],
+  ["a field inside a string", ":type string (field day :type string)", true],
+] as const)(
+  "for %s, refuses the document: %s %s",
+  (...[, declared, expected]) => {
+    expect(
+      refused(
+        `(norm sample)\n(act open :by client :starts true :ends true (field topic ${declared}))`,
+      ),
+    ).toBe(expected);
+  },
+);
+
+vitestIt.each([
   ["a sender that is neither role", "(client server)", "(client absent)"],
   ["a fact it clears", ":ends true)", ":ends true :clears absent)"],
   ["a fact it waits on", ":ends true)", ":ends true :after (absent wait))"],
