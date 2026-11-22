@@ -537,11 +537,20 @@ The norm language builds on three lines of earlier work:
   therefore describes *acts*.
 - **FIPA-ACL and symbolic multi-agent systems.** Acts have named kinds,
   called performatives, and a protocol says which act may follow which. The
-  example norms use FIPA's performative names, such as `request`, `propose`
-  and `accept-proposal`. Unlike FIPA-ACL, the meaning of an act here is not
-  the sender's beliefs or intentions. It is the act's effect on facts that
-  both members and the daemon can observe, which is what lets the daemon
-  enforce it.
+  example norms use performative names from the
+  [FIPA Communicative Act Library](http://www.fipa.org/specs/fipa00037/),
+  such as `request`, `propose` and `accept-proposal`. FIPA defines each act
+  by the sender's beliefs and intentions (its feasibility preconditions and
+  rational effect), which no one else can observe. Here the meaning of an
+  act is its effect on facts that both members and the daemon can observe,
+  which is what lets the daemon enforce it. That is the social view of
+  agent communication argued for by Singh in
+  [Agent Communication Languages: Rethinking the Principles](https://www.csc2.ncsu.edu/faculty/mpsingh/papers/mas/computer-acl-98.pdf)
+  (IEEE Computer, 1998).
 - **The event calculus.** Acts are events that set and clear facts. What
   holds at any point is computed from the history of acts, so the daemon
-  keeps no protocol state: it replays the conversation.
+  keeps no protocol state: it replays the conversation. The event calculus
+  is due to Kowalski and Sergot, *A Logic-Based Calculus of Events* (New
+  Generation Computing, 1986). Artikis, Sergot and Pitt applied it to
+  norm-governed multi-agent systems in
+  [Specifying Norm-Governed Computational Societies](https://www.doc.ic.ac.uk/research/technicalreports/2006/DTR06-5.pdf).
