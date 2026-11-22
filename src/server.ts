@@ -5,7 +5,7 @@
  * has one conversation, with the server agent, so its name identifies it.
  */
 
-import { Data, Duration, Effect, PubSub, Queue, type Redacted } from "effect";
+import { Duration, Effect, PubSub, Queue, type Redacted } from "effect";
 import type { Firewall } from "./firewall.js";
 import type { Role } from "./norms/index.js";
 import { openDatabase, type StoredMessage } from "./database.js";
@@ -26,67 +26,43 @@ export interface Failure {
   readonly feedback?: readonly string[];
 }
 
-class OperationFailure extends Data.TaggedError("OperationFailure")<Failure> {}
-
 /** A message the firewall refused. */
 type Refused = Extract<
   Effect.Effect.Success<ReturnType<Firewall["check"]>>,
   { readonly kind: "refused" }
 >;
 
-const refusalText: Readonly<Record<Refused["reason"], string>> = {
-  violation: "The message breaks a rule of the server's norms.",
-  unsure:
-    "The decision provider is unsure whether the message follows the server's norms.",
-  unavailable: "The check was unavailable.",
-};
-
 /**
- * A refusal as the server agent reads its own, and as every refusal is
- * logged: the feedback as errors, or the reason when there is none, then the
- * check, whose record names the rules that refused the message.
+ * What the sender of a refused message reads: its feedback, as errors. The
+ * server agent also reads the check and the firewall's reason. A client is
+ * not trusted with those, and when its message could not be checked it reads
+ * only that the server is unavailable.
  */
-function asServerReads({ reason, checkId, feedback }: Refused): Failure {
-  const said = feedback.length === 0 ? [refusalText[reason]] : feedback;
-  return new OperationFailure({
-    reason,
-    checkId,
-    feedback,
-    message: [
-      ...said.map((text) => `Error: ${text}`),
-      `Check: ${checkId}; ${reason}.`,
-    ].join(" "),
-  });
-}
-
-/**
- * A refusal as the client whose message it refused reads it. A client is not
- * trusted with the check: it reads the feedback and neither the check id nor
- * the firewall's reason, or only that the server is unavailable when the
- * message could not be checked.
- */
-function asClientReads({ reason, feedback }: Refused): Failure {
-  if (reason === "unavailable") {
-    return new OperationFailure({
+function refusalFor(sender: Role, refused: Refused): Failure {
+  const { reason, checkId, feedback } = refused;
+  const errors = feedback.map((text) => `Error: ${text}`).join(" ");
+  if (sender === "server") {
+    const said =
+      reason === "unavailable" ? "Error: The check was unavailable." : errors;
+    return {
       reason,
-      message: "The server is unavailable. Try again later.",
-    });
+      checkId,
+      feedback,
+      message: `${said} Check: ${checkId}; ${reason}.`,
+    };
   }
-  const said = feedback.length === 0 ? ["The message was refused."] : feedback;
-  return new OperationFailure({
-    reason: "refused",
-    feedback,
-    message: said.map((text) => `Error: ${text}`).join(" "),
-  });
+  return reason === "unavailable"
+    ? { reason, message: "The server is unavailable. Try again later." }
+    : { reason: "refused", feedback, message: errors };
 }
 
 /** The server agent named a client that has sent it no message, so the two have no conversation. */
 function unknownClient(name: AgentName): Failure {
-  return new OperationFailure({
+  return {
     reason: "unknown-client",
     name,
     message: `No client named ${name} has written to this agent. Use list_conversations to see the clients that have.`,
-  });
+  };
 }
 
 /** Fails a send with what its sender `reads`, after logging what the server agent would read of it. */
@@ -145,11 +121,10 @@ export const openServer = Effect.fn("openServer")(function* (
       if (decision.record !== undefined) {
         yield* database.record(decision.record);
       }
-      const forServer = asServerReads(decision);
       return yield* failSend(
         author,
-        forServer,
-        sender === "server" ? forServer : asClientReads(decision),
+        refusalFor("server", decision),
+        refusalFor(sender, decision),
       );
     }
     yield* database.store(message, decision.record);
