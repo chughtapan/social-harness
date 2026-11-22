@@ -23,7 +23,8 @@ import type { Message } from "./messages.js";
 import type { Role, TextRule } from "./norms/index.js";
 
 /**
- * What the decision provider is asked: the state and one question per rule,
+ * What the decision provider is asked: the state, whose `rules` are the rules
+ * asked about in order, and one choice question per rule, `q0` onwards,
  * whether the candidate breaks it. It never carries execution authority.
  */
 export interface DecisionRequest {
@@ -32,7 +33,7 @@ export interface DecisionRequest {
     Record<
       string,
       {
-        readonly ruleId: string;
+        readonly type: "choice";
         readonly instructions: string;
         readonly criteria: Readonly<Record<string, string>>;
       }
@@ -175,7 +176,7 @@ export function askProvider(
       rules.map((rule, index) => [
         `q${index}`,
         {
-          ruleId: rule.id,
+          type: "choice" as const,
           instructions: `Apply state.instructions first. For rule ${JSON.stringify(rule.id)}: ${complianceQuestion.instructions}`,
           criteria: complianceQuestion.criteria,
         },
@@ -239,20 +240,7 @@ export function jevDecisionProvider(
     const client = yield* HttpClient.HttpClient;
     const response = yield* HttpClientRequest.post(jevUrl).pipe(
       HttpClientRequest.bearerToken(apiKey),
-      HttpClientRequest.bodyJson({
-        model: setting.model,
-        state: request.state,
-        questions: Object.fromEntries(
-          Object.entries(request.questions).map(([id, question]) => [
-            id,
-            {
-              type: "choice",
-              instructions: question.instructions,
-              criteria: question.criteria,
-            },
-          ]),
-        ),
-      }),
+      HttpClientRequest.bodyJson({ model: setting.model, ...request }),
       Effect.orDie,
       Effect.flatMap(client.execute),
       Effect.catchAll(() => fail(true)),
