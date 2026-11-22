@@ -150,9 +150,8 @@ runs safer-architecture-lsp against it.
 
 ## Docs
 
-Read this file and the constitution, then the applicable section of
-`docs/spec.md` or `docs/norms.md`. Reconcile a boundary change with its public
-specification; do not leave a binding interface specification only in chat,
+Read the applicable section of `docs/spec.md` or `docs/norms.md`. Reconcile a
+boundary change with its public specification; do not leave a binding interface specification only in chat,
 agent state, or records outside this repository.
 
 Writing or regenerating public docs uses the `docs` skill at
