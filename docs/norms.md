@@ -7,29 +7,19 @@ read_when:
   - You are changing the norm compiler or the structure check
 ---
 
-A norm says which acts the client and the server agent may send each other,
-in what order, and what each field of an act may contain. Every member can
-read a server's norms with `read_norms`, and the daemon enforces them on both
-members. A message that does not follow them is not sent.
+A norm is a published rule for one kind of exchange between a client and the
+server agent, such as booking a meeting. It says which messages each side may
+send, in what order, and what each part of a message may contain. Every
+member can read a server's norms with `read_norms`. The daemon checks every
+message against them, and a message that does not follow them is not sent.
 
-This page has four parts: how a norm document and an act are written, the
-data a document is parsed into, when a norm is well formed, and how the
-[firewall](./spec.md#one-check)'s structure check checks a message.
-
-```mermaid
-flowchart LR
-    document[Norm document] -- compile --> norm[Norm]
-    text[Message text] -- read --> act[Act]
-    norm --> check[Structure check]
-    act --> check
-    conversation[Earlier messages] --> check
-    check --> passed[Passed, with text rules]
-    check --> refused[Refused, with feedback]
-```
+The first two sections explain how norms work, starting from an example. The
+sections after them are reference: the syntax, the rules a norm must follow,
+and the exact steps of a check.
 
 ## Example
 
-A client books a meeting with the server agent:
+This norm lets a client book a meeting with the server agent:
 
 ```lisp
 ; A client books a meeting with the server.
@@ -42,11 +32,11 @@ A client books a meeting with the server agent:
 
 (act offer :by server :when requested
   :clears requested :sets offered
-  (field slots :type list :min-items 1 :max-items 3
-    :description "One meeting slot: a date, start and end times, and a timezone."))
+  (field slots :type list :min-items 1 :max-items 3 :format date-time)
+  (field length :type string :format duration))
 
 (act pick :by client :when offered :ends true
-  (field slot :type string)
+  (field slot :type string :format date-time)
   (relation member slot (previous offer slots)))
 
 (act decline :by (client server) :ends true)
@@ -60,15 +50,78 @@ gives the id of the message it replies to, as `replyToMsgId` in the send.
 | 1 | client | `Hello, can we meet?` | | Refused: the message is not one act. |
 | 2 | server | `(request :norm booking :topic "Thesis outline")` | | Refused: `request` is not the server's to send. |
 | 3 | client | `(request :norm booking :topic "Thesis outline")` | | Passed. It starts an instance, and `requested` is set. |
-| 4 | server | `(offer :norm booking :slots ("Mon 10:00-10:30 UTC" "Tue 14:00-14:30 UTC"))` | 3 | Passed. `offered` is set in place of `requested`. |
-| 5 | client | `(pick :norm booking :slot "Wed 09:00-09:30 UTC")` | 4 | Refused: the slot is not one of the offered slots. |
-| 6 | client | `(pick :norm booking :slot "Tue 14:00-14:30 UTC")` | 3 | Refused: the reply chain from message 3 does not contain the offer. |
-| 7 | client | `(pick :norm booking :slot "Tue 14:00-14:30 UTC")` | 4 | Passed. It ends the instance. |
+| 4 | server | `(offer :norm booking :slots ("2026-11-23T10:00:00Z" "2026-11-24T14:00:00Z") :length "PT30M")` | 3 | Passed. `offered` is set in place of `requested`. |
+| 5 | client | `(pick :norm booking :slot "2026-11-25T09:00:00Z")` | 4 | Refused: the slot is not one of the offered slots. |
+| 6 | client | `(pick :norm booking :slot "2026-11-24T14:00:00Z")` | 3 | Refused: the reply chain from message 3 does not contain the offer. |
+| 7 | client | `(pick :norm booking :slot "2026-11-24T14:00:00Z")` | 4 | Passed. It ends the instance. |
 
 Refused messages are not stored, so message 7 is the third message of the
 conversation.
 
-## Lexical structure
+## How a norm works
+
+This section describes what a norm means. It does not depend on how a norm is
+written; [Syntax](#syntax) covers that.
+
+**Acts.** A message under a norm is an *act*. An act has a *performative*,
+which is the kind of act it is, the name of its norm, and named *fields*. In
+the example, the first accepted message is an act with the performative
+`request`, the norm `booking`, and one field, `topic`.
+
+**Forms.** A norm declares one *form* for each performative. A form lists the
+fields an act of that kind carries, and gives its *turn rule*: the conditions
+under which the act may be sent.
+
+**Instances.** One run of a norm in a conversation is an *instance*. A form
+says whether its act starts an instance or ends one. In the example,
+`request` starts a booking, and `pick` or `decline` ends it. A conversation
+has at most one instance in progress.
+
+**Facts order the acts.** A *fact* is a named flag of an instance. A form
+says which facts its act sets, which it clears, and which must already be set
+before the act may be sent. In the example, `request` sets `requested`.
+`offer` requires `requested`, clears it and sets `offered`. `pick` requires
+`offered`. The order request, offer, pick is therefore not a separate state
+machine. It follows from the facts each act requires and changes.
+
+**Who may send.** A form names the member that may send its act: the client,
+the server agent, or either. It can instead name the recipient of an earlier
+act.
+
+**Other conditions.** A turn rule can also limit how many times an act is
+sent in an instance, require a wait after an earlier act, and constrain a
+field by a field of an earlier act with a *relation*. In the example, the
+slot a client picks must be one of the slots the server offered.
+
+**Replies link the acts.** Every act after the first replies to an earlier
+message, and those replies form the instance's *thread*. A relation finds the
+earlier act by following the replies back. That is why message 6 in the
+example is refused: it replies to the request, not to the offer.
+
+**What a field may contain.** A field has a type and optional limits, such as
+a length or a date format, which are checked exactly. A text or list field can also have a description in
+plain language. A decision provider judges whether the field's text is what
+the description says. That requirement is the field's *text rule*.
+
+**Checking.** When a message is sent, the structure check decides whether it
+is an act that fits its form and that its sender may send now. It works out
+the instance's facts by replaying the conversation's stored messages. If the
+act passes, its text rules go to the decision provider.
+
+```mermaid
+flowchart LR
+    document[Norm document] -- compile --> norm[Norm]
+    text[Message text] -- read --> act[Act]
+    norm --> check[Structure check]
+    act --> check
+    conversation[Earlier messages] --> check
+    check --> passed[Passed, with text rules]
+    check --> refused[Refused, with feedback]
+```
+
+## Syntax
+
+### Lexical structure
 
 A norm document and a message's text are both sequences of these tokens:
 
@@ -93,7 +146,7 @@ A symbol has one of these forms, or none of them:
 they have the same code points in the same order, and two numbers when they have the same
 value. Nothing in a document or a message is evaluated.
 
-## Norm documents
+### Norm documents
 
 A document is one `norm` declaration followed by one `act` declaration per
 form. In the grammar below, quoted words are symbols; `name`, `string` and
@@ -114,9 +167,7 @@ turn       = ":by" , senders
            | ":clears" , facts
            | ":sets" , facts
            | ":max" , number
-           | ":after" , name
-           | ":delay" , name
-           | ":unit" , "seconds" ;
+           | ":after" , "(" , name , name , ")" ;
 
 senders    = role
            | "(" , role , { role } , ")"
@@ -129,8 +180,10 @@ field      = "(" , "field" , name , { field-attr } , ")" ;
 field-attr = ":type" , type
            | ":optional" , truth
            | ":description" , string
+           | ":format" , format
            | bound , number ;
 type       = "string" | "integer" | "list" ;
+format     = "date" | "time" | "date-time" | "duration" ;
 bound      = ":min-length" | ":max-length"
            | ":minimum" | ":maximum"
            | ":min-items" | ":max-items" ;
@@ -147,8 +200,9 @@ These rules add to the grammar:
    relations.
 2. A declaration may use each attribute once, and only the attributes the
    grammar gives it. A misspelled attribute is an error.
-3. `:by` and `:type` are required. `:after`, `:delay` and `:unit` appear
-   together or not at all.
+3. `:by` and `:type` are required. `:after` takes the fact to wait on, then
+   the field that holds the number of seconds. A string or a list takes
+   `:format`; a list's format applies to each of its items.
 4. A field accepts only the bounds of its type: `:min-length` and
    `:max-length` for a string, `:minimum` and `:maximum` for an integer,
    `:min-items` and `:max-items` for a list.
@@ -158,7 +212,7 @@ Repeating a role in a sender list has no effect. An empty list of facts is the
 same as leaving the attribute out. A text that does not match the grammar and
 these rules is not a norm document and does not compile.
 
-## Acts
+### Acts
 
 A message's text is an act when the whole text is one list: a performative
 followed by keyword and value pairs.
@@ -169,7 +223,7 @@ value     = string | symbol | "(" , { string | symbol } , ")" ;
 ```
 
 ```lisp
-(offer :norm booking :slots ("Mon 10:00-10:30 UTC" "Tue 14:00-14:30 UTC"))
+(offer :norm booking :slots ("2026-11-23T10:00:00Z" "2026-11-24T14:00:00Z") :length "PT30M")
 ```
 
 1. The performative is a name, and each keyword is `:` followed by a name.
@@ -191,9 +245,9 @@ inferred.
 
 ## The norm a document denotes
 
-Parsing a document produces a norm, which is plain data. The well-formedness
-rules and the structure check are defined on this data, not on the
-document's text.
+Parsing a document produces a norm, which is plain data. The rest of this
+page, from the well-formedness rules to the check steps, is defined on this
+data and uses its field names, not the document's text.
 
 ```text
 Norm     = { name, description, forms: Form* }
@@ -212,9 +266,9 @@ Senders  = roles(Role+)            ; a member that has one of these roles
 
 Field    = { name, optional: Boolean, description?: String }
            and one of
-             string  { minLength?, maxLength? }
+             string  { minLength?, maxLength?, format? }
              integer { minimum?, maximum? }
-             list    { minItems?, maxItems? }
+             list    { minItems?, maxItems?, format? }
 
 Relation = { operator: equals | member | subset,
              field,
@@ -238,7 +292,7 @@ Each part of a document becomes one part of the norm:
 | `:starts`, `:ends` | `starts`, `ends` | False. |
 | `:when`, `:clears`, `:sets` | `when`, `clears`, `sets` | No facts, as for an empty list. |
 | `:max` | `max` | No limit. |
-| `:after f :delay d :unit seconds` | `delay` with `fact` f and `secondsField` d | No delay. |
+| `:after (f d)` | `delay` with `fact` f and `secondsField` d | No delay. |
 | `(field name …)` | A field | |
 | `:optional` | `optional` | False: the field is required. |
 | `:description` of a field | `description` | None. |
@@ -343,9 +397,18 @@ A field's value fits its type as follows:
 
 | Type | Value | Bounds |
 | --- | --- | --- |
-| `string` | Text. | `minLength` and `maxLength` count code points. |
+| `string` | Text. With a `format`, text in that format. | `minLength` and `maxLength` count code points. |
 | `integer` | A whole number. | `minimum` and `maximum` are inclusive. |
-| `list` | A list of texts, none empty. | `minItems` and `maxItems` count items. |
+| `list` | A list of texts, none empty. With a `format`, each in that format. | `minItems` and `maxItems` count items. |
+
+The formats are those of JSON Schema:
+
+| Format | Text | Example |
+| --- | --- | --- |
+| `date` | An RFC 3339 date that exists in the calendar. | `2026-11-23` |
+| `time` | An RFC 3339 time, with seconds and an offset. | `10:00:00Z` |
+| `date-time` | A date, `T`, then a time. | `2026-11-23T10:00:00+01:00` |
+| `duration` | An ISO 8601 duration. | `PT30M` |
 
 A relation compares a field of the act with a field of an earlier act. The
 earlier act must be in the reply chain. For a source that names a
@@ -414,10 +477,11 @@ A rule's id is `<norm>.<performative>.<field>`, such as
 feedback text: the sender of an act that breaks a description is given the
 rule's text.
 
-Write a description as what the field contains, such as "One meeting slot: a
-date, start and end times, and a timezone." Anything else in the field breaks
-the rule, so a description does not need to forbid unrelated instructions or
-prompt injection. A field without a description is not judged. An integer
+Write a description as what the field contains, such as "The subject of the
+meeting." Anything else in the field breaks the rule, so a description does not need to forbid unrelated instructions or
+prompt injection. A field without a description is not judged. Where a field has a fixed shape,
+such as a date, give it a `:format`; a format is checked exactly and needs no
+decision provider. An integer
 field is limited only by its bounds; its description is not judged.
 
 The provider is told which member sent the act and is shown the
@@ -464,3 +528,20 @@ in the directory at that time, as [replay](#replay) describes.
 A norm adds no acknowledgment, notification, timer or host behavior. A delay
 only refuses an act that is sent too early. It schedules nothing; the host
 waits.
+
+## Prior work
+
+The norm language builds on three lines of earlier work:
+
+- **Speech-act theory.** A message is an action, not just text. A norm
+  therefore describes *acts*.
+- **FIPA-ACL and symbolic multi-agent systems.** Acts have named kinds,
+  called performatives, and a protocol says which act may follow which. The
+  example norms use FIPA's performative names, such as `request`, `propose`
+  and `accept-proposal`. Unlike FIPA-ACL, the meaning of an act here is not
+  the sender's beliefs or intentions. It is the act's effect on facts that
+  both members and the daemon can observe, which is what lets the daemon
+  enforce it.
+- **The event calculus.** Acts are events that set and clear facts. What
+  holds at any point is computed from the history of acts, so the daemon
+  keeps no protocol state: it replays the conversation.

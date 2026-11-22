@@ -4,18 +4,17 @@
 (act request-propose :by client :starts true :sets offered
   (field topic :type string :min-length 1
     :description "The meeting subject. Its duration and a broad timeframe such as next week are allowed; candidate times belong in options.")
-  (field options :type list :min-items 1 :max-items 3
-    :description "One candidate meeting slot: a date, start and end times, and a timezone."))
+  (field options :type list :min-items 1 :max-items 3 :format date-time)
+  (field length :type string :format duration))
 
 (act counter-propose :by (recipient (fact offered))
   :when offered :sets offered
-  (field options :type list :min-items 1 :max-items 3
-    :description "One candidate meeting slot: a date, start and end times, and a timezone."))
+  (field options :type list :min-items 1 :max-items 3 :format date-time)
+  (field length :type string :format duration))
 
 (act accept-proposal :by (recipient (fact offered))
   :when offered :clears offered :sets agreed
-  (field slot :type string :min-length 1
-    :description "One slot of the current offer, copied exactly.")
+  (field slot :type string :format date-time)
   (relation member slot (previous (fact offered) options)))
 
 (act cancel :by (client server) :ends true)

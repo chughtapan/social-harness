@@ -37,8 +37,8 @@ Branch from `main` and keep one coherent change in the pull request, including
 its tests and documentation. Follow the repository's
 [conventions](AGENTS.md).
 
-The [constitution](docs/overview.mdx#the-constitution), the
-[specification](docs/spec.md) and the [norm language](docs/norms.md) define the public contracts. Reconcile
+The [specification](docs/spec.md) and the [norm language](docs/norms.md)
+define the public contracts. Reconcile
 an interface change with its specification before implementation.
 
 ## Before submitting a PR

@@ -6,12 +6,11 @@
     :description "The subject to discuss. Dates that belong to the subject are allowed; meeting times, availability and counteroffers are not."))
 (act propose :by server :when offer-due :max 2
   :clears (offer-due decision-due) :sets offered
-  (field options :type list :min-items 2 :max-items 3
-    :description "One meeting slot: a date, start and end times, and a timezone."))
+  (field options :type list :min-items 2 :max-items 3 :format date-time)
+  (field length :type string :format duration))
 (act accept-proposal :by client :when offered
   :clears offered :sets hold-due
-  (field available :type list :min-items 1
-    :description "One slot of the latest offer, copied exactly.")
+  (field available :type list :min-items 1 :format date-time)
   (relation subset available (previous propose options)))
 (act reject-proposal :by client :when offered
   :clears offered :sets offer-due)
@@ -20,11 +19,10 @@
   (field recheck-after :type integer :minimum 5 :maximum 60
     :description "Seconds before the client checks back."))
 (act query-if :by client :when held
-  :after held :delay recheck-after :unit seconds
+  :after (held recheck-after)
   :clears held :sets (decision-due offer-due))
 (act confirm :by server :when decision-due :ends true
-  (field slot :type string :max-length 120
-    :description "The slot the server booked, copied exactly from the offer.")
+  (field slot :type string :format date-time)
   (relation member slot (previous accept-proposal available)))
 (act failure :by server :when open :ends true
   (field reason :type string :min-length 1 :max-length 300

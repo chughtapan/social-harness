@@ -4,23 +4,23 @@
 (act request-propose :by client :starts true :sets (submitted response-due)
   (field topic :type string :min-length 1
     :description "The meeting subject. Its duration and a broad timeframe such as next week are allowed.")
-  (field slots :type string :min-length 1
-    :description "All acceptable candidate slots, separated by semicolons. Each slot has its date, start and end times, and timezone."))
+  (field slots :type list :min-items 1 :format date-time)
+  (field length :type string :format duration))
 
 (act pending :by (recipient (fact response-due)) :when response-due
   :clears (response-due queried) :sets waiting
-  (field closes-at :type string :min-length 1
-    :description "The scheduling round's collection deadline as an ISO 8601 timestamp with a timezone offset. A later pending of the same submission keeps the first one's deadline.")
+  (field closes-at :type string :format date-time
+    :description "The scheduling round's collection deadline. A later pending of the same submission keeps the first one's deadline.")
   (field recheck-after :type integer :minimum 1
     :description "Seconds to wait after receiving this pending message before sending query. Normally 300; checking back must be at or after the collection deadline."))
 
 (act query :by (recipient (fact waiting)) :when waiting
-  :after waiting :delay recheck-after :unit seconds
+  :after (waiting recheck-after)
   :clears waiting :sets (response-due queried))
 
 (act confirm :by (recipient (fact queried)) :when (response-due queried)
   :clears (response-due queried) :sets agreed
-  (field slot :type string :min-length 1
-    :description "One complete slot copied exactly from the client's request-propose."))
+  (field slot :type string :format date-time)
+  (relation member slot (previous request-propose slots)))
 
 (act cancel :by (client server) :ends true)

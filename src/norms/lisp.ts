@@ -15,6 +15,7 @@ import {
   type Field,
   type FieldValue,
   type Form,
+  FORMATS,
   isName,
   type Norm,
   type Relation,
@@ -182,8 +183,6 @@ function readForm(form: Declaration): Read<Form> {
       ":clears",
       ":max",
       ":after",
-      ":delay",
-      ":unit",
     ]);
     const children = yield* Either.all(form.children.map(readDeclaration));
     if (children.some(({ kind }) => kind !== "field" && kind !== "relation")) {
@@ -230,16 +229,16 @@ function readSenders(form: Declaration): Read<Senders> {
   });
 }
 
-/** Parses a delay, written `:after fact :delay field :unit seconds`. All three attributes must be present, or none. */
+/** Parses a delay, written `:after (fact field)`: the fact to wait on, then the field of the act that set it which holds the number of seconds. */
 function readDelay(form: Declaration): Read<Delay | undefined> {
-  const fact = symbol(form.attributes.get(":after"));
-  const secondsField = symbol(form.attributes.get(":delay"));
-  const unit = symbol(form.attributes.get(":unit"));
-  if (fact === undefined && secondsField === undefined && unit === undefined) {
+  const after = form.attributes.get(":after");
+  if (after === undefined) {
     return Either.right(undefined);
   }
-  return fact === undefined || secondsField === undefined || unit !== "seconds"
-    ? Either.left("A delay supplies :after, :delay and :unit seconds.")
+  const [fact, secondsField, ...more] =
+    after.kind === "list" ? after.values.map((item) => symbol(item)) : [];
+  return fact === undefined || secondsField === undefined || more.length > 0
+    ? Either.left(":after takes a fact and a field of seconds: (fact field).")
     : Either.right({ fact, secondsField });
 }
 
@@ -262,7 +261,16 @@ function readField(form: Declaration): Read<Field> {
       ":description",
       lower,
       upper,
+      ...(type === "integer" ? [] : [":format"]),
     ]);
+    const format = FORMATS.find(
+      (known) => known === symbol(form.attributes.get(":format")),
+    );
+    if (form.attributes.has(":format") && format === undefined) {
+      return yield* Either.left(
+        ":format takes date, time, date-time or duration.",
+      );
+    }
     if (form.children.length !== 0) {
       return yield* Either.left("A field contains no child declarations.");
     }
@@ -280,11 +288,11 @@ function readField(form: Declaration): Read<Field> {
     const high = yield* numberAttribute(form, upper);
     switch (type) {
       case "string":
-        return { ...described, type, minLength: low, maxLength: high };
+        return { ...described, type, minLength: low, maxLength: high, format };
       case "integer":
         return { ...described, type, minimum: low, maximum: high };
       case "list":
-        return { ...described, type, minItems: low, maxItems: high };
+        return { ...described, type, minItems: low, maxItems: high, format };
       default: {
         const exhaustive: never = type;
         return exhaustive;
