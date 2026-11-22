@@ -131,7 +131,7 @@ it("answers a failed call with the failure's message and its fields", () =>
       {
         reason: "unsure" as const,
         checkId: "chk_2",
-        feedback: [],
+        feedback: ["Say only what the greeting needs."],
       },
     ];
     const pending = [...refusals];
@@ -148,8 +148,7 @@ it("answers a failed call with the failure's message and its fields", () =>
     yield* send(bob, { text: "hi" });
     const said: Readonly<Record<string, string>> = {
       chk_1: "Error: Send a greeting first. Check: chk_1; violation.",
-      chk_2:
-        "Error: The decision provider is unsure whether the message follows the server's norms. Check: chk_2; unsure.",
+      chk_2: "Error: Say only what the greeting needs. Check: chk_2; unsure.",
     };
     for (const fields of refusals) {
       expect(
@@ -587,7 +586,7 @@ const refusingByText = Effect.gen(function* () {
             kind: "refused",
             checkId: "chk_refused",
             reason: "violation",
-            feedback: [],
+            feedback: ["Not that."],
           }
         : { kind: "allowed" },
     );
