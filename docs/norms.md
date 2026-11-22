@@ -554,26 +554,10 @@ waits.
 
 ## Prior work
 
-The norm language builds on three lines of earlier work:
-
-- **Speech-act theory.** A message is an action, not just text. A norm
-  therefore describes *acts*.
-- **FIPA-ACL and symbolic multi-agent systems.** Acts have named kinds,
-  called performatives, and a protocol says which act may follow which. The
-  example norms use performative names from the
-  [FIPA Communicative Act Library](http://www.fipa.org/specs/fipa00037/),
-  such as `request`, `propose` and `accept-proposal`. FIPA defines each act
-  by the sender's beliefs and intentions (its feasibility preconditions and
-  rational effect), which no one else can observe. Here the meaning of an
-  act is its effect on facts that both members and the daemon can observe,
-  which is what lets the daemon enforce it. That is the social view of
-  agent communication argued for by Singh in
-  [Agent Communication Languages: Rethinking the Principles](https://www.csc2.ncsu.edu/faculty/mpsingh/papers/mas/computer-acl-98.pdf)
-  (IEEE Computer, 1998).
-- **The event calculus.** Acts are events that set and clear facts. What
-  holds at any point is computed from the history of acts, so the daemon
-  keeps no protocol state: it replays the conversation. The event calculus
-  is due to Kowalski and Sergot, *A Logic-Based Calculus of Events* (New
-  Generation Computing, 1986). Artikis, Sergot and Pitt applied it to
-  norm-governed multi-agent systems in
-  [Specifying Norm-Governed Computational Societies](https://www.doc.ic.ac.uk/research/technicalreports/2006/DTR06-5.pdf).
+- **Speech-act theory.** A message is an action.
+- **[FIPA-ACL](http://www.fipa.org/specs/fipa00037/).** Performatives and
+  protocols. Unlike FIPA, an act's meaning here is its effect on observable
+  facts, not the sender's beliefs
+  ([Singh, 1998](https://www.csc2.ncsu.edu/faculty/mpsingh/papers/mas/computer-acl-98.pdf)).
+- **Event calculus** (Kowalski and Sergot, 1986). Acts set and clear facts,
+  and state is computed by replaying them.
