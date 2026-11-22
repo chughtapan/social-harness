@@ -251,6 +251,7 @@ export const openDatabase = Effect.fn("openDatabase")(function* (
 function storedOf(row: MessageRow, serverAgent: AgentName): StoredMessage {
   return {
     sequence: row.sequence,
+    sender: row.fromServer ? "server" : "client",
     message: {
       author: row.fromServer ? serverAgent : row.client,
       recipient: row.fromServer ? row.client : serverAgent,
@@ -263,7 +264,7 @@ function storedOf(row: MessageRow, serverAgent: AgentName): StoredMessage {
 }
 
 function rowOf(
-  { message, checkedAt }: CheckedMessage,
+  { message, checkedAt }: Omit<CheckedMessage, "sender">,
   serverAgent: AgentName,
 ): typeof MessageRow.insert.Type {
   const fromServer = message.author === serverAgent;
