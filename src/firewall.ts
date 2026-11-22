@@ -46,7 +46,7 @@ export const checkRecordSchema = Schema.Struct({
 export type CheckRecord = typeof checkRecordSchema.Type;
 
 /** Why the firewall refused a message: it violated a rule, the provider was unsure of one, or its check was unavailable. */
-export type RefusalReason = NonNullable<CheckRecord["reason"]> | "unavailable";
+type RefusalReason = NonNullable<CheckRecord["reason"]> | "unavailable";
 
 /**
  * A message with the time this firewall checked it, in Unix milliseconds. A
