@@ -1,9 +1,10 @@
 /**
- * @file Compiles a norm document: the Lisp frontend reads it as a norm, and
- * the norm must be well formed. The well-formedness rules read the norm
- * alone, whatever frontend produced it, so that the structure check never
- * meets a form that refers to something its norm lacks, or a turn rule it
- * cannot settle.
+ * @file Compiles a norm document: parses it, then checks that the norm is
+ * well formed.
+ *
+ * The well-formedness rules work on the parsed norm, not on its text. They
+ * guarantee what the structure check relies on: every fact, field and act a
+ * form refers to exists, and every turn rule can be evaluated.
  */
 
 import { Array, Either, Option } from "effect";
@@ -19,13 +20,13 @@ import {
   type Relation,
 } from "./norm.js";
 
-/** One well-formedness rule as it applies to a norm: whether the norm breaks it, and the rule in words that do not echo the norm's document. */
+/** One rule applied to a norm: whether the norm breaks it, and the rule's text. The text never quotes the document. */
 type Applied = readonly [broken: boolean, rule: string];
 
 const NAME_RULE =
   "A norm, an act, a field and a fact each have a lowercase name: a letter, then letters, digits or hyphens, 64 characters at most.";
 
-/** The well-formed norm `document` states, or why it states none. */
+/** Compiles a document into a norm. Fails with the reason if it does not parse or is not well formed. */
 export function compileNorm(document: string): Either.Either<Norm, string> {
   return Either.flatMap(readNorm(document), (norm) =>
     Option.match(brokenRule(norm), {
@@ -36,9 +37,9 @@ export function compileNorm(document: string): Either.Either<Norm, string> {
 }
 
 /**
- * The first rule `norm` breaks, when it is not well formed: its names are
- * names, each performative has one form, some form starts an instance, and
- * every form is well formed within it.
+ * Returns the first rule the norm breaks, if any. The rules: every name is
+ * a valid name, each performative has exactly one form, at least one form
+ * starts an instance, and every form is well formed.
  */
 function brokenRule(norm: Norm): Option.Option<string> {
   const performatives = norm.forms.map((form) => form.performative);
@@ -63,11 +64,14 @@ function brokenRule(norm: Norm): Option.Option<string> {
 }
 
 /**
- * The first rule one form breaks in its norm, where `facts` are the facts
- * some form sets. Its fields are distinct and their bounds ordered. Every
- * fact it reads is one of `facts`. A form that starts an instance needs
- * nothing earlier. Its delay and each of its relations refer to fields the
- * structure check will find.
+ * Returns the first rule a form breaks, if any. `facts` holds every fact
+ * that some form in the norm sets.
+ *
+ * The main rules: field names are valid and unique, and bounds are in
+ * order. `max` is a positive integer. Every fact the form reads or clears
+ * is in `facts`. A form that starts an instance depends on no earlier act.
+ * A delay and each relation refer only to fields that the earlier act is
+ * guaranteed to have.
  */
 function brokenFormRule(
   norm: Norm,
@@ -121,7 +125,7 @@ function brokenFormRule(
   );
 }
 
-/** Whether a field's bounds are ordered and, where they count code points or items, nonnegative integers. A field without bounds has them in order. */
+/** Whether a field's lower bound is at most its upper bound. For a string or a list, the bounds must also be whole numbers of zero or more. */
 function hasOrderedBounds(field: Field): boolean {
   const { low, high, counted } = boundsOf(field);
   const ordered = low === undefined || high === undefined || low <= high;
@@ -131,7 +135,7 @@ function hasOrderedBounds(field: Field): boolean {
   return ordered && (whole || !counted);
 }
 
-/** A field's lower and upper bound, and whether they are counted: a string's code points or a list's items. */
+/** A field's lower and upper bound. `counted` is true for a string or a list, whose bounds count code points or items. */
 function boundsOf(field: Field): {
   readonly low?: number;
   readonly high?: number;
@@ -151,7 +155,7 @@ function boundsOf(field: Field): {
   }
 }
 
-/** Whether a form that starts an instance needs nothing earlier: no fact, delay or relation, and senders named by role. */
+/** Whether a form can start an instance: it names its senders by role and has no `when` fact, delay or relation. */
 function canStart(form: Form): boolean {
   return (
     form.by.kind === "roles" &&
@@ -162,9 +166,10 @@ function canStart(form: Form): boolean {
 }
 
 /**
- * Whether the structure check can always settle `delay` when it reaches it:
- * the form waits on the delay's fact, so the fact is set, and every form
- * that sets the fact requires the delay's field as a nonnegative integer.
+ * Whether the structure check can always evaluate `delay`. Two things make
+ * that true. The form lists the delay's fact in `when`, so the fact is set
+ * whenever the delay is checked. And every form that sets the fact requires
+ * the seconds field as an integer of zero or more.
  */
 function canWait(norm: Norm, form: Form, delay: Delay): boolean {
   return (
@@ -184,10 +189,13 @@ function canWait(norm: Norm, form: Form, delay: Delay): boolean {
 }
 
 /**
- * The first rule a relation breaks. Its field is declared, and its source's
- * field is required on every form the source may name, so an earlier act
- * always states it. The types are those its operator compares: `equals` two
- * fields of one type, `member` a string with a list, `subset` two lists.
+ * Returns the first rule a relation breaks, if any.
+ *
+ * The relation's field must be declared on the form. The source's field must
+ * be required on every form the source can refer to, so the earlier act
+ * always has it. The field types must suit the operator: `equals` compares
+ * two fields of the same type, `member` a string with a list, and `subset`
+ * two lists.
  */
 function brokenRelationRule(
   norm: Norm,
@@ -218,7 +226,7 @@ function brokenRelationRule(
   ]);
 }
 
-/** The forms an earlier act may have: the one of its performative, or every form that sets its fact. */
+/** The forms an earlier-act reference can refer to: the form with that performative, or every form that sets that fact. */
 function formsOf(norm: Norm, earlier: EarlierAct): readonly Form[] {
   return norm.forms.filter((form) =>
     earlier.kind === "performative"
@@ -227,7 +235,7 @@ function formsOf(norm: Norm, earlier: EarlierAct): readonly Form[] {
   );
 }
 
-/** The first rule of `applied` that is broken. */
+/** Returns the text of the first broken rule in the list. */
 function firstBroken(applied: readonly Applied[]): Option.Option<string> {
   return Option.map(
     Array.findFirst(applied, ([broken]) => broken),

@@ -1,8 +1,8 @@
 /**
- * @file The server's tables. `messages` stores each message once, in the order
- * it was stored, with the server agent's firewall's check of it, and
- * `firewall_checks` stores the record of each check. A query that fails ends
- * its caller as a defect.
+ * @file The database. The `messages` table holds every message in the order
+ * it was stored. The `firewall_checks` table holds the record of each check.
+ * Once the tables are prepared, a failed query is treated as a defect, not
+ * as an expected error.
  */
 
 import { Model, SqlClient, type Statement } from "@effect/sql";
@@ -25,8 +25,8 @@ import {
 import { AgentName, type Message, MsgId } from "./messages.js";
 
 /**
- * The tables could not be created. Messages name the operator's
- * action without disclosing SQL.
+ * The tables could not be prepared. The message tells the operator what to
+ * do and contains no SQL.
  * @public
  */
 export class DatabasePreparationError extends Data.TaggedError(
@@ -42,9 +42,9 @@ export class DatabasePreparationError extends Data.TaggedError(
 }
 
 /**
- * One row of `messages`. `client` names its conversation and `fromServer`
- * says which of the two agents wrote it, so the other agent of every message
- * is the server agent.
+ * One row of `messages`. `client` names the conversation. `fromServer` is
+ * true when the server agent wrote the message and false when the client
+ * did.
  */
 class MessageRow extends Model.Class<MessageRow>("MessageRow")({
   sequence: Model.Generated(Schema.Number),
@@ -56,7 +56,7 @@ class MessageRow extends Model.Class<MessageRow>("MessageRow")({
   checkedAt: Schema.NullOr(Schema.NumberFromString),
 }) {}
 
-/** One row of `firewall_checks`: the record of one check and the time of that check. */
+/** One row of `firewall_checks`: a check's record and the time of the check. */
 // eslint-disable-next-line agent-code-guard/max-non-trivial-classes-per-file -- Each table's row is one model class, and the two tables are one module.
 class CheckRow extends Model.Class<CheckRow>("CheckRow")({
   sequence: Model.Generated(Schema.Number),
@@ -65,15 +65,13 @@ class CheckRow extends Model.Class<CheckRow>("CheckRow")({
 }) {}
 
 /**
- * Creates the tables in an empty database, in one transaction, and leaves a
- * database that already has them as it is, so a login that cannot create
- * tables serves a database another login prepared. A database that has
- * anything else is refused: other tables, or the tables of a version of this
- * server whose columns differ from the row models'. `messages` stores each
- * message once, in the order it was stored: `client` names its conversation,
- * `from_server` says which of the two agents wrote it, and `checked_at` is
- * when the firewall checked it. `firewall_checks` stores the record of each
- * check.
+ * Creates the tables if the current schema is empty, in one transaction.
+ *
+ * If the schema already has exactly these tables and column names, nothing
+ * is changed. This lets the server run under a login that cannot create
+ * tables, on a database that another login prepared. Any other contents of
+ * the schema are refused: unrelated tables, or these tables with different
+ * column names. Column types are not compared.
  */
 export const prepareTables = Effect.fn("prepareDatabase")(
   function* (sql: SqlClient.SqlClient) {
@@ -119,7 +117,7 @@ export const prepareTables = Effect.fn("prepareDatabase")(
   ),
 );
 
-/** Every column of this server's tables as `table.column`, in name order, as the row models declare them. */
+/** The expected columns, as sorted `table.column` names, taken from the row models. */
 function columnsOfTables() {
   return [
     ...Object.keys(MessageRow.fields).map((field) => `messages.${field}`),
@@ -130,24 +128,25 @@ function columnsOfTables() {
 }
 
 /**
- * A stored message: the message, the time the firewall checked it, and its
- * place in the order messages were stored.
+ * A message as stored. `sequence` is its place: its position in the order
+ * messages were stored.
  */
 export interface StoredMessage extends CheckedMessage {
   readonly sequence: number;
 }
 
 /**
- * The key of the advisory lock a transaction holds while it stores messages,
- * so that messages commit in `sequence` order: a reader that has read to one
- * sequence has seen every message before it.
+ * The key of the advisory lock taken by every transaction that stores a
+ * message. The lock makes messages commit in `sequence` order. Without it, a
+ * reader could see sequence 8 before sequence 7 commits, move its cursor
+ * past 7, and never read it.
  */
 const STORE_LOCK = 1;
 
 /**
- * Connects to the database at `url` until the scope closes, prepares its
- * tables, and gives every read and write of them. `serverAgent` is the other
- * agent of each client's conversation.
+ * Connects to the database at `url`, prepares the tables and returns the
+ * queries the server uses. The connection closes with the scope.
+ * `serverAgent` is the server agent's name, which the rows do not store.
  */
 export const openDatabase = Effect.fn("openDatabase")(function* (
   url: Redacted.Redacted,
@@ -183,13 +182,13 @@ export const openDatabase = Effect.fn("openDatabase")(function* (
   const save = (record: CheckRecord) =>
     checks.insertVoid({ checkedAt: record.checkedAt, record });
   return {
-    /** The messages of `client`'s conversation after the place `after`, oldest first, `limit` of them at most. */
+    /** Reads `client`'s conversation after the place `after`, oldest first. `limit` caps the count; null means no cap. */
     conversation: (client: AgentName, after = 0, limit: number | null = null) =>
       read(sql`client = ${client} AND sequence > ${after}`, limit),
     /**
-     * The messages `reader` received after the place `after`, oldest first:
-     * for the server agent every client's, and for a client the server
-     * agent's messages to it.
+     * Reads the messages sent to `reader` after the place `after`, oldest
+     * first. For the server agent that is every client's messages. For a
+     * client it is the server agent's messages to that client.
      */
     inbox: (reader: AgentName, after: number, limit: number) =>
       read(
@@ -198,14 +197,14 @@ export const openDatabase = Effect.fn("openDatabase")(function* (
           : sql`client = ${reader} AND from_server AND sequence > ${after}`,
         limit,
       ),
-    /** The place of the newest message, or zero when there is none. */
+    /** The place of the newest message, or zero if there are no messages. */
     newest: sql<{
       sequence: number;
     }>`SELECT COALESCE(MAX(sequence), 0) AS sequence FROM messages`.pipe(
       Effect.map(([newest]) => newest?.sequence ?? 0),
       Effect.orDie,
     ),
-    /** The client of every conversation, in name order. */
+    /** The names of all clients that have a conversation, sorted. */
     clients: sql<{ client: string }>`SELECT DISTINCT client FROM messages`.pipe(
       Effect.flatMap((rows) =>
         Schema.decodeUnknown(Schema.Array(AgentName))(
@@ -216,11 +215,10 @@ export const openDatabase = Effect.fn("openDatabase")(function* (
       Effect.orDie,
       Effect.withSpan("conversationsOf"),
     ),
-    /** Saves the record of one check. */
     record: save,
     /**
-     * Stores a message with the record of its check, in one transaction that
-     * takes the store lock first.
+     * Stores a message, and its check's record if there is one, in one
+     * transaction that holds the store lock.
      */
     store: (message: Message, record?: CheckRecord) =>
       sql
@@ -236,7 +234,7 @@ export const openDatabase = Effect.fn("openDatabase")(function* (
           }),
         )
         .pipe(Effect.orDie, Effect.withSpan("saveMessage")),
-    /** The records of the hundred latest checks since `since`, newest first. */
+    /** Reads up to 100 of the newest check records with a time of `since` or later, newest first. */
     records: (since: number) =>
       sql`SELECT * FROM firewall_checks WHERE checked_at >= ${since}
         ORDER BY checked_at DESC, sequence DESC LIMIT 100`.pipe(
@@ -248,6 +246,7 @@ export const openDatabase = Effect.fn("openDatabase")(function* (
   };
 });
 
+/** Converts a row to a stored message. The row stores only the client's name, so the author and recipient are rebuilt from `fromServer`. */
 function storedOf(row: MessageRow, serverAgent: AgentName): StoredMessage {
   return {
     sequence: row.sequence,
@@ -263,6 +262,7 @@ function storedOf(row: MessageRow, serverAgent: AgentName): StoredMessage {
   };
 }
 
+/** Converts a message to a row. */
 function rowOf(
   { message, checkedAt }: Omit<CheckedMessage, "sender">,
   serverAgent: AgentName,

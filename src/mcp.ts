@@ -1,7 +1,7 @@
 /**
- * @file The MCP tools and inbox event through which an agent's host reaches
- * the server: the tools of the caller's role, each call's result or failure,
- * and the event whose occurrences are the caller's inbox entries.
+ * @file The MCP interface. It registers the tools for the caller's role,
+ * turns each operation's result or failure into a tool result, and publishes
+ * new inbox entries as an MCP event.
  */
 
 import {
@@ -20,54 +20,55 @@ import { AgentName, Message, MsgId, wellFormedString } from "./messages.js";
 import { ACT_SYNTAX, normDocument, type Norms } from "./norms/index.js";
 import { type Failure, PAGE_SIZE, type Server } from "./server.js";
 
-/** The version of this package, as MCP clients and telemetry read it. */
+/** This package's version, reported to MCP clients and in telemetry. */
 export const packageVersion: string = packageJson.version;
 
-/** A place in an ordered read, which a host reads and presents as decimal text. A read returns what follows it. */
+/** A cursor. A host, the program that connects an agent to this server, sees it as decimal text. Decoding it gives the place the server reads from. */
 const Cursor = Schema.compose(
   Schema.String.pipe(Schema.pattern(/^\d{1,15}$/u)),
   Schema.NumberFromString,
 );
 
-/** One message as a host reads it, from an inbox or a conversation. */
+/** One item of an inbox or conversation page: a message. */
 const Entry = Schema.Struct({ message: Message });
 
 const pageOfEntries = Schema.Array(Entry).pipe(Schema.maxItems(PAGE_SIZE));
 
-/** A page of an inbox: its entries, the cursor a read that continues it presents, and whether more entries follow now. */
+/** The result of an inbox read. `nextCursor` is always present. `hasMore` is true when more entries are already waiting. */
 const InboxPage = Schema.Struct({
   entries: pageOfEntries,
   nextCursor: Cursor,
   hasMore: Schema.Boolean,
 });
 
-/** A page of a conversation: its entries, and the cursor of the next page when there is one. */
+/** The result of a conversation read. `nextCursor` is present only when there is another page. */
 const ConversationPage = Schema.Struct({
   entries: pageOfEntries,
   nextCursor: Schema.optional(Cursor),
 });
 
-/** What a send returns: the message id its message was stored under. */
+/** The result of a send: the id of the stored message. */
 const SendReceipt = Schema.Struct({ msgId: MsgId });
 
-/** A page of the server as the page of an inbox a host reads. */
+/** Converts a server page to an inbox result. */
 const inboxPage = (page: Page) => ({
   entries: page.messages.map((message) => ({ message })),
   nextCursor: page.next,
   hasMore: page.more,
 });
 
-/** A page of the server as the page of a conversation a host reads. */
+/** Converts a server page to a conversation result. */
 const conversationPage = (page: Page) => ({
   entries: page.messages.map((message) => ({ message })),
   ...(page.more ? { nextCursor: page.next } : {}),
 });
 
-/** The cursor a read takes: the `nextCursor` an earlier result gave. */
+/** The optional `cursor` argument of the read tools. */
 const cursorArgument = Schema.optional(Cursor).annotations({
   description: "the nextCursor of an earlier result",
 });
 
+/** The input of a tool that takes no arguments. Its JSON Schema is given explicitly as an object with no properties. */
 const noArguments = Schema.Record({
   key: Schema.String,
   value: Schema.Never,
@@ -86,27 +87,30 @@ const sentFields = {
 };
 
 /**
- * The longest a receive_messages call may wait. It stays under the time after
- * which hosts and proxies give up on a tool call.
+ * The longest a `receive_messages` call may wait. Hosts and proxies commonly
+ * give up on a tool call after about a minute, so this stays below that.
  */
 const MAXIMUM_WAIT_SECONDS = 50;
 
-/** How often the SDK reads the inbox of an agent whose host has a push stream or a webhook subscription. */
+/** How often the SDK checks the inbox for a host subscribed by push or webhook. */
 const INBOX_CHECK_MILLISECONDS = 1000;
 
+/** The lifetime the SDK gives a webhook subscription. */
 const WEBHOOK_TTL_MILLISECONDS = 30 * 60_000;
 
+/** The name of the MCP event for new inbox entries. */
 const INBOX_EVENT = "org.social-harness/inbox.pending";
 
 /**
- * The MCP handler of an open `server`: it answers each MCP request with the
- * tools of the agent the request is admitted as. A request's `authInfo`
- * names its owner in `extra.issuer` and `extra.subject`: the owner
- * `admits.issuer` and `admits.subject` name has the server agent, and every
- * other owner has a client, named from its issuer and subject. `norms` are
- * the server's norms, whose documents every agent reads with `read_norms`. A
- * tool call runs on the runtime this effect ran in and is interrupted when
- * its request is aborted.
+ * Makes the MCP handler for an open server. Each request gets the tools of
+ * the agent it is authenticated as.
+ *
+ * A request's `authInfo.extra` carries its owner's `issuer` and `subject`.
+ * The owner matching `admits` is the server agent. Every other owner is a
+ * client, whose name is derived from its issuer and subject.
+ *
+ * `norms` are the server's norms, which `read_norms` returns. A tool call is
+ * interrupted when its request is aborted.
  */
 export const mcpHandler = Effect.fn("mcpHandler")(function* (
   server: Server,
@@ -118,7 +122,7 @@ export const mcpHandler = Effect.fn("mcpHandler")(function* (
 ) {
   const run = Runtime.runPromise(yield* Effect.runtime());
 
-  /** The agent an admitted request's token names. */
+  /** The name of the agent a request is authenticated as. */
   const callerOf = (authInfo?: AuthInfo) => {
     const issuer = String(authInfo?.extra?.issuer);
     const subject = String(authInfo?.extra?.subject);
@@ -133,9 +137,9 @@ export const mcpHandler = Effect.fn("mcpHandler")(function* (
   };
 
   /**
-   * The inbox event: an occurrence is an inbox entry, and a subscription's
-   * cursor is an inbox cursor. The SDK delivers by poll, push and webhook,
-   * and keeps every subscription in memory.
+   * The inbox event. Each new inbox entry is one occurrence, and an event
+   * cursor is an inbox cursor. The SDK handles poll, push and webhook
+   * delivery and keeps subscriptions in memory, so they end with the process.
    */
   const events = new EventsExtension({
     getPrincipal: ({ http }) => callerOf(http?.authInfo),
@@ -169,20 +173,20 @@ export const mcpHandler = Effect.fn("mcpHandler")(function* (
   });
 });
 
-/** What answers each MCP request from the agent of the owner the request is admitted as. */
+/** The handler that answers MCP requests. */
 export type McpHandler = Effect.Effect.Success<ReturnType<typeof mcpHandler>>;
 
-/** A page of the server's messages. */
+/** A page as the server returns it. */
 type Page = Effect.Effect.Success<ReturnType<Server["conversation"]>>;
 
-/** What a request's tools are registered with: the SDK's MCP object for the request, the server whose operations they run, and the runner of their calls. */
+/** What registering a tool needs: the request's MCP server object, the server whose operations the tool calls, and the function that runs an effect. */
 interface Registration {
   readonly mcp: McpServer;
   readonly server: Server;
   readonly run: ReturnType<typeof Runtime.runPromise<never>>;
 }
 
-/** One check of the inbox event for the agent `principal` names. */
+/** Reads new inbox entries for the agent named `principal`, in the form the Events extension expects. */
 function inboxOccurrences(
   server: Server,
   principal: string | null,
@@ -209,6 +213,7 @@ function inboxOccurrences(
   });
 }
 
+/** Registers the tools both roles have. `read_norms` is registered only when the server has norms. */
 function registerSharedTools(
   at: Registration,
   caller: AgentName,
@@ -269,7 +274,7 @@ function registerSharedTools(
   }
 }
 
-/** The server agent names the client of each conversation and reads its firewall's decisions. */
+/** Registers the server agent's tools. Its send and read tools take a client name, and it alone can list conversations and read firewall decisions. */
 function registerServerAgentTools(at: Registration) {
   const { server } = at;
   register(
@@ -339,7 +344,7 @@ function registerServerAgentTools(at: Registration) {
   );
 }
 
-/** A client names no recipient and no conversation: both are the server agent. */
+/** Registers a client's tools. They take no recipient, because a client talks only to the server agent. */
 function registerClientTools(at: Registration, client: AgentName) {
   const { server } = at;
   register(
@@ -369,10 +374,12 @@ function registerClientTools(at: Registration, client: AgentName) {
 }
 
 /**
- * Registers a tool whose calls `execute` answers. A call runs with `run` and
- * is interrupted when its request is aborted. Its value is the result's structured content. A typed failure is a result
- * marked as an error. A call that ends any other way is logged and answered
- * with a fixed text that says nothing of what went wrong.
+ * Registers one tool. `execute` handles each call.
+ *
+ * A successful call returns its value as structured content. A `Failure`
+ * returns an error result with the failure's message and fields. Any other
+ * error is logged and returns a fixed message that reveals nothing about the
+ * cause. A call is interrupted when its request is aborted.
  */
 function register<A, I, B extends object, J extends object, E extends Failure>(
   { mcp, run }: Registration,
@@ -426,7 +433,7 @@ function register<A, I, B extends object, J extends object, E extends Failure>(
   );
 }
 
-/** A failed tool call: its message is the result's text and its other fields the structured content. */
+/** Converts a failure to an error result. The message becomes the text and the other fields become the structured content. */
 function failed(failure: Failure) {
   return {
     isError: true as const,
@@ -441,10 +448,9 @@ function failed(failure: Failure) {
 }
 
 /**
- * `schema` as the Standard Schema the MCP SDK validates a value with and
- * lists as JSON Schema. Effect's own Standard Schema carries no JSON Schema,
- * which the SDK requires. A value with a field the schema does not name is
- * invalid.
+ * Converts an Effect schema to the Standard Schema form the MCP SDK takes.
+ * The SDK needs a JSON Schema alongside the validator, which Effect's own
+ * conversion does not include. Unknown fields are rejected.
  */
 function standard<A, I>(
   schema: Schema.Schema<A, I>,

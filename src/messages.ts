@@ -1,9 +1,9 @@
-/** @file The agents of a server and the messages they send each other, as validated values. */
+/** @file Agent names, message ids and messages, with the rules each must satisfy. */
 
 import { Data, Effect, Schema } from "effect";
 import { randomBytes } from "node:crypto";
 
-/** The name of an agent on its server: the server agent's configured name, or the name the server derives for a client from its owner. */
+/** An agent's name. The server agent's name comes from the settings. A client's name is derived from its owner. */
 export const AgentName = Schema.String.pipe(
   Schema.minLength(3),
   Schema.maxLength(32),
@@ -15,10 +15,10 @@ export const AgentName = Schema.String.pipe(
       "an agent name: 3 to 32 lowercase letters, digits or single hyphens, starting and ending with a letter or digit",
   }),
 );
-/** Validated nominal value decoded by {@link AgentName}. */
+/** A string that passed {@link AgentName}. */
 export type AgentName = typeof AgentName.Type;
 
-/** A send whose text cannot be a message: it is malformed or too long. */
+/** A message could not be created, usually because its text is not valid Unicode or is too long. */
 class CommunicationError extends Data.TaggedError("CommunicationError")<{
   readonly reason: "content-invalid";
 }> {
@@ -28,8 +28,9 @@ class CommunicationError extends Data.TaggedError("CommunicationError")<{
 }
 
 /**
- * One message's id: `msg_` then 32 random bytes in canonical base64url, whose
- * last character carries four bits.
+ * A message id: `msg_` followed by 32 random bytes in base64url, which is 43
+ * characters. The last character encodes only four bits, which limits which
+ * characters it can be.
  */
 export const MsgId = Schema.String.pipe(
   Schema.pattern(/^msg_[A-Za-z0-9_-]{42}[AEIMQUYcgkosw048]$/u),
@@ -40,15 +41,15 @@ export const MsgId = Schema.String.pipe(
   }),
 );
 /**
- * A validated author-scoped message id.
+ * A string that passed {@link MsgId}.
  * @useDeclaredType
  */
 export type MsgId = typeof MsgId.Type;
 
-/** The byte limit of one message's text as JSON text. */
+/** The largest size of a message's text, measured in bytes of its JSON encoding. */
 const maximumTextBytes = 32_768;
 
-/** A string without lone surrogates, so it survives UTF-8. */
+/** A string with no unpaired surrogates, which UTF-8 cannot encode. */
 export const wellFormedString = Schema.String.pipe(
   Schema.filter((value) => !/\p{Surrogate}/u.test(value), {
     identifier: "WellFormedUnicodeString",
@@ -56,10 +57,9 @@ export const wellFormedString = Schema.String.pipe(
 );
 
 /**
- * One message from its author to another agent, fixed through delivery and
- * restart. Its text is well formed and at most 32,768 bytes as JSON text.
- * `replyToMsgId` is the id of the message it answers, when its sender named
- * one.
+ * One message from its author to its recipient. A message never changes
+ * after it is created. `replyToMsgId` is the id of the message it replies to,
+ * if the sender gave one.
  */
 const messageSchema = Schema.Struct({
   author: AgentName,
@@ -75,12 +75,15 @@ const messageSchema = Schema.Struct({
   Schema.filter(({ author, recipient }) => recipient !== author),
   Schema.annotations({ identifier: "Message" }),
 );
-/** @useDeclaredType */
+/**
+ * A value that passed the message schema.
+ * @useDeclaredType
+ */
 export type Message = typeof messageSchema.Type;
 
-/** Owns construction of a message. */
+/** The message schema, with `create` to make a new message. */
 export const Message = Object.assign(messageSchema, {
-  /** A new message with a fresh id, or the refusal of what cannot be one. */
+  /** Makes a message with a new id. Fails if the message is not valid, for example when its text is too long. */
   create: (input: Omit<Message, "msgId">) =>
     Effect.suspend(() =>
       Schema.decode(messageSchema)({

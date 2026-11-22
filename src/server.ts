@@ -1,8 +1,7 @@
 /**
- * @file What agents do on the server `sharnessd` runs: a server agent and each
- * of its clients send each other messages and read their inbox and their
- * conversation, and the server agent reads its firewall's decisions. A client
- * has one conversation, with the server agent, so its name identifies it.
+ * @file The server's operations: sending a message, reading an inbox and
+ * reading a conversation. A conversation is between the server agent and one
+ * client, so the client's name identifies it.
  */
 
 import { Duration, Effect, PubSub, Queue, type Redacted } from "effect";
@@ -11,12 +10,13 @@ import type { Role } from "./norms/index.js";
 import { openDatabase, type StoredMessage } from "./database.js";
 import { type AgentName, Message, type MsgId } from "./messages.js";
 
-/** The most messages one read of an inbox or a conversation returns. */
+/** The largest number of messages a read returns. */
 export const PAGE_SIZE = 50;
 
 /**
- * An operation that failed: `message` is what a model reads of it, and
- * `reason` with the other fields what a host reads.
+ * A failed operation. `message` is the text shown to the agent's model.
+ * `reason` and the optional fields are for the host, the program that
+ * connects the agent to this server.
  */
 export interface Failure {
   readonly reason: string;
@@ -33,9 +33,11 @@ type Refused = Extract<
 >;
 
 /**
- * What the sender of a refused message reads: its feedback, as errors. The
- * server agent also reads the check and the firewall's reason. A client is
- * not trusted with those, and when its message could not be checked it reads
+ * The failure to return to the sender of a refused message.
+ *
+ * The server agent gets the feedback, the check id and the firewall's reason.
+ * A client gets the feedback and the reason `refused`, but not the check id
+ * or the firewall's reason. If the check was unavailable, a client is told
  * only that the server is unavailable.
  */
 function refusalFor(sender: Role, refused: Refused): Failure {
@@ -56,7 +58,7 @@ function refusalFor(sender: Role, refused: Refused): Failure {
     : { reason: "refused", feedback, message: errors };
 }
 
-/** The server agent named a client that has sent it no message, so the two have no conversation. */
+/** The failure for a client name that has no conversation with the server agent. */
 function unknownClient(name: AgentName): Failure {
   return {
     reason: "unknown-client",
@@ -65,7 +67,7 @@ function unknownClient(name: AgentName): Failure {
   };
 }
 
-/** Fails a send with what its sender `reads`, after logging what the server agent would read of it. */
+/** Logs `logged`, then fails the send with `reads`, the failure the sender is given. For a client's refused send, `logged` is the fuller version the server agent would get. */
 function failSend(author: AgentName, logged: Failure, reads = logged) {
   return Effect.logWarning("Send failed").pipe(
     Effect.annotateLogs({ agentName: author, reason: logged.message }),
@@ -74,11 +76,14 @@ function failSend(author: AgentName, logged: Failure, reads = logged) {
 }
 
 /**
- * Opens the server on the database at `url` until the scope closes: `name`
- * is its server agent, whose `firewall` checks every message sent. A read
- * takes the place `after` which it starts and returns a page: its messages,
- * the place `next` of the read that continues it, and whether `more` follow
- * now.
+ * Opens the server on the database at `url`. It stays open until the scope
+ * closes. `name` is the server agent's name, and `firewall` checks every
+ * message before it is stored.
+ *
+ * Reads are paged by place: a message's place is its position in the order
+ * messages were stored. A read returns the messages after the place `after`,
+ * the place `next` to continue from, and `more`, which says whether more
+ * messages follow.
  */
 export const openServer = Effect.fn("openServer")(function* (
   url: Redacted.Redacted,
@@ -86,18 +91,21 @@ export const openServer = Effect.fn("openServer")(function* (
   firewall: Firewall,
 ) {
   const database = yield* openDatabase(url, name);
-  /** The lock of each conversation a message was sent in, by its client. */
+  /** One lock per conversation, keyed by client name. */
   const conversationLocks = new Map<AgentName, Effect.Semaphore>();
-  /** Published with an agent's name each time a message becomes readable for it. */
+  /** Receives an agent's name each time a new message is stored for that agent. */
   const readable = yield* PubSub.unbounded<AgentName>();
 
   /**
-   * Sends one message in `client`'s conversation, from the member `sender`
-   * names. A check reads the conversation's earlier messages, so the
-   * conversation's lock is held from that read until the message is stored,
-   * while other conversations do not wait. No transaction is open while a
-   * check runs. A refused message is not stored, and neither is one the
-   * server agent addresses to a client that has not written to it.
+   * Sends one message in `client`'s conversation. `sender` says which member
+   * is sending: the client or the server agent.
+   *
+   * The firewall's check depends on the conversation's earlier messages, so
+   * the conversation's lock is held from reading them until the new message
+   * is stored. The lock blocks other sends in the same conversation. It does
+   * not block reads or other conversations, and no database transaction is
+   * held open during the check. A refused message is not stored. The
+   * server agent cannot write to a client that has not written first.
    */
   const send = Effect.fn("send")(function* (
     sender: Role,
@@ -133,10 +141,10 @@ export const openServer = Effect.fn("openServer")(function* (
   }, Effect.scoped);
 
   /**
-   * At most `limit` messages of `reader`'s inbox after the place `after`.
-   * The server agent's inbox has every client's messages; a client's has the
-   * server agent's messages to it. Without `after` the read starts after the
-   * newest message and returns none.
+   * Reads up to `limit` messages from `reader`'s inbox. The server agent's
+   * inbox holds the messages from every client. A client's inbox holds the
+   * server agent's messages to that client. Without `after`, the read starts
+   * after the newest message.
    */
   const inbox = Effect.fn("readInbox")(function* (
     reader: AgentName,
@@ -147,10 +155,11 @@ export const openServer = Effect.fn("openServer")(function* (
   });
 
   /**
-   * A page of `reader`'s inbox after `after`, after waiting up to `wait`
-   * seconds for a message when none follows it. The read subscribes before it
-   * reads, so a wait does not miss a message that becomes readable after the
-   * read.
+   * Reads a page of `reader`'s inbox. If the page is empty and `wait` is
+   * given, waits up to `wait` seconds for a message and reads again.
+   *
+   * It subscribes to new messages before the first read, so a message stored
+   * between the read and the wait is not missed.
    */
   const receive = Effect.fn("receive")(function* (
     reader: AgentName,
@@ -168,7 +177,7 @@ export const openServer = Effect.fn("openServer")(function* (
     return yield* inbox(reader, { limit: PAGE_SIZE, after: page.next });
   }, Effect.scoped);
 
-  /** A page of `client`'s conversation after `after`, oldest first. */
+  /** Reads a page of `client`'s conversation, oldest message first. */
   const conversation = Effect.fn("readConversation")(function* (
     client: AgentName,
     after: number,
@@ -187,7 +196,7 @@ export const openServer = Effect.fn("openServer")(function* (
     inbox,
     receive,
     conversation,
-    /** The server agent's page of its conversation with `client`, which must have written to it. */
+    /** Reads a conversation for the server agent. Fails if `client` has not written to it. */
     conversationWith: (client: AgentName, after: number) =>
       Effect.flatMap(database.clients, (clients) =>
         clients.includes(client)
@@ -199,10 +208,10 @@ export const openServer = Effect.fn("openServer")(function* (
   };
 });
 
-/** What agents do on an open server. */
+/** The operations of an open server. */
 export type Server = Effect.Effect.Success<ReturnType<typeof openServer>>;
 
-/** The first `limit` of `stored` as a page read from the place `from`. */
+/** Builds a page from `stored`, which holds one message more than `limit` when more messages follow. `from` is the place the read started at. */
 function pageOf(stored: readonly StoredMessage[], limit: number, from: number) {
   const page = stored.slice(0, limit);
   return {
@@ -212,7 +221,7 @@ function pageOf(stored: readonly StoredMessage[], limit: number, from: number) {
   };
 }
 
-/** Locks `client`'s conversation, whose lock is one of `locks`, until the scope closes. */
+/** Locks `client`'s conversation until the scope closes, creating its lock in `locks` on first use. */
 function lockConversation(
   locks: Map<AgentName, Effect.Semaphore>,
   client: AgentName,
