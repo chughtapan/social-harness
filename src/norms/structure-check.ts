@@ -1,9 +1,11 @@
 /**
- * @file The structure check: what runs a norm. It replays a conversation's
- * earlier messages to find the instance in progress, then says whether a
- * further message is an act its sender may send next. It reads norms, acts
- * and messages as plain data, and is handed the reader that turns a
- * message's text into an act.
+ * @file The structure check, which decides whether a message is an act its
+ * sender may send next.
+ *
+ * It keeps no state between checks. Each check replays the conversation's
+ * earlier messages to rebuild the instance in progress, then checks the new
+ * message against it. The parser that turns text into an act is passed in,
+ * so this file knows nothing about syntax.
  */
 
 import { Either } from "effect";
@@ -20,11 +22,12 @@ import {
 } from "./norm.js";
 
 /**
- * A message as the structure check reads it: its message id, the id of the
- * message it replies to, which member sent it and its text. `checkedAt` is
- * the time it was checked, in milliseconds. An earlier message that was
- * never checked has none and is replayed as no act, and the message under
- * check takes the time given beside it.
+ * A message as the structure check takes it. `checkedAt` is the time it was
+ * checked, in Unix milliseconds.
+ *
+ * An earlier message without `checkedAt` was stored while the server had no
+ * norms, and replay treats it as not being an act. The message under check
+ * has no `checkedAt` either: the caller passes the current time separately.
  */
 export interface Sent {
   readonly msgId: string;
@@ -35,9 +38,9 @@ export interface Sent {
 }
 
 /**
- * One text rule: a requirement in prose that a decision provider judges a
- * message against. The sender of a message it refuses reads the same text as
- * feedback, so a rule says what the message must do.
+ * A rule about a field's text, written in prose for the decision provider.
+ * If the rule refuses a message, the sender is shown the same text as
+ * feedback, so the text says what the field must contain.
  */
 export interface TextRule {
   readonly id: string;
@@ -45,11 +48,13 @@ export interface TextRule {
 }
 
 /**
- * What the structure check finds of one message. A refusal gives the rule it
- * is recorded under and, as `feedback`, what does not fit. A pass gives the
- * text rules a decision provider judges the message against, and the
- * `instance` as the provider reads it with them: its norm, the act's
- * performative and fields, and the facts that are set.
+ * The result of checking one message.
+ *
+ * A refusal has the id of the rule to record and `feedback` for the sender.
+ * A pass has the text rules for the decision provider and `instance`, a
+ * summary the provider is shown: the norm's name, digest and description,
+ * the act's performative, the form's field declarations, and the facts that
+ * were set before this act.
  */
 export type Finding =
   | {
@@ -64,20 +69,24 @@ export type Finding =
     };
 
 /**
- * Why a message does not pass: the stage that failed, and the feedback its
- * sender reads. The `form` stage reads the message alone: its text is an act
- * of one of the server's norms whose fields fit their form. The `protocol`
- * stage reads the conversation: the act is one its sender may send next.
+ * The reason a message is refused: the stage that failed and the feedback
+ * for the sender.
+ *
+ * The `form` stage checks the message itself: the text is an act of one of
+ * the server's norms and its fields match the form. The `protocol` stage
+ * checks the message against the conversation: the sender may send this act
+ * next. An act that names a different norm from the instance in progress is
+ * a protocol problem.
  */
 interface Problem {
   readonly stage: "form" | "protocol";
   readonly feedback: string;
 }
 
-/** What one step gives, or the problem that refuses the message there. */
+/** The result of one step: its value, or the problem that refuses the message. */
 type Step<A> = Either.Either<A, Problem>;
 
-/** An act that fits its form: the act, the norm it is checked under and the form that norm declares for it. */
+/** An act that passed the form stage, with its norm and its form. */
 interface Fitted {
   readonly act: Act;
   readonly norm: Norm;
@@ -85,26 +94,31 @@ interface Fitted {
 }
 
 /**
- * Reads a text as an act and fits it to its form, under the norm of the
- * instance in progress or, when none is, the norm the act names.
- * It also gives the norm the text was checked under, which names a refusal's
- * rule: a text that is no act is checked under the instance's norm, and
- * under none when no instance is in progress.
+ * Parses text as an act and runs the form stage on it.
+ *
+ * The norm used is the norm of the instance in progress, or the norm the act
+ * names when no instance is in progress. The returned `norm` is the one the
+ * text was checked under, which goes into the rule id of a refusal. It is
+ * undefined when no instance is in progress and the text is not an act, or
+ * names a norm the server does not have.
  */
 type FitText = (
   text: string,
   instanceNorm?: Norm,
 ) => { readonly norm?: Norm; readonly fitted: Step<Fitted> };
 
-/** An act of the instance, with the message that states it and the time that message was checked. */
+/** An act that passed, with the message that carried it and the time of its check. */
 type SentAct = Fitted & Sent & { readonly checkedAt: number };
 
 /**
- * What replaying a conversation finds. `stored` gives the performative of
- * each earlier message, which a reply may name. `instance` is the instance
- * in progress: its norm, the act that set each fact that is set, how many
- * acts of each performative were sent, its acts in order, and its `thread`:
- * the reply reference of every message that belongs to it.
+ * The state of a conversation after replay.
+ *
+ * `stored` maps each earlier message id to its performative, or to undefined
+ * if the message was not an act that passed. `instance` is the instance in
+ * progress, if any. Its `facts` map each set fact to the act that set it.
+ * `timesSent` counts the acts sent per performative. `acts` holds the acts
+ * that passed, in order. `thread` maps each message that belongs to the
+ * instance to the message it replies to.
  */
 interface Progress {
   readonly stored: ReadonlyMap<string, string | undefined>;
@@ -120,14 +134,16 @@ interface Progress {
 type Instance = NonNullable<Progress["instance"]>;
 
 /**
- * The structure check of a server whose norms are `norms`, which reads each
- * message's text with `readAct`. It checks `sent` at the time `now`, after
- * the `earlier` messages of its conversation: it replays them to find the
- * instance in progress, then reads the message as an act of that instance
- * or, when none is, of the norm it names. An act that fits passes with a
- * text rule for each described field it states. Any other message is refused
- * under a rule named for the norm it was checked under and the stage that
- * failed.
+ * Makes the structure check for a server's norms. `readAct` parses a
+ * message's text into an act.
+ *
+ * The returned function checks `sent` at the time `now`. It replays the
+ * `earlier` messages to find the instance in progress, then checks `sent` as
+ * an act of that instance, or of the norm it names when there is none.
+ *
+ * A valid act passes, with one text rule for each judged field it
+ * includes. Anything else is refused. The refusal's rule id combines the
+ * norm the message was checked under and the stage that failed.
  */
 export function structureCheck(
   norms: readonly Norm[],
@@ -153,9 +169,9 @@ export function structureCheck(
 }
 
 /**
- * The refusal of a message with `problem`, under a rule named for `norm`,
- * the norm the message was checked under, and the stage that failed. A
- * message checked under no norm has the word `norm` there.
+ * Builds a refusal. Its rule id is the norm's name and the failed stage,
+ * such as `booking-protocol`. If the message was checked under no norm, the
+ * id uses the word `norm` in place of a name.
  */
 function refusal(problem: Problem, norm?: Norm): Finding {
   return {
@@ -166,9 +182,9 @@ function refusal(problem: Problem, norm?: Norm): Finding {
 }
 
 /**
- * The pass of an act that fits: a text rule for each judged field the act
- * states, which requires the field's text to be what its description says,
- * and what the decision provider reads of the instance.
+ * Builds a pass. It has one text rule for each judged field the act
+ * includes, requiring the field to contain only what its description says,
+ * and the instance summary for the decision provider.
  */
 function pass(progress: Progress, { act, norm, form }: Fitted): Finding {
   return {
@@ -195,10 +211,12 @@ function pass(progress: Progress, { act, norm, form }: Fitted): Finding {
 }
 
 /**
- * Replays a conversation's earlier messages in order under the server's
- * norms. Only a checked message that passes every step at the time of its
- * check has its effects. Every message is stored afterwards, and may join
- * the thread of the instance in progress.
+ * Replays the earlier messages in order to rebuild the conversation's state.
+ *
+ * Each message that has a check time is checked again as of that time. Only
+ * a message that passes changes the instance's facts, counts and acts.
+ * Every message is added to `stored`, and joins the thread if it replies
+ * into the instance.
  */
 function replay(fit: FitText, earlier: readonly Sent[]): Progress {
   const stored = new Map<string, string | undefined>();
@@ -220,9 +238,8 @@ function replay(fit: FitText, earlier: readonly Sent[]): Progress {
 }
 
 /**
- * Checks one message by every step: whether its text is an act that fits its
- * form, and whether the conversation's progress permits that act at the time
- * of its check. It also gives the norm the message was checked under.
+ * Runs both stages on one message: the form stage, then the protocol stage.
+ * Also returns the norm the message was checked under.
  */
 function checkMessage(
   progress: Progress,
@@ -239,9 +256,12 @@ function checkMessage(
 }
 
 /**
- * Why the conversation's progress does not permit the fitted act of `sent`. A
- * continuation that replies outside the instance, comes before its delay or
- * breaks a relation gets the one refusal of an act out of turn.
+ * Runs the protocol stage: whether the conversation's state allows this act
+ * now.
+ *
+ * Several different failures give the same "not valid" feedback: replying
+ * outside the instance, arriving before the delay has passed, and breaking
+ * a relation.
  */
 function checkProtocol(
   progress: Progress,
@@ -291,10 +311,10 @@ function checkProtocol(
 }
 
 /**
- * Whether the form lets the sender of `sent` send its act: by its role, or
- * as the recipient of `setter`, the message that set the form's fact. A
- * conversation has two members, so that recipient is the member who did not
- * send it.
+ * Whether the form allows this sender. With roles, the sender's role must
+ * be listed. With a recipient rule, the sender must be the recipient of
+ * `setter`, the message that set the fact. A conversation has two members,
+ * so the recipient is whoever did not send `setter`.
  */
 function permitsSender({ by }: Form, { sender }: Sent, setter?: SentAct) {
   return by.kind === "recipient"
@@ -302,7 +322,7 @@ function permitsSender({ by }: Form, { sender }: Sent, setter?: SentAct) {
     : by.roles.includes(sender);
 }
 
-/** A message that replies into the instance's thread belongs to it, whether or not it advanced the instance, so a later reply may name it. */
+/** Adds a message to the instance's thread if it started the instance or replies to a message in the thread. This applies even to a message that did not pass, so a later message can reply to it. */
 function joinThread(
   progress: Progress,
   { msgId, replyToMsgId }: Pick<Sent, "msgId" | "replyToMsgId">,
@@ -325,7 +345,7 @@ function joinThread(
     : progress;
 }
 
-/** The problem of an act out of turn, naming the act its reply reference points at when that message is one. */
+/** Builds the "not valid" problem for an act sent out of turn. If the act replies to an earlier act, the feedback names that act's performative. */
 function turnProblem(
   progress: Progress,
   norm: Norm,
@@ -340,7 +360,7 @@ function turnProblem(
   );
 }
 
-/** Whether the message's reply reference suits `form`: an act that starts an instance may omit it, and a reference names a stored message of the conversation. */
+/** Checks the reply reference. Only an act that starts an instance may omit it, and a reference must name a stored message of this conversation. */
 function checkReference(
   progress: Progress,
   form: Form,
@@ -362,7 +382,7 @@ function checkReference(
       );
 }
 
-/** A conversation's progress once `sent`, an act that passed, has its effects: it ends the instance, or starts one when none is in progress and then clears and sets facts. */
+/** Applies an act that passed. An ending act removes the instance. Otherwise the act starts an instance if none is in progress, then clears and sets facts and counts itself. */
 function applyAct(progress: Progress, sent: SentAct): Progress {
   const { norm, form } = sent;
   if (form.ends) {
@@ -390,7 +410,7 @@ function applyAct(progress: Progress, sent: SentAct): Progress {
   };
 }
 
-/** Whether every fact the form needs is set and fewer acts of it than its limit were sent. */
+/** Whether every fact in the form's `when` is set and the form's `max` has not been reached. */
 function isEnabled(form: Form, instance: Instance) {
   const facts = form.when.every((fact) => instance.facts.has(fact));
   const count =
@@ -399,7 +419,7 @@ function isEnabled(form: Form, instance: Instance) {
   return facts && count;
 }
 
-/** The messages a reply reference leads back through, within the instance's thread. */
+/** The ids reached by following reply references back from `replyToMsgId`, staying within the instance's thread. */
 function replyChain(instance: Instance, replyToMsgId?: string) {
   const chain = new Set<string>();
   let current = replyToMsgId;
@@ -415,9 +435,10 @@ function replyChain(instance: Instance, replyToMsgId?: string) {
 }
 
 /**
- * Whether the form's delay has yet to pass at `now`: the act that set the
- * delay's fact was checked fewer seconds ago than its field says. A
- * well-formed norm always gives that act and that number.
+ * Whether the form's delay has not yet passed at `now`. The delay is
+ * measured from the check time of the act that set the delay's fact, and
+ * its length comes from that act's seconds field. A well-formed norm
+ * guarantees that act and that number exist.
  */
 function isDelayed(instance: Instance, { delay }: Form, now: number) {
   if (delay === undefined) {
@@ -433,9 +454,9 @@ function isDelayed(instance: Instance, { delay }: Form, now: number) {
 }
 
 /**
- * Whether the act satisfies every relation of its form: it states the
- * relation's field, the reply chain contains the earlier act the source
- * names, and the two fields compare as the operator requires.
+ * Whether the act satisfies every relation of its form. For each relation,
+ * the act must include the field, the earlier act must be in the reply
+ * chain, and the two values must satisfy the operator.
  */
 function satisfiesRelations(
   instance: Instance,
@@ -455,7 +476,7 @@ function satisfiesRelations(
   });
 }
 
-/** Whether `actual` is what a relation's operator requires against `expected`. */
+/** Whether `actual` satisfies the operator against `expected`: equal to it, one of its items, or a subset of its items. */
 function isSatisfied(
   operator: Relation["operator"],
   actual: FieldValue,
@@ -481,7 +502,7 @@ function isSatisfied(
   }
 }
 
-/** The earlier act `earlier` names, when the reply chain contains it: the one that set a fact, or the latest of a performative. */
+/** Finds the earlier act a relation refers to: the act that set a fact, or the latest act with a performative. Returns undefined if it is not in the reply chain. */
 function earlierAct(
   instance: Instance,
   earlier: EarlierAct,
@@ -502,11 +523,11 @@ function earlierAct(
 }
 
 /**
- * `act` with the norm it is checked under and the form that norm declares
- * for it, once the server has a norm for it, the act names that norm
- * and its fields fit the form: every required field stated, every stated
- * field declared, and each value of its field's type and within its bounds.
- * The refusal names every field at fault.
+ * Runs the form stage on an act. The act passes when the server has the
+ * norm, the act names that norm, the norm declares the performative, and
+ * the fields match: every required field is present, every field present is
+ * declared, and every value has the right type and is within bounds. A
+ * refusal lists every field that is wrong.
  */
 function fitForm(act: Act, norm?: Norm): Step<Fitted> {
   const { performative, fields } = act;
@@ -554,7 +575,7 @@ function fitForm(act: Act, norm?: Norm): Step<Fitted> {
     : Either.left(formProblem(failures.join(" ")));
 }
 
-/** Whether `value` has the type of `field` and lies within its bounds. A string's length counts code points. */
+/** Whether `value` has the field's type and is within its bounds. A string's length is counted in code points. */
 function accepts(field: Field, value: FieldValue): boolean {
   switch (field.type) {
     case "string":
@@ -581,7 +602,7 @@ function accepts(field: Field, value: FieldValue): boolean {
   }
 }
 
-/** Whether `value` lies between two inclusive bounds, where each is set. */
+/** Whether `value` is within the inclusive bounds. A missing bound is not checked. */
 function within(value: number, minimum?: number, maximum?: number) {
   return (
     (minimum === undefined || value >= minimum) &&
@@ -589,12 +610,10 @@ function within(value: number, minimum?: number, maximum?: number) {
   );
 }
 
-/** The problem of a message whose text is no act that fits its form. */
 function formProblem(feedback: string): Problem {
   return { stage: "form", feedback };
 }
 
-/** The problem of an act its sender may not send next. */
 function protocolProblem(feedback: string): Problem {
   return { stage: "protocol", feedback };
 }

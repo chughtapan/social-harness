@@ -1,19 +1,25 @@
 /**
- * @file The norm IR: a norm as the data a frontend produces and the
- * structure check runs over. A norm is a set of forms. Each form declares
- * one performative: the fields an act of it carries, which member may send
- * it, the facts that must be set before it, and the facts it sets and
- * clears. An act is what one message states: a performative, the norm it
- * belongs to and a value for each field it carries. Every value here is
- * plain data, so a norm prints as JSON.
+ * @file The data model of a norm. The parser produces these values and the
+ * structure check runs on them. Every type here is plain data that prints
+ * as JSON.
+ *
+ * An act is one message's content: a performative, a norm name and field
+ * values. A performative is the name of a kind of act, such as `offer`. An
+ * instance is one run of a norm in a conversation, from an act that starts
+ * it to an act that ends it. A fact is a named flag of an instance, which
+ * acts set and clear.
+ *
+ * A norm is a set of forms, one per performative. A form says which fields
+ * an act carries, who may send it, which facts must be set first, and which
+ * facts it sets and clears.
  */
 
-/** Which of a conversation's two members sends a message: the server agent, or its client. */
+/** The member of a conversation that sends a message: the client or the server agent. */
 export type Role = "client" | "server";
 
 /**
- * One norm. `document` is the text it was compiled from and `digest` the
- * SHA-256 of that text, which names exactly what both members read.
+ * One norm. `document` is the text it was compiled from, and `digest` is
+ * the SHA-256 of that text.
  */
 export interface Norm {
   readonly name: string;
@@ -24,12 +30,17 @@ export interface Norm {
 }
 
 /**
- * The form of one performative, and its turn rule. An act of it may follow
- * when its sender is one `by` permits, every fact of `when` is set, fewer
- * than `max` acts of it were sent in the instance, its `delay` has passed
- * and each of its `relations` is satisfied. Once it passes, it clears the
- * facts of `clears`, then sets those of `sets`. A form that `starts` starts
- * an instance, and one that `ends` ends it.
+ * The form of one performative, including its turn rule: the conditions
+ * for sending an act of it.
+ *
+ * The form requires all of these: `by` permits the sender, every fact in
+ * `when` is set, fewer than `max` acts of this performative were sent in
+ * the instance, the `delay` has passed, and every relation in `relations`
+ * is satisfied. The structure check also requires a valid reply reference.
+ *
+ * `starts` means the act starts an instance, and `ends` means it ends one.
+ * When an act that does not end the instance passes, the facts in `clears`
+ * are cleared and then the facts in `sets` are set.
  */
 export interface Form {
   readonly performative: string;
@@ -46,19 +57,20 @@ export interface Form {
 }
 
 /**
- * Which member may send an act: one that has any of `roles`, or the
- * recipient of the message that set `fact`, whichever role that is.
+ * Who may send an act: a member with one of `roles`, or the member that
+ * received the message which set `fact`.
  */
 export type Senders =
   | { readonly kind: "roles"; readonly roles: readonly Role[] }
   | { readonly kind: "recipient"; readonly fact: string };
 
 /**
- * One field of a form. An act must state it unless it is `optional`. A
- * string's bounds count code points, an integer's bounds are inclusive, and
- * a list's bounds count its items, which are nonempty strings. A
- * `description` says what the field contains, and a decision provider
- * judges the text of a string or list field against it.
+ * One field of a form. An act must include it unless it is `optional`.
+ *
+ * All bounds are inclusive. A string's bounds count code points and a
+ * list's count items. Each list item is a nonempty string.
+ * `description` says what the field should contain. For a string or list
+ * field, the decision provider judges the field's text against it.
  */
 export type Field = {
   readonly name: string;
@@ -83,9 +95,9 @@ export type Field = {
 );
 
 /**
- * A wait before an act: it may follow only once the act that set `fact` is
- * as many seconds old as that earlier act's integer field `secondsField`
- * says.
+ * A required wait before an act. The earlier act that set `fact` carries a
+ * number of seconds in its field `secondsField`. The new act may be sent
+ * only once that many seconds have passed since the earlier act.
  */
 export interface Delay {
   readonly fact: string;
@@ -93,9 +105,9 @@ export interface Delay {
 }
 
 /**
- * What `field`, a field of this act, must be against the `source`, a field
- * of an earlier act: `equals` it, a `member` of its list, or a `subset` of
- * its list.
+ * A constraint between a field of this act and a field of an earlier act.
+ * `field` must equal the source field (`equals`), be one of its items
+ * (`member`), or have only items found in it (`subset`).
  */
 export interface Relation {
   readonly operator: "equals" | "member" | "subset";
@@ -103,15 +115,15 @@ export interface Relation {
   readonly source: { readonly act: EarlierAct; readonly field: string };
 }
 
-/** An earlier act of the instance: the latest of a performative, or the one that set a fact. */
+/** A reference to an earlier act in the reply chain: the latest act with a given performative, or the act that set a given fact. */
 export type EarlierAct =
   | { readonly kind: "performative"; readonly performative: string }
   | { readonly kind: "fact"; readonly fact: string };
 
-/** What a field of an act contains: text, a number or a list of texts. */
+/** A field's value: text, a number or a list of texts. */
 export type FieldValue = string | number | readonly string[];
 
-/** One act as a message states it: its performative, the name of its norm and the value of each field it carries. */
+/** One act. `fields` maps each field name the act includes to its value. */
 export interface Act {
   readonly performative: string;
   readonly norm: string;
@@ -119,23 +131,23 @@ export interface Act {
 }
 
 /**
- * Whether `text` may name a norm, a performative, a field or a fact: a
- * lowercase letter, then lowercase letters, digits or hyphens, 64 characters
- * at most.
+ * Whether `text` is a valid name for a norm, performative, field or fact: a
+ * lowercase letter followed by lowercase letters, digits or hyphens, at
+ * most 64 characters in all.
  */
 export function isName(text: string): boolean {
   return /^[a-z][a-z0-9-]{0,63}$/u.test(text);
 }
 
-/** The field `name` of a form. */
+/** Finds a form's field by name, or returns undefined. */
 export function fieldOf(form: Form, name: string): Field | undefined {
   return form.fields.find((field) => field.name === name);
 }
 
 /**
- * The fields of `form` that a decision provider judges: the string and list
- * fields that have a description, each with the subject its text rule names.
- * An integer is limited by its bounds alone.
+ * The fields of a form that the decision provider judges: string and list
+ * fields that have a description. `subject` is how the field's text rule
+ * refers to it. Integer fields are never judged.
  */
 export function judgedFields(form: Form) {
   return form.fields.flatMap((field) =>

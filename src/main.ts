@@ -1,12 +1,12 @@
 #!/usr/bin/env node
 /**
- * @file The `sharnessd` executable: it reads the settings file, compiles the
- * server's norms from their documents, opens the server behind the firewall
- * that enforces them on every message, and serves its MCP tools over HTTP to the
- * owners the authentication admits. `--help` prints the
- * usage, no argument serves until the process is stopped, and any other
- * arguments print the usage to standard error. A startup failure prints one
- * line and exits unsuccessfully.
+ * @file The `sharnessd` executable. It reads the settings file, compiles the
+ * norms, opens the server with its firewall, and serves the MCP tools over
+ * HTTP to authenticated owners.
+ *
+ * With no arguments it serves until stopped. `--help` prints the usage. Any
+ * other arguments print the usage to standard error and exit with status 1.
+ * An expected startup failure prints one line and exits with status 1.
  */
 import * as NodeSdk from "@effect/opentelemetry/NodeSdk";
 import { FileSystem } from "@effect/platform";
@@ -46,17 +46,14 @@ import { AgentName } from "./messages.js";
 import { compileNorms } from "./norms/index.js";
 import { openServer } from "./server.js";
 
-/**
- * Messages identify the failed operation without disclosing documents or credentials.
- */
+/** A startup failure. Its message says what to fix and never contains a credential. */
 class SettingsError extends Data.TaggedError("SettingsError")<{
   readonly message: string;
 }> {}
 
-/** A startup failure whose message names the setting to change. */
 const settingsError = (message: string) => new SettingsError({ message });
 
-/** The settings file as an operator writes it. */
+/** The contents of the settings file. */
 const settingsFile = Schema.Struct({
   port: Schema.Int.pipe(Schema.between(1, 65535)),
   host: Schema.NonEmptyString,
@@ -75,9 +72,10 @@ const settingsFile = Schema.Struct({
 });
 
 /**
- * The norms of the `.lisp` documents directly in `directory`, compiled in
- * name order, or the failure of a directory that cannot be read, has no
- * such document or has one that does not compile.
+ * Compiles the `.lisp` files in `directory`, in file name order.
+ * Subdirectories are not read. Fails if the directory cannot be read, holds
+ * no `.lisp` file, holds one that does not compile, or holds two with the
+ * same norm name.
  */
 const normsIn = Effect.fn("normsIn")(function* (directory: string) {
   const filesystem = yield* FileSystem.FileSystem;
@@ -98,12 +96,12 @@ const normsIn = Effect.fn("normsIn")(function* (directory: string) {
 });
 
 /**
- * The settings as the process uses them: the settings file, with the norms
- * in place of their directory and the decision provider in place of its
- * setting. The norms directory resolves against the settings
- * file's own directory, whatever the working directory. The provider is Jev
- * under the named model and limits, with the key in the environment
- * variable `SHARNESS_DECISION_PROVIDER_KEY`.
+ * Reads the settings file and returns the settings with the norms compiled
+ * and the decision provider built.
+ *
+ * `normsDirectory` is resolved relative to the settings file, not the
+ * working directory. The provider's key comes from the environment variable
+ * `SHARNESS_DECISION_PROVIDER_KEY`.
  */
 const loadSettings = Effect.fn("loadSettings")(function* () {
   const settingsPath = yield* Config.string("SHARNESS_CONFIG_FILE").pipe(
@@ -156,13 +154,16 @@ const loadSettings = Effect.fn("loadSettings")(function* () {
 });
 
 /**
- * Listens on the settings' host and port as the MCP SDK's example of an
- * OAuth-protected server does: the SDK's Express app validates the Host and
- * Origin headers against the resource's hostname, serves the OAuth discovery
- * documents, and checks each request's bearer token before the MCP handler
- * answers it at `/mcp`. A token is a JWT the issuer signed for the resource
- * with a subject, verified against the key set the issuer's metadata names.
- * Returns once the listener accepts connections.
+ * Starts the HTTP listener and returns once it accepts connections.
+ *
+ * The SDK's Express app checks the Host and Origin headers against the
+ * resource's hostname. The SDK's metadata router serves the OAuth discovery
+ * documents. The SDK's bearer middleware checks each request's token before
+ * the MCP handler answers it at `/mcp`.
+ *
+ * A token must be an RS256 JWT signed by the issuer, with the resource as
+ * its audience, a subject and the configured scope. Its signature is
+ * verified against the issuer's published keys.
  */
 const listen = Effect.fn("listen")(function* (
   { host, port, authentication }: typeof settingsFile.Type,
@@ -232,7 +233,7 @@ const listen = Effect.fn("listen")(function* (
   });
 });
 
-/** What `--help` prints: the variables read at every start. */
+/** The usage text, which lists the environment variables the server reads. */
 const HELP_MESSAGE = [
   "Usage: sharnessd [--help]",
   "",
@@ -242,11 +243,11 @@ const HELP_MESSAGE = [
   "Standard OTEL_* variables configure telemetry.",
 ].join("\n");
 
-/** Printed for a startup failure that names no setting of its own. */
+/** Printed when startup fails for a reason that has no message of its own. */
 const UNEXPLAINED_FAILURE =
   "The server could not start. Check SHARNESS_CONFIG_FILE and SHARNESS_DATABASE_URL; run sharnessd --help for what each names.";
 
-/** Prints one line to standard error and makes the process exit unsuccessfully. */
+/** Prints `line` to standard error and sets the exit status to 1. */
 const exitUnsuccessfully = (line: string) =>
   Console.error(line).pipe(
     Effect.andThen(
@@ -257,8 +258,8 @@ const exitUnsuccessfully = (line: string) =>
   );
 
 /**
- * Installs a process-global stderr logger for OpenTelemetry warnings and failures.
- * The logger remains installed after export closes.
+ * Sends OpenTelemetry's own warnings and errors to standard error. The
+ * logger is global to the process and stays installed after export stops.
  */
 const exportDiagnostics = Layer.effectDiscard(
   Effect.sync(() =>
@@ -270,10 +271,10 @@ const exportDiagnostics = Layer.effectDiscard(
 );
 
 /**
- * Exports spans as OTLP/HTTP protobuf when `OTEL_EXPORTER_OTLP_ENDPOINT` is
- * set, under the service name `OTEL_SERVICE_NAME` gives, or `sharnessd`.
- * OpenTelemetry reads the endpoint and its remaining exporter, batch and
- * resource settings from the standard variables, and warns of one it cannot use.
+ * Exports spans over OTLP/HTTP when `OTEL_EXPORTER_OTLP_ENDPOINT` is set,
+ * and does nothing otherwise. The service name is `OTEL_SERVICE_NAME`, or
+ * `sharnessd` if that is unset. OpenTelemetry reads its other settings from
+ * the standard `OTEL_*` variables.
  */
 const spanExport = Layer.unwrapEffect(
   Effect.gen(function* () {
@@ -293,7 +294,7 @@ const spanExport = Layer.unwrapEffect(
   }).pipe(Effect.orDie),
 );
 
-/** Serves until the process is stopped. Fails if it cannot start. */
+/** Starts the server and runs until the process is stopped. Fails if startup fails. */
 const serve = Effect.gen(function* () {
   const url = yield* Config.redacted("SHARNESS_DATABASE_URL").pipe(
     Effect.mapError(() =>

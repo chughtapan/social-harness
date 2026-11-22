@@ -1,9 +1,10 @@
 /**
- * @file The Lisp frontend of the norm language: it reads a norm document as a
- * norm and a message's text as an act. Both are parenthesized data that is
- * never evaluated. The frontend settles syntax only: whether the norm it
- * reads is well formed is the compiler's question, and whether an act may be
- * sent is the structure check's.
+ * @file The Lisp syntax of the norm language. It parses a norm document into
+ * a norm and a message's text into an act. Both are parenthesized data, and
+ * nothing in them is evaluated.
+ *
+ * This file checks syntax only. The compiler checks that a norm is well
+ * formed, and the structure check decides whether an act may be sent.
  */
 
 import { Either } from "effect";
@@ -21,19 +22,18 @@ import {
   type Senders,
 } from "./norm.js";
 
-/** What the frontend read, or why the text is not that, in words that do not echo the text. */
+/** A parse result: the value, or an error message. */
 type Read<A> = Either.Either<A, string>;
 
-/** One value of parenthesized data: a symbol, a quoted string or a list. */
+/** A parsed value: a symbol, a quoted string or a list. */
 type SExpression =
   | { readonly kind: "symbol"; readonly value: string }
   | { readonly kind: "string"; readonly value: string }
   | { readonly kind: "list"; readonly values: readonly SExpression[] };
 
 /**
- * One declaration of a document: its keyword, the name that follows it in a
- * `norm`, `act`, `field` or `relation`, its `:attribute value` pairs and the
- * rest of its items.
+ * One declaration of a document, such as `(act offer :by server ...)`: its
+ * keyword, its name, its `:attribute value` pairs and its remaining items.
  */
 interface Declaration {
   readonly kind: string;
@@ -42,24 +42,24 @@ interface Declaration {
   readonly children: readonly SExpression[];
 }
 
-/** The form of a symbol that is a number: a JSON number. */
+/** Matches a symbol that is a number, using JSON's number syntax. */
 const NUMBER = /^-?(?:0|[1-9]\d*)(?:\.\d+)?(?:[eE][+-]?\d+)?$/u;
 
 /**
- * How an act is written, for an agent that has to write one. It reads beside
- * the tool that returns the norm documents.
+ * Instructions for writing an act, addressed to an agent. They are appended
+ * to the description of the `read_norms` tool.
  */
 export const ACT_SYNTAX =
   'A message is one act and nothing else: (<performative> :norm <norm> :<field> <value> ...). Quote text as a JSON string, write a list as quoted strings in parentheses such as ("first" "second"), and send an act without fields as (<performative> :norm <norm>). The act that starts an instance omits replyToMsgId in send_message; every later act supplies the id of the message it answers.';
 
-/** The attributes that bound a field of each type. */
+/** The bound attributes each field type accepts. */
 const bounds = {
   string: [":min-length", ":max-length"],
   integer: [":minimum", ":maximum"],
   list: [":min-items", ":max-items"],
 } as const;
 
-/** The norm a document states: one `norm` declaration, then an `act` declaration for each form. */
+/** Parses a norm document: one `norm` declaration followed by one `act` declaration per form. */
 export function readNorm(document: string): Read<Norm> {
   return Either.gen(function* () {
     const expressions = yield* Either.mapLeft(
@@ -89,11 +89,13 @@ export function readNorm(document: string): Read<Norm> {
 }
 
 /**
- * The act a message's text states. The whole text is one list: a
- * performative, then `:field value` pairs, of which `:norm` names the act's
- * norm. A value is a quoted string, a symbol or a list of those. A symbol
- * that has the form of a number is one, and any other symbol is its own
- * text. A message carries no comment.
+ * Parses a message's text as an act. The whole text must be one list: a
+ * performative followed by `:field value` pairs. The `:norm` pair names the
+ * act's norm.
+ *
+ * A value is a quoted string, a symbol or a list of those. A symbol that
+ * looks like a number is a number, except inside a list, where every item
+ * is text. Any other symbol is text. Comments are not allowed in a message.
  */
 export function readAct(text: string): Read<Act> {
   return readSExpressions(text, false).pipe(
@@ -168,7 +170,7 @@ function readValue(node: SExpression): Read<FieldValue> {
     : Either.left("Numbers must be finite.");
 }
 
-/** The form an `act` declaration states: its turn rule in its attributes, and a child for each field and relation. */
+/** Parses an `act` declaration into a form. Its attributes give the turn rule, and its child lists give the fields and relations. */
 function readForm(form: Declaration): Read<Form> {
   return Either.gen(function* () {
     yield* checkAttributes(form, [
@@ -209,7 +211,7 @@ function readForm(form: Declaration): Read<Form> {
   });
 }
 
-/** Who `:by` lets send an act: `client`, `server`, both, or `(recipient (fact name))`. */
+/** Parses `:by`, which says who may send the act: `client`, `server`, both, or `(recipient (fact name))`. */
 function readSenders(form: Declaration): Read<Senders> {
   const node = form.attributes.get(":by");
   if (node?.kind === "list" && symbol(node.values[0]) === "recipient") {
@@ -228,7 +230,7 @@ function readSenders(form: Declaration): Read<Senders> {
   });
 }
 
-/** The wait `:after fact :delay field :unit seconds` states. The three attributes come together. */
+/** Parses a delay, written `:after fact :delay field :unit seconds`. All three attributes must be present, or none. */
 function readDelay(form: Declaration): Read<Delay | undefined> {
   const fact = symbol(form.attributes.get(":after"));
   const secondsField = symbol(form.attributes.get(":delay"));
@@ -241,6 +243,7 @@ function readDelay(form: Declaration): Read<Delay | undefined> {
     : Either.right({ fact, secondsField });
 }
 
+/** Parses a `field` declaration. The bound attributes it accepts depend on its type, and a field may not be named `norm`. */
 function readField(form: Declaration): Read<Field> {
   return Either.gen(function* () {
     const type = symbol(form.attributes.get(":type"));
@@ -290,7 +293,7 @@ function readField(form: Declaration): Read<Field> {
   });
 }
 
-/** The relation `(relation operator field (previous act field))` states. */
+/** Parses a relation, written `(relation operator field (previous act field))`. */
 function readRelation(form: Declaration): Read<Relation> {
   return Either.gen(function* () {
     yield* checkAttributes(form, []);
@@ -318,7 +321,7 @@ function readRelation(form: Declaration): Read<Relation> {
   });
 }
 
-/** The value source `(previous act field)` states, whose act is a performative or `(fact name)`. */
+/** Parses a relation's source, written `(previous act field)`. The act is a performative or `(fact name)`. */
 function readSource(node: SExpression): Read<Relation["source"]> {
   const [head, act, field, ...rest] = node.kind === "list" ? node.values : [];
   const named = symbol(field);
@@ -338,7 +341,7 @@ function readSource(node: SExpression): Read<Relation["source"]> {
       });
 }
 
-/** The fact `(fact name)` names. */
+/** Returns the name in `(fact name)`, or undefined if the node is not that. */
 function factOf(node?: SExpression): string | undefined {
   return node?.kind === "list" &&
     node.values.length === 2 &&
@@ -347,7 +350,7 @@ function factOf(node?: SExpression): string | undefined {
     : undefined;
 }
 
-/** A list whose first item is a symbol is a declaration. A `norm`, `act`, `field` or `relation` names itself with its next item. */
+/** Parses a list into a declaration. The first item is the keyword. For `norm`, `act`, `field` and `relation`, the second item is the name. */
 function readDeclaration(node: SExpression): Read<Declaration> {
   if (node.kind !== "list") {
     return Either.left("Expected a parenthesized declaration.");
@@ -371,7 +374,7 @@ function readDeclaration(node: SExpression): Read<Declaration> {
   );
 }
 
-/** A declaration's items after its name: each `:attribute` with the value that follows it, and the rest as children. */
+/** Splits the items after a declaration's name into `:attribute value` pairs and child items. */
 function declarationItems(
   items: readonly SExpression[],
 ): Read<Pick<Declaration, "attributes" | "children">> {
@@ -399,7 +402,7 @@ function declarationItems(
   return Either.right({ attributes, children });
 }
 
-/** Whether a declaration has only attributes it takes, so that a misspelled one is refused. */
+/** Fails if the declaration has an attribute outside `allowed`, which catches a misspelled attribute. */
 function checkAttributes(
   form: Declaration,
   allowed: readonly string[],
@@ -412,7 +415,7 @@ function checkAttributes(
     : Either.left(`Unknown attribute ${unknown}.`);
 }
 
-/** The names an attribute gives: one symbol, or a list of symbols. Without the attribute there are none. */
+/** Reads an attribute's value as a list of names. The value is one symbol or a list of symbols. A missing attribute gives an empty list. */
 function names(node?: SExpression): Read<readonly string[]> {
   if (node === undefined) {
     return Either.right([]);
@@ -424,7 +427,7 @@ function names(node?: SExpression): Read<readonly string[]> {
     : Either.left("Expected a name or a list of names.");
 }
 
-/** Whether an attribute says `true`. Without the attribute it is false. */
+/** Reads a `true` or `false` attribute. A missing attribute is false. */
 function booleanAttribute(form: Declaration, key: string): Read<boolean> {
   const node = form.attributes.get(key);
   const value = symbol(node);
@@ -436,7 +439,7 @@ function booleanAttribute(form: Declaration, key: string): Read<boolean> {
     : Either.left(`${key} takes true or false.`);
 }
 
-/** The finite number an attribute gives, when the declaration has it. */
+/** Reads a number attribute, or undefined if it is missing. */
 function numberAttribute(
   form: Declaration,
   key: string,
@@ -453,7 +456,7 @@ function numberAttribute(
     : Either.left(`${key} takes a finite number.`);
 }
 
-/** The quoted string an attribute gives, when the declaration has it. */
+/** Reads a quoted-string attribute, or undefined if it is missing. */
 function textAttribute(
   form: Declaration,
   key: string,
@@ -464,17 +467,20 @@ function textAttribute(
     : Either.left(`${key} takes a quoted string.`);
 }
 
-/** The text of a symbol. */
+/** Returns the node's text if it is a symbol. */
 function symbol(node?: SExpression): string | undefined {
   return node?.kind === "symbol" ? node.value : undefined;
 }
 
 /**
- * Reads every expression of `text`: lists in parentheses, strings quoted
- * with JSON escaping, and symbols, which are every other run of characters.
- * A `;` starts a comment that runs to the end of its line, which a document
- * may carry and a message may not, so that every token of a message is
- * accounted for. A failure gives the offset of the token at fault.
+ * Parses `text` into its top-level expressions: parenthesized lists, strings
+ * quoted with JSON escaping, and symbols, which are any other run of
+ * characters.
+ *
+ * A `;` starts a comment that runs to the end of the line. Documents may
+ * have comments. Messages may not, so that every token of a message is part
+ * of its act. An error reports the offset of the bad token, or the end of
+ * the text for an unclosed parenthesis.
  */
 function readSExpressions(
   text: string,
@@ -504,7 +510,7 @@ function readSExpressions(
     : Either.left({ offset, detail: "An opening parenthesis is not closed." });
 }
 
-/** Adds one token to the innermost open list, and gives why the token cannot stand where it does. */
+/** Adds one token to the innermost open list, skipping whitespace and allowed comments. Returns an error message if the token is not acceptable. */
 function acceptToken(
   token: string,
   stack: SExpression[][],

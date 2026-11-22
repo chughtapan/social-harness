@@ -1,10 +1,12 @@
 /**
- * @file The server agent's firewall. It checks every message of a
- * conversation when it is sent, whichever member sends it: the structure
- * check reads the message as an act of the server's norms, a
- * decision provider judges it against the text rules those norms give it,
- * and the check decides whether the message is sent and what its caller
- * saves.
+ * @file The firewall, which checks every message against the server's norms
+ * before it is sent. A norm says which structured messages, called acts, the
+ * two members of a conversation (the client and the server agent) may send
+ * each other, and in what order.
+ *
+ * A check has two steps. The structure check decides whether the message is
+ * a valid act at this point in the conversation. The decision provider then
+ * judges the act's text fields against their rules.
  */
 
 import { Clock, Effect, Option, Schema, Struct } from "effect";
@@ -14,12 +16,14 @@ import { askProvider, type DecisionProvider } from "./decision-provider.js";
 import { AgentName, type Message } from "./messages.js";
 
 /**
- * What one completed check decided, as its caller saves it, without message
- * content: which member sent the message, the client of its conversation, and
- * whether it was `allowed` or `refused`. `checkedAt` is Unix milliseconds. A
- * refused message has the `reason` it was refused: a `violation` of a rule,
- * or an `unsure` answer to one. `refusedBy` names each rule that refused it,
- * with its feedback. `checkedRuleIds` lists the rules the check applied.
+ * The saved record of one check. It holds no message content.
+ *
+ * `sender` is the member that sent the message and `client` names its
+ * conversation. `checkedAt` is in Unix milliseconds. A refused message has a
+ * `reason`: it broke a rule (`violation`) or the provider could not settle a
+ * rule (`unsure`). `refusedBy` lists the rules that refused it.
+ * `checkedRuleIds` lists the text rules the provider judged, or the
+ * structure check's rule when that refused the message.
  */
 // eslint-disable-next-line agent-code-guard/no-exported-brand-constructor -- The firewall owns this grammar, which the server stores and returns from read_firewall_decisions.
 export const checkRecordSchema = Schema.Struct({
@@ -37,13 +41,16 @@ export const checkRecordSchema = Schema.Struct({
   ),
   checkedRuleIds: Schema.Array(Schema.NonEmptyString),
 });
-/** @useDeclaredType */
+/**
+ * A decoded check record.
+ * @useDeclaredType
+ */
 export type CheckRecord = typeof checkRecordSchema.Type;
 
 /**
- * A message with which member sent it and the time this firewall checked it,
- * in Unix milliseconds. A message sent while the server had no norms has no
- * check.
+ * An earlier message of a conversation, with the member that sent it and the
+ * time it was checked, in Unix milliseconds. `checkedAt` is absent for a
+ * message stored while the server had no norms.
  */
 export interface CheckedMessage {
   readonly message: Message;
@@ -52,8 +59,8 @@ export interface CheckedMessage {
 }
 
 /**
- * A message that may be sent. `record` is what the caller saves of the
- * decision; a server without norms has none.
+ * The message may be sent. The caller saves `record`. There is no record
+ * when the server has no norms.
  */
 interface Allowed {
   readonly kind: "allowed";
@@ -61,10 +68,10 @@ interface Allowed {
 }
 
 /**
- * A message whose send fails, whichever member sent it: one that violates a
- * rule, one the provider is unsure of, or one whose check was unavailable,
- * which has no record because no rule refused it. `feedback` is what its
- * sender reads.
+ * The message must not be sent. `feedback` is the text for its sender.
+ *
+ * The reason is `violation`, `unsure` or `unavailable`. An unavailable check
+ * has no record, because no rule refused the message.
  */
 interface Refused {
   readonly kind: "refused";
@@ -74,11 +81,11 @@ interface Refused {
   readonly record?: CheckRecord;
 }
 
-/** The server agent's firewall. */
+/** The firewall: one `check` operation. */
 export interface Firewall {
   /**
-   * Checks a message `sender` sends, after the `earlier` messages of its
-   * conversation in order.
+   * Checks a message that `sender` wants to send. `earlier` holds the
+   * conversation's stored messages, oldest first.
    */
   readonly check: (
     sender: Role,
@@ -88,21 +95,23 @@ export interface Firewall {
 }
 
 /**
- * The firewall of a server whose norms are `norms`. A server without norms
- * allows every message and records nothing.
+ * Makes the firewall for a server with the given norms. Without norms, the
+ * firewall allows every message and records nothing.
  *
- * A check runs the norms' structure check on its message first, with the
- * earlier messages; that check's refusal refuses the message as a
- * violation. The `provider` then answers whether the message breaks each
- * text rule the structure check gave it. A violation refuses, and so does
- * an unsure answer when no rule is violated; the feedback of a refusal is the
- * text of each rule that refused it. A provider that gives no usable answer,
- * and rules without a provider, make the check unavailable.
+ * A check runs the structure check first. If that refuses the message, the
+ * reason is `violation`. Otherwise the provider answers each text rule the
+ * structure check returned. Any violated rule refuses the message. If no
+ * rule is violated but the provider is unsure about one, that also refuses
+ * it. The feedback is the structure check's explanation, or the text of
+ * each text rule that refused the message.
+ *
+ * The check is `unavailable` when the provider gives no usable answer, or
+ * when there are text rules but no provider.
  */
 export function makeFirewall(applies: {
   readonly norms?: Pick<Norms, "structureCheck">;
   readonly provider?: DecisionProvider;
-  /** The most earlier messages the provider reads: 256 when unset. */
+  /** How many earlier messages the provider is shown. Defaults to 256. */
   readonly historyLimit?: number;
 }): Firewall {
   const { norms, provider, historyLimit } = applies;
@@ -119,7 +128,6 @@ export function makeFirewall(applies: {
   ): Effect.fn.Return<Allowed | Refused> {
     const now = yield* Clock.currentTimeMillis;
     const checkId = `chk_${randomBytes(32).toString("hex")}`;
-    /** The record of this check's decision. It names the client of the message's conversation. */
     const record = (
       decided: Pick<CheckRecord, "reason" | "refusedBy" | "checkedRuleIds">,
     ): CheckRecord => ({
@@ -205,7 +213,7 @@ export function makeFirewall(applies: {
   return { check };
 }
 
-/** A message `sender` sent, as the structure check reads it. */
+/** Converts a message to the shape the structure check takes. */
 function sentBy(sender: Role, message: Message, checkedAt?: number) {
   return {
     ...Struct.pick(message, "msgId", "replyToMsgId", "text"),

@@ -1,8 +1,9 @@
 /**
- * @file The norm language as the rest of the daemon uses it. A norm has two
- * forms and no others: the document its author writes and every member
- * reads, and the norm that document compiles to, which the structure check
- * runs. Nothing in this folder imports from outside it.
+ * @file The entry point of the norm language. The rest of the server imports
+ * only from this file, and nothing in this folder imports from outside it.
+ *
+ * A norm exists in two forms: the document its author writes, which every
+ * member can read, and the compiled norm, which the structure check runs.
  */
 
 import { Either, Schema } from "effect";
@@ -11,14 +12,14 @@ import { readAct } from "./lisp.js";
 import { judgedFields } from "./norm.js";
 import { type Finding, type Sent, structureCheck } from "./structure-check.js";
 
-/** How an act is written, for an agent that has to write one. */
+/** Instructions for writing an act, addressed to an agent. */
 export { ACT_SYNTAX } from "./lisp.js";
-/** Which of a conversation's two members sends a message. */
+/** The member of a conversation that sends a message: `client` or `server`. */
 export type { Role } from "./norm.js";
-/** A text rule a norm gives an act, for a decision provider to judge. */
+/** A rule about a field's text, which the decision provider judges. */
 export type { TextRule } from "./structure-check.js";
 
-/** A norm's document as a member reads it, under the name and the description it states. */
+/** One norm as `read_norms` returns it: its name, its description and the full document. */
 // eslint-disable-next-line agent-code-guard/no-exported-brand-constructor -- The read_norms tool returns this shape as it stands, and needs its schema to publish it.
 export const normDocument = Schema.Struct({
   name: Schema.String,
@@ -27,12 +28,13 @@ export const normDocument = Schema.Struct({
 });
 
 /**
- * A server's norms: at least one. `documents` are what every member reads.
- * `structureCheck` checks one message at the time `now`, in milliseconds,
- * after the earlier messages of its conversation. `hasTextRules` says
- * whether any norm describes a string or list field, which gives it a text
- * rule that needs a decision provider. A server without norms has no value
- * of this type.
+ * A server's compiled norms. There is always at least one.
+ *
+ * `documents` is what `read_norms` returns. `structureCheck` checks one
+ * message against the earlier messages of its conversation, where `now` is
+ * the current time in Unix milliseconds. `hasTextRules` is true when any
+ * norm gives a string or list field a description, which means the server
+ * needs a decision provider.
  */
 export interface Norms {
   readonly documents: ReadonlyArray<typeof normDocument.Type>;
@@ -45,9 +47,8 @@ export interface Norms {
 }
 
 /**
- * The norms `documents` compile to, or why they are no server's norms: there
- * is no document, one of them does not compile, or two of them name the
- * same norm.
+ * Compiles the documents into a server's norms. Fails if there are no
+ * documents, if one does not compile, or if two have the same norm name.
  */
 export function compileNorms(
   documents: readonly string[],
