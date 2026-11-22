@@ -86,8 +86,8 @@ const complianceQuestion = {
 };
 
 /** One rule's answer as a check reads it: whether the provider left the rule unsettled, and whether it settled it as broken. */
-export interface Answer<Rule> {
-  readonly rule: Rule;
+interface Answer {
+  readonly rule: TextRule;
   readonly unsure: boolean;
   readonly violates: boolean;
 }
@@ -156,12 +156,12 @@ const DEFAULT_HISTORY_LIMIT = 256;
  * without one of its choices fails the request, and so does asking without
  * a provider.
  */
-export function askProvider<Rule extends TextRule>(
-  rules: readonly Rule[],
+export function askProvider(
+  rules: readonly TextRule[],
   candidate: Candidate,
   beside: Beside,
   provider?: DecisionProvider,
-): Effect.Effect<ReadonlyArray<Answer<Rule>>, DecisionProviderError> {
+): Effect.Effect<readonly Answer[], DecisionProviderError> {
   const noAnswer = new DecisionProviderError({ transient: false });
   if (rules.length === 0) {
     return Effect.succeed([]);
@@ -233,7 +233,7 @@ export function jevDecisionProvider(
   apiKey: Redacted.Redacted,
   setting: typeof decisionProviderSetting.Type,
 ): DecisionProvider {
-  const failed = (transient: boolean) => () =>
+  const fail = (transient: boolean) =>
     Effect.fail(new DecisionProviderError({ transient }));
   const answer = Effect.fn("Jev.answer")(function* (request: DecisionRequest) {
     const client = yield* HttpClient.HttpClient;
@@ -255,14 +255,14 @@ export function jevDecisionProvider(
       }),
       Effect.orDie,
       Effect.flatMap(client.execute),
-      Effect.catchAll(failed(true)),
+      Effect.catchAll(() => fail(true)),
     );
     const decoder = new TextDecoder();
     const body = yield* response.stream.pipe(
       Stream.runFoldEffect({ bytes: 0, text: "" }, (current, chunk) => {
         const bytes = current.bytes + chunk.byteLength;
         return bytes > maximumResponseBytes
-          ? failed(false)()
+          ? fail(false)
           : Effect.succeed({
               bytes,
               text: current.text + decoder.decode(chunk, { stream: true }),
@@ -270,15 +270,15 @@ export function jevDecisionProvider(
       }),
       Effect.map((current) => current.text + decoder.decode()),
       Effect.catchTag("ResponseError", (error) =>
-        error.reason === "EmptyBody" ? Effect.succeed("") : failed(true)(),
+        error.reason === "EmptyBody" ? Effect.succeed("") : fail(true),
       ),
     );
     if (response.status < 200 || response.status >= 300) {
-      return yield* failed(response.status === 429 || response.status >= 500)();
+      return yield* fail(response.status === 429 || response.status >= 500);
     }
     return yield* Schema.decodeUnknown(Schema.parseJson(decisionResponse))(
       body,
-    ).pipe(Effect.catchAll(failed(false)));
+    ).pipe(Effect.catchAll(() => fail(false)));
   });
   return {
     ...Struct.omit(setting, "model"),

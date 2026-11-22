@@ -294,6 +294,7 @@ it("shows the provider only the latest earlier messages that fit its byte limit,
         recipient: alice,
         text: "x".repeat(32_000),
       }),
+      sender: "client" as const,
       checkedAt: 1,
     };
 
@@ -371,6 +372,7 @@ it.prop(
         historyLimit,
         earlier: Array.from({ length: sent }, () => ({
           message,
+          sender: "client" as const,
           checkedAt: 1,
         })),
       });
@@ -424,13 +426,14 @@ describe("Firewall structure check", () => {
       const requests: DecisionRequest[] = [];
       const checked: Array<Parameters<StructureCheck>> = [];
       const earlier = [
-        { message: yield* fromBob, checkedAt: 1 },
+        { message: yield* fromBob, sender: "client" as const, checkedAt: 1 },
         {
           message: yield* Message.create({
             author: alice,
             recipient: bob,
             text: "Hi",
           }),
+          sender: "server" as const,
         },
       ];
 
