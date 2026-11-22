@@ -16,21 +16,52 @@ import { Effect, JSONSchema, Runtime, Schema } from "effect";
 import { createHash } from "node:crypto";
 import packageJson from "../package.json" with { type: "json" };
 import { checkRecordSchema } from "./firewall.js";
-import { AgentName, MsgId, wellFormedString } from "./messages.js";
+import { AgentName, Message, MsgId, wellFormedString } from "./messages.js";
 import { ACT_SYNTAX, normDocument, type Norms } from "./norms/index.js";
-import {
-  ConversationPage,
-  Cursor,
-  Entry,
-  type Failure,
-  InboxPage,
-  PAGE_SIZE,
-  SendReceipt,
-  type Server,
-} from "./server.js";
+import { type Failure, PAGE_SIZE, type Server } from "./server.js";
 
 /** The version of this package, as MCP clients and telemetry read it. */
 export const packageVersion: string = packageJson.version;
+
+/** A place in an ordered read, which a host reads and presents as decimal text. A read returns what follows it. */
+const Cursor = Schema.compose(
+  Schema.String.pipe(Schema.pattern(/^\d{1,15}$/u)),
+  Schema.NumberFromString,
+);
+
+/** One message as a host reads it, from an inbox or a conversation. */
+const Entry = Schema.Struct({ message: Message });
+
+const pageOfEntries = Schema.Array(Entry).pipe(Schema.maxItems(PAGE_SIZE));
+
+/** A page of an inbox: its entries, the cursor a read that continues it presents, and whether more entries follow now. */
+const InboxPage = Schema.Struct({
+  entries: pageOfEntries,
+  nextCursor: Cursor,
+  hasMore: Schema.Boolean,
+});
+
+/** A page of a conversation: its entries, and the cursor of the next page when there is one. */
+const ConversationPage = Schema.Struct({
+  entries: pageOfEntries,
+  nextCursor: Schema.optional(Cursor),
+});
+
+/** What a send returns: the message id its message was stored under. */
+const SendReceipt = Schema.Struct({ msgId: MsgId });
+
+/** A page of the server as the page of an inbox a host reads. */
+const inboxPage = (page: Page) => ({
+  entries: page.messages.map((message) => ({ message })),
+  nextCursor: page.next,
+  hasMore: page.more,
+});
+
+/** A page of the server as the page of a conversation a host reads. */
+const conversationPage = (page: Page) => ({
+  entries: page.messages.map((message) => ({ message })),
+  ...(page.more ? { nextCursor: page.next } : {}),
+});
 
 /** The cursor a read takes: the `nextCursor` an earlier result gave. */
 const cursorArgument = Schema.optional(Cursor).annotations({
@@ -141,6 +172,9 @@ export const mcpHandler = Effect.fn("mcpHandler")(function* (
 /** What answers each MCP request from the agent of the owner the request is admitted as. */
 export type McpHandler = Effect.Effect.Success<ReturnType<typeof mcpHandler>>;
 
+/** A page of the server's messages. */
+type Page = Effect.Effect.Success<ReturnType<Server["conversation"]>>;
+
 /** What a request's tools are registered with: the SDK's MCP object for the request, the server whose operations they run, and the runner of their calls. */
 interface Registration {
   readonly mcp: McpServer;
@@ -155,22 +189,20 @@ function inboxOccurrences(
   after: { readonly cursor: string | null; readonly maxEvents?: number },
 ) {
   return Effect.gen(function* () {
-    const page = yield* server.inbox(
-      yield* Schema.decodeUnknown(AgentName)(principal),
-      {
+    const page = yield* Effect.flatMap(
+      server.inbox(yield* Schema.decodeUnknown(AgentName)(principal), {
         limit: Math.min(after.maxEvents ?? PAGE_SIZE, PAGE_SIZE),
         ...(after.cursor === null
           ? {}
-          : { cursor: yield* Schema.decode(Cursor)(after.cursor) }),
-      },
+          : { after: yield* Schema.decode(Cursor)(after.cursor) }),
+      }),
+      (read) => Schema.encode(InboxPage)(inboxPage(read)),
     );
     return {
-      events: (yield* Schema.encode(Schema.Array(Entry))(page.entries)).map(
-        (data) => ({
-          eventId: `${data.message.author}/${data.message.msgId}`,
-          data,
-        }),
-      ),
+      events: page.entries.map((data) => ({
+        eventId: `${data.message.author}/${data.message.msgId}`,
+        data,
+      })),
       cursor: page.nextCursor,
       hasMore: page.hasMore,
     };
@@ -215,7 +247,8 @@ function registerSharedTools(
       output: InboxPage,
       readOnly: true,
     },
-    (request) => server.receive(caller, request),
+    ({ cursor, wait }) =>
+      Effect.map(server.receive(caller, { after: cursor, wait }), inboxPage),
   );
   if (norms !== undefined) {
     register(
@@ -254,7 +287,7 @@ function registerServerAgentTools(at: Registration) {
       }),
       output: SendReceipt,
     },
-    ({ to, ...sent }) => server.send(server.name, to, sent),
+    ({ to, ...sent }) => server.send("server", to, sent),
   );
   register(
     at,
@@ -271,7 +304,11 @@ function registerServerAgentTools(at: Registration) {
       output: ConversationPage,
       readOnly: true,
     },
-    (input) => server.conversationWith(input.with, input.cursor),
+    (input) =>
+      Effect.map(
+        server.conversationWith(input.with, input.cursor ?? 0),
+        conversationPage,
+      ),
   );
   register(
     at,
@@ -314,7 +351,7 @@ function registerClientTools(at: Registration, client: AgentName) {
       input: Schema.Struct(sentFields),
       output: SendReceipt,
     },
-    (sent) => server.send(client, client, sent),
+    (sent) => server.send("client", client, sent),
   );
   register(
     at,
@@ -326,7 +363,8 @@ function registerClientTools(at: Registration, client: AgentName) {
       output: ConversationPage,
       readOnly: true,
     },
-    ({ cursor }) => server.conversation(client, cursor),
+    ({ cursor }) =>
+      Effect.map(server.conversation(client, cursor ?? 0), conversationPage),
   );
 }
 
@@ -388,13 +426,15 @@ function register<A, I, B extends object, J extends object, E extends Failure>(
   );
 }
 
+/** A failed tool call: its message is the result's text and its other fields the structured content. */
 function failed(failure: Failure) {
   return {
     isError: true as const,
     content: [{ type: "text" as const, text: failure.message }],
     structuredContent: Object.fromEntries(
       Object.entries(failure).filter(
-        ([field, value]) => field !== "_tag" && value !== undefined,
+        ([field, value]) =>
+          field !== "_tag" && field !== "message" && value !== undefined,
       ),
     ),
   };
