@@ -16,6 +16,7 @@ import {
   type Answer,
   type Answering,
   answersTo,
+  ruleIdsOf,
 } from "../tests/support/decision-provider.js";
 import {
   DecisionProviderError,
@@ -266,9 +267,7 @@ it.each(senders)(
         kind: "allowed",
         record: { checkedRuleIds: [proposal.id, privacy.id] },
       });
-      expect(
-        Object.values(request?.questions ?? {}).map(({ ruleId }) => ruleId),
-      ).toEqual([proposal.id, privacy.id]);
+      expect(Object.keys(request?.questions ?? {})).toEqual(["q0", "q1"]);
       expect(state).toEqual({ sender, rules });
     }),
 );
@@ -461,7 +460,7 @@ describe("Firewall structure check", () => {
           Schema.decodeUnknownSync(
             Schema.parseJson(Schema.Struct({ instance: Schema.Unknown })),
           )(state).instance,
-          Object.values(questions).map(({ ruleId }) => ruleId),
+          ruleIdsOf({ state, questions }),
         ]),
       ).toEqual([[{ turn: 2 }, [privacy.id]]]);
       expect(result).toMatchObject({

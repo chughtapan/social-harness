@@ -1,5 +1,6 @@
 /** @file A decision provider's answers, for the tests of the firewall and of what sits on it. */
 
+import { Schema } from "effect";
 import type {
   DecisionProvider,
   DecisionRequest,
@@ -22,10 +23,11 @@ export function answersTo(
   choices: Readonly<Record<string, string | Answer>> = {},
   otherwise = "compliant",
 ): DecisionResponse {
+  const ruleIds = ruleIdsOf(request);
   return {
     answers: Object.fromEntries(
-      Object.entries(request.questions).map(([id, question]) => {
-        const selected = choices[question.ruleId] ?? otherwise;
+      Object.entries(request.questions).map(([id, question], index) => {
+        const selected = choices[ruleIds[index] ?? ""] ?? otherwise;
         return [
           id,
           typeof selected === "string"
@@ -43,4 +45,14 @@ export function answersTo(
       }),
     ),
   };
+}
+
+/** The id of the rule each question of `request` asks about, in question order. */
+export function ruleIdsOf(request: DecisionRequest): readonly string[] {
+  const state: unknown = JSON.parse(request.state);
+  return Schema.decodeUnknownSync(
+    Schema.Struct({
+      rules: Schema.Array(Schema.Struct({ id: Schema.String })),
+    }),
+  )(state).rules.map((rule) => rule.id);
 }
