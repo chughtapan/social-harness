@@ -7,19 +7,19 @@
   (field availability :type string :min-length 1 :max-length 600
     :description "When the client can meet: dates, times and a timezone."))
 (act propose :by server :when offer-due :clears offer-due :sets offered
-  (field slot :type string :min-length 1 :max-length 120
-    :description "One meeting slot: a date, start and end times, and a timezone. It fits the availability the client last stated."))
+  (field slot :type string :format date-time
+    :description "The start of a meeting slot that fits the availability the client last stated.")
+  (field length :type string :format duration))
 (act reject-proposal :by client :when offered
   :clears offered :sets offer-due
   (field availability :type string :min-length 1 :max-length 600
     :description "Other times the client can meet: dates, times and a timezone."))
 (act accept-proposal :by client :when offered
   :clears offered :sets selected
-  (field slot :type string :max-length 120)
+  (field slot :type string :format date-time)
   (relation equals slot (previous propose slot)))
 (act confirm :by server :when selected :ends true
-  (field slot :type string :max-length 120
-    :description "The accepted slot, copied exactly.")
+  (field slot :type string :format date-time)
   (relation equals slot (previous accept-proposal slot)))
 (act failure :by server :when open :ends true
   (field reason :type string :min-length 1 :max-length 300

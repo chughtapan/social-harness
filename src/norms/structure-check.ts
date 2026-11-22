@@ -15,6 +15,7 @@ import {
   type Field,
   type FieldValue,
   type Form,
+  type Format,
   judgedFields,
   type Norm,
   type Relation,
@@ -581,7 +582,8 @@ function accepts(field: Field, value: FieldValue): boolean {
     case "string":
       return (
         typeof value === "string" &&
-        within(Array.from(value).length, field.minLength, field.maxLength)
+        within(Array.from(value).length, field.minLength, field.maxLength) &&
+        (field.format === undefined || hasFormat(value, field.format))
       );
     case "integer":
       return (
@@ -592,7 +594,11 @@ function accepts(field: Field, value: FieldValue): boolean {
     case "list":
       return (
         typeof value === "object" &&
-        value.every((item) => item !== "") &&
+        value.every(
+          (item) =>
+            item !== "" &&
+            (field.format === undefined || hasFormat(item, field.format)),
+        ) &&
         within(value.length, field.minItems, field.maxItems)
       );
     default: {
@@ -600,6 +606,51 @@ function accepts(field: Field, value: FieldValue): boolean {
       return exhaustive;
     }
   }
+}
+
+const DATE = String.raw`(\d{4})-(\d{2})-(\d{2})`;
+const TIME = String.raw`([01]\d|2[0-3]):[0-5]\d:([0-5]\d|60)(\.\d+)?(Z|[+-]([01]\d|2[0-3]):[0-5]\d)`;
+/**
+ * Whether `text` is written in `format`. A date must also be a real calendar
+ * date, so `2026-02-30` is not one. Letters are upper case.
+ */
+function hasFormat(text: string, format: Format): boolean {
+  switch (format) {
+    case "date":
+      return new RegExp(`^${DATE}$`, "u").test(text) && isCalendarDate(text);
+    case "time":
+      return new RegExp(`^${TIME}$`, "u").test(text);
+    case "date-time":
+      return (
+        new RegExp(`^${DATE}T${TIME}$`, "u").test(text) &&
+        isCalendarDate(text.slice(0, 10))
+      );
+    case "duration":
+      return isDuration(text);
+    default: {
+      const exhaustive: never = format;
+      return exhaustive;
+    }
+  }
+}
+
+/** Whether `text` is an ISO 8601 duration such as `P1D` or `PT30M`: a date part, then an optional time part after `T`, with at least one component. */
+function isDuration(text: string): boolean {
+  const [days = "", time, ...more] = text.slice(1).split("T");
+  if (!text.startsWith("P") || more.length > 0 || time === "") {
+    return false;
+  }
+  return (
+    days + (time ?? "") !== "" &&
+    /^(\d+Y)?(\d+M)?(\d+W)?(\d+D)?$/u.test(days) &&
+    /^(\d+H)?(\d+M)?(\d+(\.\d+)?S)?$/u.test(time ?? "")
+  );
+}
+
+/** Whether a `YYYY-MM-DD` text names a day that exists. */
+function isCalendarDate(date: string): boolean {
+  const day = new Date(`${date}T00:00:00Z`);
+  return !Number.isNaN(day.getTime()) && day.toISOString().startsWith(date);
 }
 
 /** Whether `value` is within the inclusive bounds. A missing bound is not checked. */

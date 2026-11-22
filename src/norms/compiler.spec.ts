@@ -118,13 +118,23 @@ vitestIt.each<keyof Splices>(["norm", "open", "field", "close"])(
 );
 
 vitestIt.each([
+  ["a known format on a string", "string", " :format date", false],
+  ["an unknown format", "string", " :format weekday", true],
+  ["a format on a list", "list", " :format date-time", false],
+  ["a format on an integer", "integer", " :format date", true],
+] as const)(
+  "for %s, refuses the document: %s %s %s",
+  (...[, type, field, expected]) => {
+    expect(
+      refused(document([{ name: "topic", type, optional: false }], { field })),
+    ).toBe(expected);
+  },
+);
+
+vitestIt.each([
   ["a sender that is neither role", "(client server)", "(client absent)"],
   ["a fact it clears", ":ends true)", ":ends true :clears absent)"],
-  [
-    "a fact it waits on",
-    ":ends true)",
-    ":ends true :after absent :delay wait :unit seconds)",
-  ],
+  ["a fact it waits on", ":ends true)", ":ends true :after (absent wait))"],
   [
     "an act a relation reads",
     ":ends true)",
@@ -167,7 +177,7 @@ const waiting = `(norm waiting)
 (act hold :by client :starts true :sets held
   (field wait :type integer :minimum 0)
   (field topic :type string))
-(act poll :by client :when held :after held :delay wait :unit seconds :ends true
+(act poll :by client :when held :after (held wait) :ends true
   (field copy :type string)
   (relation equals copy (previous hold topic)))
 `;
@@ -175,8 +185,8 @@ const waiting = `(norm waiting)
 vitestIt.each([
   [
     "a delay after a fact its act does not wait on",
-    ":when held :after held",
-    ":after held",
+    ":when held :after (held wait)",
+    ":after (held wait)",
   ],
   [
     "a relation that reads an optional field of an earlier act",

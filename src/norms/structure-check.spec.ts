@@ -285,7 +285,7 @@ it("permits an act with a delay and a limit only once its fact is that old and w
 (act hold :by client :starts true :sets held
   (field wait :type integer :minimum 0))
 (act poll :by (client server) :when held :max ${maximum}
-  :after held :delay wait :unit seconds)
+  :after (held wait))
 `);
         const history: Sent[] = [];
         const start = 1_000;
@@ -588,6 +588,32 @@ it("reads any quoted string and counts its length in code points against its bou
       },
     ),
   );
+});
+
+it.each([
+  ["date", "2026-11-23", ["2026-02-30", "2026-11-3", "23-11-2026"]],
+  ["time", "10:00:00Z", ["10:00", "24:00:00Z", "10:00:00"]],
+  [
+    "date-time",
+    "2026-11-23T10:00:00+01:00",
+    ["2026-11-23 10:00:00Z", "2026-02-30T10:00:00Z", "2026-11-23"],
+  ],
+  ["duration", "PT30M", ["30M", "P", "PT"]],
+])(
+  "requires a string with the %s format to be written in it",
+  (format, valid, invalid) => {
+    const declared = `:type string :format ${format}`;
+    expect(accepted(declared, valid)).toBe(true);
+    for (const text of invalid) {
+      expect([text, accepted(declared, text)]).toEqual([text, false]);
+    }
+  },
+);
+
+it("requires every item of a list with a format to be written in it", () => {
+  const declared = ":type list :format date";
+  expect(accepted(declared, ["2026-11-23", "2026-11-24"])).toBe(true);
+  expect(accepted(declared, ["2026-11-23", "tomorrow"])).toBe(false);
 });
 
 it("requires a list of nonempty items whose count is within its bounds", () => {

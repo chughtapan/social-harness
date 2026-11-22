@@ -7,20 +7,18 @@
 
 (act propose :by server :when negotiating
   :sets offered :clears accepted
-  (field options :type list :min-items 1 :max-items 3
-    :description "One candidate meeting slot: a date, start and end times, and a timezone."))
+  (field options :type list :min-items 1 :max-items 3 :format date-time)
+  (field length :type string :format duration))
 
 (act accept-proposal :by client :when (negotiating offered) :sets accepted
-  (field available :type list :min-items 1 :max-items 3
-    :description "One slot of the current offer, copied exactly.")
+  (field available :type list :min-items 1 :max-items 3 :format date-time)
   (relation subset available (previous (fact offered) options)))
 
 (act reject-proposal :by client :when (negotiating offered) :clears accepted)
 
 (act confirm :by server :when (negotiating offered accepted) :sets confirmed
   :clears (negotiating offered accepted)
-  (field slot :type string :min-length 1
-    :description "The agreed meeting slot, copied exactly from the offer.")
+  (field slot :type string :format date-time)
   (relation member slot (previous (fact accepted) available)))
 
 (act cancel :by (client server) :ends true)

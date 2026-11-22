@@ -68,7 +68,9 @@ export type Senders =
  * One field of a form. An act must include it unless it is `optional`.
  *
  * All bounds are inclusive. A string's bounds count code points and a
- * list's count items. Each list item is a nonempty string.
+ * list's count items. Each list item is a nonempty string. A string with a
+ * `format` must be written in that format, and so must every item of a list
+ * with one.
  * `description` says what the field should contain. For a string or list
  * field, the decision provider judges the field's text against it.
  */
@@ -81,6 +83,7 @@ export type Field = {
       readonly type: "string";
       readonly minLength?: number;
       readonly maxLength?: number;
+      readonly format?: Format;
     }
   | {
       readonly type: "integer";
@@ -91,8 +94,17 @@ export type Field = {
       readonly type: "list";
       readonly minItems?: number;
       readonly maxItems?: number;
+      readonly format?: Format;
     }
 );
+
+/**
+ * The formats a string field can require, as JSON Schema defines them:
+ * an RFC 3339 `date`, `time` or `date-time`, or an ISO 8601 `duration`.
+ */
+export const FORMATS = ["date", "time", "date-time", "duration"] as const;
+/** One of {@link FORMATS}. */
+export type Format = (typeof FORMATS)[number];
 
 /**
  * A required wait before an act. The earlier act that set `fact` carries a
