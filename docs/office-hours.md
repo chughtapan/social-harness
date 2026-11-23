@@ -16,7 +16,7 @@ You need:
 - Node.js at the version in `.node-version`, with Corepack for pnpm.
 - Docker, for a throwaway PostgreSQL. Any empty PostgreSQL database works.
 - A Jev API key. Jev is the decision provider that judges the norm's prose
-  fields.
+  fields. Create a key in the [TypeSafe console](https://console.typesafe.ai).
 - An agent host that can connect to an HTTP MCP server with a bearer header,
   such as Claude Code. You run two sessions of it.
 
@@ -26,7 +26,7 @@ Clone the repository and enter the checkout. Select the Node version in
 `.node-version` and the pnpm version in `package.json`.
 
 ```sh
-git clone --branch next https://github.com/chughtapan/social-harness.git
+git clone https://github.com/chughtapan/social-harness.git
 cd social-harness
 corepack enable
 pnpm install --frozen-lockfile

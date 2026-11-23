@@ -1,6 +1,6 @@
 ---
 title: Specification
-description: The words Social Harness uses, the daemon and its settings, messaging, the firewall and releases.
+description: The words Social Harness uses, the daemon and its settings, messaging and the firewall.
 read_when:
   - You are integrating an agent host with a daemon or running one
   - You need what a send returns, what a firewall decision means or how an agent is named
@@ -489,52 +489,3 @@ norm the message was checked under, then `form` or `protocol`, as in
 For a `violation`, `refusedBy` lists the violated text rules, or the
 structure check's rule. For `unsure`, it lists the text rules with an unsure
 answer.
-
-## Releases
-
-A release is a package and an image that were built and tested together.
-
-### Publication and versions
-
-`@social-harness/social-harness` is published to npm, and the daemon ships as
-a signed image. Both carry one version, `YYYY.MDD.N`: the UTC year, the month and
-two-digit day (`1121` for 21 November), and a counter that starts at 0 and
-goes one past the highest that npm or a `v<version>` tag has for that day. The package version and the MCP protocol revision change
-independently.
-
-The [release workflow](https://github.com/social-harness/social-harness/blob/main/.github/workflows/release.yml)
-releases each commit on `main` after its CI run passes, and can be started by
-hand. It tags the commit `v<version>` first, then publishes to npm with provenance,
-pushes the image, and creates a GitHub release whose notes list the merged
-pull requests and the image digest.
-
-### Service images
-
-The image is `ghcr.io/social-harness/daemon`. It is an OCI index for
-`linux/amd64` and `linux/arm64`, built from the release commit and tagged
-`<version>` and `sha-<commit>`.
-
-The release workflow signs the index by digest with keyless cosign before
-tagging it. Verification requires:
-
-| Attribute | Required value |
-| --- | --- |
-| Certificate identity | `https://github.com/social-harness/social-harness/.github/workflows/release.yml@refs/heads/main` |
-| OIDC issuer | `https://token.actions.githubusercontent.com` |
-
-### Release notification
-
-After the GitHub release exists, the workflow dispatches
-`social-harness-released` to `social-harness/deployment` with this
-`client_payload`:
-
-```json
-{
-  "version": "<calendar version>",
-  "daemon": "ghcr.io/social-harness/daemon@sha256:<digest>"
-}
-```
-
-The digest identifies the signed index. Events may repeat or arrive out of
-order, so a receiver ignores a version that is not newer than the one it
-runs, comparing the version's parts as numbers.

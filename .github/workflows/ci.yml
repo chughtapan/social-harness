@@ -38,10 +38,7 @@ jobs:
         run: pnpm lint
         timeout-minutes: 30
       - run: pnpm format:check
-      - run: pnpm docs:check
-      - run: pnpm nx run @social-harness/social-harness:test:release
-
-  test:
+      - run: pnpm docs:checktest:
     runs-on: ubuntu-latest
     timeout-minutes: 20
     environment: *nx-cache-environment
@@ -103,9 +100,7 @@ jobs:
     permissions:
       contents: read
     steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      # The image a release tags builds here before it merges.
-      - name: Build the daemon image for amd64
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1- name: Build the daemon image for amd64
         run: |
           docker buildx build --platform linux/amd64 --load \
             --tag ghcr.io/social-harness/daemon:ci .

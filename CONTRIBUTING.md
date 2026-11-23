@@ -98,5 +98,3 @@ checks ran. Link the issue when one exists.
 
 For a vulnerability, use the
 [security reporting procedure](SECURITY.md).
-Maintainer release behavior is defined in
-[Publication and versions](docs/spec.md#publication-and-versions).

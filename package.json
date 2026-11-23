@@ -5,11 +5,11 @@
   "license": "Apache-2.0",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/social-harness/social-harness.git"
+    "url": "git+https://github.com/chughtapan/social-harness.git"
   },
-  "homepage": "https://github.com/social-harness/social-harness#readme",
+  "homepage": "https://github.com/chughtapan/social-harness#readme",
   "bugs": {
-    "url": "https://github.com/social-harness/social-harness/issues"
+    "url": "https://github.com/chughtapan/social-harness/issues"
   },
   "type": "module",
   "engines": {
@@ -116,10 +116,6 @@
         "inputs": [
           "workspaceFiles"
         ]
-      },
-      "test:release": {
-        "command": "bash scripts/compute-next-version.test.sh",
-        "cache": false
       }
     }
   },
