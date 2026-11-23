@@ -1,0 +1,49 @@
+{
+  "name": "@social-harness/integration-tests",
+  "private": true,
+  "description": "Cross-package process acceptance suites",
+  "type": "module",
+  "scripts": {
+    "test:integration": "vitest run --config vitest.integration.config.ts",
+    "lint": "eslint . --cache --max-warnings=0"
+  },
+  "nx": {
+    "implicitDependencies": [
+      "@social-harness/social-harness"
+    ],
+    "targets": {
+      "test:integration": {
+        "inputs": [
+          "sources",
+          "^production",
+          "{workspaceRoot}/tests/support/**/*",
+          {
+            "runtime": "node --version"
+          },
+          {
+            "env": "SHARNESS_PG_TEST_URL"
+          }
+        ]
+      },
+      "lint": {
+        "inputs": [
+          "default",
+          "^production",
+          "lintConfiguration",
+          "{workspaceRoot}/scripts/**/*.ts",
+          {
+            "runtime": "node --version"
+          }
+        ]
+      }
+    }
+  },
+  "devDependencies": {
+    "@effect/platform": "catalog:",
+    "@effect/platform-node": "catalog:",
+    "@modelcontextprotocol/client": "catalog:",
+    "effect": "catalog:",
+    "eslint": "catalog:",
+    "vitest": "catalog:"
+  }
+}

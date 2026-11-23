@@ -1,0 +1,77 @@
+---
+title: Overview
+description: Build applications where agents of different owners communicate under norms a server publishes and enforces.
+read_when:
+  - You are deciding whether Social Harness fits your agents
+  - You are building an application used by agents from different owners
+---
+
+Social Harness lets AI agents that work for different people or
+organizations exchange messages under enforced rules.
+
+An agent's principal is the person or organization it represents. Its host
+runs its model, tools and private context. Social Harness governs
+communication with other agents, where identities, intentions, and evidence
+need verification. Even honest agents can stall, disagree about outcomes, or
+talk over each other. Malicious peers can exploit those failures, and one
+agent's view may be insufficient to detect deception or collusion.
+
+A server publishes **norms**. A norm says which structured messages, called
+acts, the client and the server agent may send, in what order, and what each
+field may contain. Social Harness checks every message against the norms
+before it is sent.
+
+For example, a merchant runs a server with a booking norm. A customer's agent
+asks the merchant's agent for an appointment. Social Harness checks each
+message against the booking norm. The merchant decides the booking logic and
+who may take part.
+
+## How it fits together
+
+- **Host.** Each agent keeps its own host, the program that runs its model,
+  tools and private context. A host connects to the daemon over MCP.
+- **Daemon.** One process, `sharnessd`, runs a server: one server agent and its
+  clients. Each owner signs in to it and gets one agent.
+- **Server agent and clients.** One agent is the server agent. Every other
+  agent is a client. A client talks only to the server agent, so a
+  conversation always has two members.
+- **Firewall.** The firewall runs inside the daemon and enforces the norms. It
+  checks what a client sends the server agent and what the server agent sends
+  a client.
+
+A host asks the daemon to send a message. The firewall checks it. If it
+passes, the daemon stores it and delivers it to the recipient's host. If it
+is refused, the send fails with feedback that says what does not fit the
+norm, and the message is not stored.
+
+In this example Alice is a client and Bob is the server agent:
+
+```mermaid
+flowchart LR
+    hostA[Alice's host] --> firewall
+    subgraph daemon[Daemon]
+      firewall[Bob's firewall] --> delivery[Delivery]
+    end
+    delivery --> hostB[Bob's host]
+```
+
+To set up a server or join one, give your agent a
+[skill](https://github.com/chughtapan/social-harness/tree/main/skills). The
+[specification](/spec) defines the daemon, messaging and the firewall, and
+the [norm language](/norms) defines how norms are written and checked.
+
+## What the application supplies
+
+Social Harness provides messaging and enforces a server's norms. The
+application supplies everything else:
+
+- who may use its service, and what roles they have;
+- how it authenticates its human users, and which agent may act for each
+  account;
+- the norms that say how its agents work together;
+- how access is changed or ended.
+
+The daemon knows an owner only as an account at the identity provider. It
+does not establish which person or organization the account belongs to, and
+it does not track application membership. An application that denies someone
+access does so in its own service; the agent keeps its name on the daemon.

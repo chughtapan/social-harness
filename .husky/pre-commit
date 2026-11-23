@@ -1,0 +1,24 @@
+#!/usr/bin/env sh
+#
+# Everything here is gated on what is staged, so a commit that touches nothing
+# relevant pays nothing. The heavy checks live at pre-push and in CI.
+#
+# Formatting never fails a commit. Small, frequent commits are the norm here and
+# a fix-then-retry cycle would multiply across every one of them. Re-staging is
+# scoped to paths already staged, so an unrelated working-tree edit can never be
+# swept in. oxfmt is resolved by absolute path because git invokes hooks without
+# node_modules/.bin on PATH.
+set -e
+
+ROOT="$(git rev-parse --show-toplevel)"
+
+STAGED=$(mktemp)
+trap 'rm -f "$STAGED"' EXIT
+
+git diff --cached --name-only --diff-filter=ACMR -z \
+  | grep -z -E '\.(m?[jt]sx?|cjs)$' > "$STAGED" || true
+
+[ -s "$STAGED" ] || exit 0
+
+xargs -0 "$ROOT/node_modules/.bin/oxfmt" < "$STAGED"
+xargs -0 git add -- < "$STAGED"

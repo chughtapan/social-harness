@@ -1,0 +1,247 @@
+/**
+ * @file The repository's one ESLint flat configuration. Each section names
+ * the paths it covers: the root package's `src/` and test fixtures, the root
+ * modules with `scripts/`, and the integration tests.
+ */
+import comments from "@eslint-community/eslint-plugin-eslint-comments";
+import { plugin as guard } from "eslint-plugin-agent-code-guard";
+
+type StrictRules = ReturnType<typeof makeStrictRules>;
+type GuardPreset = typeof guard.configs.documentation;
+
+/** Build outputs, dependencies and agent state are not linted. */
+const globalIgnores = {
+  ignores: ["**/dist/**", "**/node_modules/**", "**/*.d.ts", ".claude/**"],
+};
+
+/** ESLint and Vitest load a configuration module through its default export. */
+const configModuleRules = {
+  files: ["*.config.ts", "**/*.config.ts"],
+  rules: { "import-x/no-default-export": "off" },
+};
+
+/** Per-file line ceiling, counting neither blanks nor comments. */
+const DEFAULT_MAX_LINES = 1050;
+
+const PACKAGE_SOURCE_FILES = ["src/**/*.ts", "tests/support/**/*.ts", "*.ts"];
+
+/** Signatures describe parameters and returns; prose adds caller obligations. */
+const documentationRules = {
+  "jsdoc/require-param": "off",
+  "jsdoc/require-returns": "off",
+};
+
+/** One TypeScript project covers every linted file. */
+const languageOptions = {
+  ...guard.configs.strict.languageOptions,
+  globals: {
+    AbortController: "readonly",
+    AbortSignal: "readonly",
+    Buffer: "readonly",
+    Response: "readonly",
+    TextDecoder: "readonly",
+    TextEncoder: "readonly",
+    URL: "readonly",
+    clearInterval: "readonly",
+    clearTimeout: "readonly",
+    console: "readonly",
+    crypto: "readonly",
+    fetch: "readonly",
+    process: "readonly",
+    setInterval: "readonly",
+    setTimeout: "readonly",
+  },
+  parserOptions: {
+    project: ["./tsconfig.check.json"],
+    tsconfigRootDir: import.meta.dirname,
+  },
+};
+
+/** Rules for `// eslint-disable` comments in every TypeScript file. */
+const disableCommentRules = {
+  files: ["**/*.ts"],
+  languageOptions,
+  plugins: { "eslint-comments": comments },
+  rules: {
+    "eslint-comments/require-description": ["error", { ignore: [] }],
+  },
+};
+
+/**
+ * A package's sections, with paths relative to the package: the strict preset
+ * on its sources and root modules, plus the barrel-documentation preset.
+ */
+function packageSections() {
+  return [
+    makeStrictBlock(PACKAGE_SOURCE_FILES, makeStrictRules()),
+    {
+      ...makePresetBlock(["src/**/index.ts"], guard.configs.documentation),
+      rules: { ...guard.configs.documentation.rules, ...documentationRules },
+    },
+  ];
+}
+
+/**
+ * The strict preset on the root modules and the Node-run scripts under
+ * `scripts/`.
+ */
+function rootSection() {
+  return makeStrictBlock(["*.ts", "scripts/**/*.ts"], makeStrictRules());
+}
+
+/** Sections for process suites: the strict preset on every TypeScript file plus the integration-test preset on specs. */
+function integrationSections() {
+  return [
+    makeStrictBlock(["**/*.ts"], makeStrictRules()),
+    makePresetBlock(["**/*.spec.ts"], guard.configs.integrationTests),
+    {
+      files: ["**/*.spec.ts"],
+      rules: { "agent-code-guard/no-example-only-tests": "off" },
+    },
+  ];
+}
+
+function makeStrictRules() {
+  return {
+    ...guard.configs.strict.rules,
+    "max-lines-per-function": [
+      "error",
+      { max: 120, skipBlankLines: true, skipComments: true, IIFEs: true },
+    ],
+    "sonarjs/max-lines-per-function": "off",
+    "max-statements": "off",
+    complexity: ["error", { max: 16 }],
+    "sonarjs/cyclomatic-complexity": "off",
+    "sonarjs/cognitive-complexity": ["error", 20],
+    "max-nested-callbacks": ["error", 5],
+    "agent-code-guard/no-vacuous-jsdoc": "error",
+    ...documentationRules,
+    "agent-code-guard/prefer-stepdown-function-order": "error",
+    "agent-code-guard/require-stable-file-shell": "error",
+    // The architecture analyzer owns deterministic file, folder, domain, and
+    // workspace-package cycle detection in one cached whole-project pass.
+    "import-x/no-cycle": "off",
+    // The TypeScript-aware rule reports the same deprecated-symbol uses without
+    // repeating Sonar's expensive type walk for every file.
+    "sonarjs/deprecation": "off",
+    "@typescript-eslint/naming-convention": [
+      "error",
+      {
+        selector: ["classProperty", "objectLiteralProperty", "typeProperty"],
+        modifiers: ["requiresQuotes"],
+        format: null,
+      },
+      // An Effect schema is a constant that shares its PascalCase name with the type it decodes.
+      {
+        selector: "variable",
+        modifiers: ["const", "global"],
+        format: ["camelCase", "PascalCase", "UPPER_CASE"],
+        leadingUnderscore: "forbid",
+        trailingUnderscore: "forbid",
+      },
+      ...presetEntryOptions("@typescript-eslint/naming-convention"),
+    ],
+    // TypeScript reports a real redeclaration; this rule also reports a schema and the type that shares its name.
+    "@typescript-eslint/no-redeclare": "off",
+    "@typescript-eslint/no-invalid-void-type": [
+      "error",
+      {
+        allowAsThisParameter: false,
+        allowInGenericTypeArguments: [
+          "Deferred.Deferred",
+          "Effect.Effect",
+          "Either.Either",
+          "Exit.Exit",
+          "Fiber.RuntimeFiber",
+        ],
+      },
+    ],
+    "max-lines": [
+      "error",
+      { max: DEFAULT_MAX_LINES, skipBlankLines: true, skipComments: true },
+    ],
+    // Disabled: knip runs once at the workspace root (whole-monorepo)
+    // via `pnpm lint`; per-package lint scripts run eslint only.
+    "agent-code-guard/require-knip-in-lint": "off",
+    // Effect and Option constructors intentionally return distinct closed variants
+    // through one declared union. SonarJS treats those variants as inconsistent
+    // return types even when TypeScript proves the public return type.
+    "sonarjs/function-return-type": "off",
+    // TypeScript's control-flow analysis owns these checks. SonarJS loses the
+    // established narrowing for Effect Schema unions and generic array methods,
+    // so it reports errors for statically typed object and string operands.
+    "sonarjs/in-operator-type-error": "off",
+    "sonarjs/argument-type": "off",
+    // `sharnessd` takes `--help` or nothing, which needs no argument parser.
+    "agent-code-guard/prefer-effect-platform": ["error", { disable: ["argv"] }],
+  };
+}
+
+/**
+ * The options a strict preset rule entry carries after its severity, so a
+ * workspace override can extend the preset instead of replacing it.
+ */
+function presetEntryOptions(rule: string): readonly unknown[] {
+  const entry = guard.configs.strict.rules[rule];
+  return Array.isArray(entry) ? entry.slice(1) : [];
+}
+
+function makeStrictBlock(files: readonly string[], rules: StrictRules) {
+  return {
+    files: [...files],
+    languageOptions,
+    plugins: guard.configs.strict.plugins,
+    settings: guard.configs.strict.settings,
+    rules,
+  };
+}
+
+function makePresetBlock(files: readonly string[], preset: GuardPreset) {
+  return {
+    files: [...files],
+    languageOptions,
+    plugins: preset.plugins,
+    rules: preset.rules,
+  };
+}
+
+/** A spec asserts the literal reasons, codes and names that are the contract under test. */
+const specAssertionRules = {
+  files: ["**/*.spec.ts"],
+  rules: { "agent-code-guard/no-hardcoded-assertion-literals": "off" },
+};
+
+/**
+ * Places a project's sections at its folder: every `files` and `ignores`
+ * pattern is read relative to `folder`.
+ */
+function at<Section extends object>(
+  folder: string,
+  sections: readonly Section[],
+): Section[] {
+  const within = (patterns: readonly string[]) =>
+    patterns.map((pattern) => `${folder}/${pattern}`);
+  return sections.map((section) => ({
+    ...section,
+    ...("files" in section && isPatterns(section.files)
+      ? { files: within(section.files) }
+      : {}),
+    ...("ignores" in section && isPatterns(section.ignores)
+      ? { ignores: within(section.ignores) }
+      : {}),
+  }));
+}
+
+function isPatterns(value: unknown): value is readonly string[] {
+  return Array.isArray(value);
+}
+
+export default [
+  globalIgnores,
+  rootSection(),
+  disableCommentRules,
+  ...packageSections(),
+  ...at("tests/integration", integrationSections()),
+  configModuleRules,
+  specAssertionRules,
+];

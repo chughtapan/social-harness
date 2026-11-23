@@ -1,0 +1,110 @@
+{
+  "$schema": "./node_modules/nx/schemas/nx-schema.json",
+  "namedInputs": {
+    "default": [
+      "{projectRoot}/**/*",
+      "sharedGlobals"
+    ],
+    "production": [
+      "default",
+      "!{projectRoot}/**/*.spec.ts",
+      "!{projectRoot}/tests/**",
+      "!{projectRoot}/vitest.integration.config.ts",
+      "!{projectRoot}/safer-architecture.config.json"
+    ],
+    "sources": [
+      "default",
+      "!{projectRoot}/safer-architecture.config.json"
+    ],
+    "lintConfiguration": [
+      "{workspaceRoot}/eslint.config.ts",
+      "{workspaceRoot}/knip.json",
+      "{workspaceRoot}/tsconfig.check.json"
+    ],
+    "workspaceFiles": [
+      "{workspaceRoot}/**/*"
+    ],
+    "sharedGlobals": [
+      "{workspaceRoot}/tsconfig.json",
+      "{workspaceRoot}/pnpm-lock.yaml",
+      "{workspaceRoot}/pnpm-workspace.yaml",
+      "{workspaceRoot}/.npmrc",
+      "{workspaceRoot}/package.json"
+    ]
+  },
+  "targetDefaults": {
+    "build": {
+      "dependsOn": [
+        "^build"
+      ],
+      "inputs": [
+        "production",
+        "^production"
+      ],
+      "outputs": [
+        "{projectRoot}/dist"
+      ],
+      "cache": true
+    },
+    "typecheck": {
+      "inputs": [
+        "{workspaceRoot}/**/*.ts",
+        "{workspaceRoot}/tsconfig.check.json",
+        "sharedGlobals"
+      ],
+      "outputs": [
+        "{workspaceRoot}/tsconfig.check.tsbuildinfo"
+      ],
+      "cache": true
+    },
+    "test": {
+      "dependsOn": [
+        "^build"
+      ],
+      "inputs": [
+        "sources",
+        "^production",
+        "{workspaceRoot}/vitest.config.ts"
+      ],
+      "cache": true
+    },
+    "test:integration": {
+      "dependsOn": [
+        "^build"
+      ],
+      "inputs": [
+        "sources",
+        "^production",
+        {
+          "runtime": "node --version"
+        }
+      ],
+      "cache": true
+    },
+    "lint": {
+      "dependsOn": [
+        "^build"
+      ],
+      "inputs": [
+        "default",
+        "^production",
+        "lintConfiguration"
+      ],
+      "cache": true
+    },
+    "arch:check": {
+      "options": {
+        "env": {
+          "NODE_OPTIONS": "--max-old-space-size=8192"
+        }
+      },
+      "inputs": [
+        "default",
+        "{projectRoot}/safer-architecture.config.json"
+      ],
+      "cache": true
+    }
+  },
+  "defaultBase": "main",
+  "analytics": false
+}

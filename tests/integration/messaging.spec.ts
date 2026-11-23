@@ -1,0 +1,165 @@
+/** @file One server process delivers between its server agent and a client, in one order for both. */
+
+import { Effect, Fiber, Stream } from "effect";
+import { expect, it } from "vitest";
+import { callTool, send } from "../support/host.js";
+import {
+  INBOX_EVENT,
+  inboxStream,
+  processTrace,
+  received,
+  SERVER_AGENT_OWNER,
+  sharedServer,
+} from "./server-fixture.js";
+
+/** Each trace starts one server. */
+const PROCESS_TEST_TIMEOUT_MS = 120_000;
+
+/** The server agent and one client of a running server. */
+const serverAndClient = Effect.gen(function* () {
+  const sharnessd = yield* sharedServer();
+  yield* sharnessd.start();
+  const server = yield* sharnessd.signInAs(SERVER_AGENT_OWNER);
+  const client = yield* sharnessd.signInAs("bob");
+  return { server, client };
+});
+
+const greeting = "hello from the server agent";
+const reply = "reply from the server agent";
+const opening = "opening from the client";
+
+it(
+  "delivers between the server agent and a client in both directions and saves one history for both",
+  processTrace(
+    Effect.gen(function* () {
+      const { server, client } = yield* serverAndClient;
+
+      const opened = yield* send(client, { text: opening });
+      expect(yield* received(server, 1)).toEqual([
+        {
+          msgId: opened.msgId,
+          author: client.name,
+          recipient: server.name,
+          text: opening,
+        },
+      ]);
+      const replied = yield* send(server, {
+        to: client.name,
+        text: greeting,
+        replyToMsgId: opened.msgId,
+      });
+      expect(yield* received(client, 1)).toEqual([
+        {
+          msgId: replied.msgId,
+          replyToMsgId: opened.msgId,
+          author: server.name,
+          recipient: client.name,
+          text: greeting,
+        },
+      ]);
+
+      const serverHistory = yield* callTool(server, "read_conversation", {
+        with: client.name,
+      });
+      expect(serverHistory.entries.map(({ message }) => message.msgId)).toEqual(
+        [opened.msgId, replied.msgId],
+      );
+      expect(yield* callTool(client, "read_conversation")).toEqual(
+        serverHistory,
+      );
+      expect(yield* callTool(server, "list_conversations")).toEqual({
+        clients: [client.name],
+      });
+    }),
+  ),
+  PROCESS_TEST_TIMEOUT_MS,
+);
+
+it(
+  "offers the inbox event by poll, push and webhook, and delivers a polling host the entries after its cursor",
+  processTrace(
+    Effect.gen(function* () {
+      const sharnessd = yield* sharedServer();
+      yield* sharnessd.start();
+      const server = yield* sharnessd.signInAs(SERVER_AGENT_OWNER);
+      const client = yield* sharnessd.signInAs("bob");
+      yield* send(client, { text: opening });
+      const listed = yield* Effect.tryPromise(() => client.events.list());
+      expect(listed.events).toMatchObject([
+        { name: INBOX_EVENT, delivery: ["poll", "push", "webhook"] },
+      ]);
+      const first = yield* send(server, { to: client.name, text: greeting });
+      const second = yield* send(server, { to: client.name, text: reply });
+      const polled = yield* inboxStream(client, "0", "poll").pipe(
+        Stream.take(2),
+        Stream.runCollect,
+      );
+      expect([...polled].map((entry) => entry.message.msgId)).toEqual([
+        first.msgId,
+        second.msgId,
+      ]);
+    }),
+  ),
+  PROCESS_TEST_TIMEOUT_MS,
+);
+
+it(
+  "holds a waiting receive_messages until an entry becomes readable after its cursor, and returns none when the wait ends",
+  processTrace(
+    Effect.gen(function* () {
+      const { server, client } = yield* serverAndClient;
+      const receive = (cursor: string, wait: number) =>
+        callTool(client, "receive_messages", { cursor, wait });
+      yield* send(client, { text: opening });
+      const start = yield* callTool(client, "receive_messages");
+      const waiting = yield* Effect.fork(receive(start.nextCursor, 50));
+      const sent = yield* send(server, { to: client.name, text: greeting });
+      const woken = yield* Fiber.join(waiting);
+      expect(woken.entries.map((entry) => entry.message.msgId)).toEqual([
+        sent.msgId,
+      ]);
+      expect(yield* receive(woken.nextCursor, 0.2)).toEqual({
+        entries: [],
+        nextCursor: woken.nextCursor,
+      });
+    }),
+  ),
+  PROCESS_TEST_TIMEOUT_MS,
+);
+
+/** How many times the server agent and the client send each other two messages at once. */
+const CROSSING_ROUNDS = 8;
+
+it(
+  "completes the messages the server agent and a client send each other at once and saves them in one order for both",
+  processTrace(
+    Effect.gen(function* () {
+      const { server, client } = yield* serverAndClient;
+      const text = "a crossing message";
+      yield* send(client, { text: opening });
+      const toClient = send(server, { to: client.name, text });
+      const toServer = send(client, { text });
+      for (let round = 0; round < CROSSING_ROUNDS; round += 1) {
+        yield* Effect.all([toClient, toServer, toClient, toServer], {
+          concurrency: 4,
+        });
+      }
+      for (const participant of [server, client]) {
+        const delivered = yield* received(participant, 2 * CROSSING_ROUNDS);
+        expect(new Set(delivered.map((message) => message.msgId)).size).toBe(
+          2 * CROSSING_ROUNDS,
+        );
+      }
+      const serverSaved = yield* callTool(server, "read_conversation", {
+        with: client.name,
+      });
+      const clientSaved = yield* callTool(client, "read_conversation");
+      const order = serverSaved.entries.map((entry) => entry.message.msgId);
+      expect(order).toHaveLength(4 * CROSSING_ROUNDS + 1);
+      expect(clientSaved.entries.map((entry) => entry.message.msgId)).toEqual(
+        order,
+      );
+    }),
+  ),
+  PROCESS_TEST_TIMEOUT_MS,
+);

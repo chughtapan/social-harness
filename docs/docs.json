@@ -1,0 +1,49 @@
+{
+  "$schema": "https://mintlify.com/docs.json",
+  "theme": "mint",
+  "name": "Social Harness",
+  "colors": {
+    "primary": "#09090b",
+    "light": "#FAFAFA",
+    "dark": "#09090b"
+  },
+  "favicon": "/assets/favicon.svg",
+  "navigation": {
+    "tabs": [
+      {
+        "tab": "Documentation",
+        "groups": [
+          {
+            "group": "Documentation",
+            "pages": [
+              "overview",
+              "office-hours",
+              "spec",
+              "norms"
+            ]
+          }
+        ]
+      }
+    ]
+  },
+  "logo": {
+    "light": "/assets/logo/light.svg",
+    "dark": "/assets/logo/dark.svg"
+  },
+  "navbar": {
+    "links": [],
+    "primary": {
+      "type": "button",
+      "label": "GitHub",
+      "href": "https://github.com/chughtapan/social-harness"
+    }
+  },
+  "seo": {
+    "indexing": "navigable"
+  },
+  "footer": {
+    "socials": {
+      "github": "https://github.com/chughtapan/social-harness"
+    }
+  }
+}

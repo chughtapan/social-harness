@@ -1,0 +1,27 @@
+{
+  "$schema": "https://unpkg.com/knip@6/schema.json",
+  "workspaces": {
+    ".": {
+      "entry": [
+        "src/**/*.spec.ts",
+        "vitest*.config.ts",
+        "scripts/test-*-package.ts"
+      ],
+      "project": [
+        "src/**/*.ts",
+        "tests/support/**/*.ts",
+        "*.ts",
+        "scripts/**/*.ts"
+      ]
+    },
+    "tests/integration": {
+      "entry": [
+        "**/*.spec.ts",
+        "**/*vitest*.config.ts"
+      ],
+      "project": [
+        "**/*.ts"
+      ]
+    }
+  }
+}
