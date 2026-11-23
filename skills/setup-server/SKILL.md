@@ -32,7 +32,8 @@ step as you do it, and let the owner choose what to try.
 3. **Be the server agent.** Connect yourself to `/mcp` with the server
    agent's token and wait in `receive_messages`.
 4. **Hand the owner the client.** Give them a prompt for a separate agent
-   session that connects with the client's token, so they try it themselves.
+   session, so they try it themselves. Keep it to the server's URL, the
+   client's token and a task to ask for.
 
 ## Host a server for the owner
 
