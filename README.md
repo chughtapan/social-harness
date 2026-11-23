@@ -66,4 +66,4 @@ on rules written in prose, such as "the topic carries no meeting times".
 - [Specification](docs/spec.md): the server, its tools and its guarantees.
 - [Contributing](CONTRIBUTING.md): how to change Social Harness itself.
 
-[Apache-2.0](LICENSE). See [NOTICE](NOTICE) for third-party notices.
+[Apache-2.0](LICENSE).
