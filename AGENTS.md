@@ -20,15 +20,8 @@ owner's agent and delivers their messages. npm packages use the `@social-harness
 Executables use `sharness*`, environment variables use `SHARNESS_*`, and
 protocol namespaces use `org.social-harness/*`.
 
-The daemon image is built from the root
-`Dockerfile`; private product overlays stay in deployment. Image publication follows
-[Publication and versions](docs/spec.md#publication-and-versions).
-
-`main` is the only track; npm publication membership and versioning follow
-[Publication and versions](docs/spec.md#publication-and-versions).
-Releases follow the same section: a merge releases after CI passes. Release
-notes are built from pull request titles, so a title says what changed for a
-user.
+The daemon image is built from the root `Dockerfile`. `main` is the only
+track. A pull request title says what changed for a user.
 
 ## The `@social-harness/social-harness` package
 

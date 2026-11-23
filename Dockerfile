@@ -13,7 +13,7 @@ RUN pnpm nx run @social-harness/social-harness:build
 RUN pnpm deploy --filter @social-harness/social-harness --prod --legacy --ignore-scripts /deploy
 
 FROM node:24.18.0-bookworm-slim@sha256:6f7b03f7c2c8e2e784dcf9295400527b9b1270fd37b7e9a7285cf83b6951452d
-LABEL org.opencontainers.image.source="https://github.com/social-harness/social-harness"
+LABEL org.opencontainers.image.source="https://github.com/chughtapan/social-harness"
 LABEL org.opencontainers.image.description="Social Harness server"
 COPY --from=build --chown=node:node /deploy/ /opt/social-harness/
 USER node

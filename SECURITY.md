@@ -1,13 +1,11 @@
 # Security policy
 
-This page explains which Social Harness releases receive security fixes and
-how to report a vulnerability privately.
+This page explains where security fixes land and how to report a
+vulnerability privately.
 
 ## Supported versions
 
-Only the latest calendar release published from `main` receives security
-fixes. Fixes land on `main` and ship in the next release; older releases are
-not patched.
+Security fixes land on `main`. Earlier commits are not patched.
 
 ## Report a vulnerability
 
@@ -30,4 +28,4 @@ line that starts with `[social-harness security]`.
 
 The maintainer acknowledges a report within five business days, then shares
 an assessment and a plan for a fix. Please keep the report private until a
-fixed release is published and the maintainer agrees to disclosure.
+fix is on `main` and the maintainer agrees to disclosure.

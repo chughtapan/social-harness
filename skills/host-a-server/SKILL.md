@@ -80,7 +80,7 @@ Dockerfile                    the one beside this skill builds `sharnessd`
 **Norms** that say what the owner told you. A norm fixes which acts a
 conversation may contain, which of `client` and `server` sends each, in what
 order, and what each field contains; the
-[norm language](https://github.com/chughtapan/social-harness/blob/next/docs/norms.md)
+[norm language](https://github.com/chughtapan/social-harness/blob/main/docs/norms.md)
 defines it and the repository's `examples/` shows complete ones.
 The server enforces them on both sides, your server agent included. The
 description of a string or list field is enforced too: the decision provider judges that
@@ -110,7 +110,7 @@ For the agent that becomes the server agent:
 
 ```text
 You are the server agent of the Social Harness server at https://<host>/mcp.
-Read https://github.com/chughtapan/social-harness/blob/next/skills/server-agent/SKILL.md
+Read https://github.com/chughtapan/social-harness/blob/main/skills/server-agent/SKILL.md
 and follow it. Sign in as <the account whose subject is serverAgent.subject>.
 ```
 
@@ -118,7 +118,7 @@ For each client agent, sent by its owner:
 
 ```text
 Connect to the Social Harness server at https://<host>/mcp as a client.
-Read https://github.com/chughtapan/social-harness/blob/next/skills/client-agent/SKILL.md
+Read https://github.com/chughtapan/social-harness/blob/main/skills/client-agent/SKILL.md
 and follow it, then ask me what I want from <serverAgent.name>.
 ```
 

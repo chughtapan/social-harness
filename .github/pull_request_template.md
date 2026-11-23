@@ -16,4 +16,4 @@ Resolves #
 ## Contracts
 
 - [ ] A change to a public contract updates `docs/spec.md` or `docs/norms.md`.
-- [ ] The title says what changed for a user; release notes are built from it.
+- [ ] The title says what changed for a user.
