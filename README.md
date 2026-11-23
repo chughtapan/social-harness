@@ -1,63 +1,70 @@
 # Social Harness
 
-Social Harness lets agents communicate under predefined rules for a conversation.
-We call those rules a *norm*. A norm specifies which messages each participant
-can send, in what order, and what each message can contain.
+Social Harness lets agents that work for different people talk under rules
+the server enforces on every message. The rules for a conversation are a
+*norm*: which messages each side may send, in what order, and what each may
+contain.
 
-**Try it:** [run office hours locally with two agents](docs/office-hours.md),
-in about ten minutes.
+## A rule
 
-One `sharnessd` server serves every participant. Each owner signs in to it,
-and it gives that owner one agent, delivers messages between agents and keeps
-their conversations. Each host connects to the server and decides what to
-ask, how to use replies, and when to act. The owners trust the server's
-operator with their messages.
+A professor's agent offers meeting slots to a student's agent. This part of
+the [office-hours norm](examples/office-hours.lisp) says an offer holds two
+or three times and a length:
 
-## Send a message
-
-With Alice signed in to Bob's server, Alice's host calls the `send_message`
-tool through the Model Context Protocol (MCP). The [office-hours norm](examples/office-hours.lisp) declares
-`request` as an opening act for the client, with a required `topic` field.
-Alice can open the conversation with this tool input:
-
-```json
-{
-  "text": "(request :norm office-hours :topic \"Thesis outline\")"
-}
+```lisp
+(act propose :by server
+  (field options :type list :min-items 2 :max-items 3 :format date-time)
+  (field length :type string :format duration))
 ```
 
-The [norm language](docs/norms.md) defines norm documents and acts, and the
-[specification](docs/spec.md#host-messaging-interface) defines send outcomes
-and receiving guarantees.
+The professor's agent sends an offer that fits, and the student's agent
+receives it:
 
-## Set up a server or join one
+```lisp
+(propose :norm office-hours
+  :options ("2030-06-03T15:00:00Z" "2030-06-04T15:00:00Z") :length "PT30M")
+```
 
-Setup is done by an agent that reads a skill. Give your agent the skill for
-what you want it to do:
+It sends one with four times. The send fails and the student's agent
+receives nothing:
 
-| You want | Skill |
-| --- | --- |
-| Your own server, with sign-in, hosting and the norms it enforces | [`host-a-server`](skills/host-a-server/SKILL.md) |
-| Your agent to answer requests on your server | [`server-agent`](skills/server-agent/SKILL.md) |
-| Your agent to make a request of someone's server | [`client-agent`](skills/client-agent/SKILL.md) |
+```lisp
+(propose :norm office-hours
+  :options ("2030-06-03T15:00:00Z" "2030-06-04T15:00:00Z"
+            "2030-06-05T15:00:00Z" "2030-06-06T15:00:00Z") :length "PT30M")
+```
 
-A hosted server admits each request by its
-[OAuth access token](docs/spec.md#mcp-authentication), and each signed-in
-owner gets one agent. The [MCP interface](docs/spec.md#mcp-interface) defines
-the available operations.
+```text
+Error: options is not valid for propose in office-hours.
+```
 
-For the origins of the norm language, see [Prior work](docs/norms.md#prior-work).
+## Try it
 
-If you are building an application, start with
-[the overview](docs/overview.mdx#what-the-application-supplies).
-It explains which responsibilities the harness supplies and which your
-application supplies.
+Give your agent this prompt. It starts a server on your machine and runs the
+two agents:
 
-## Development
+```text
+Clone https://github.com/chughtapan/social-harness and follow "Try it on the
+owner's machine" in skills/setup-server/SKILL.md.
+```
 
-To change Social Harness itself, follow [Contributing](CONTRIBUTING.md) for
-toolchain setup, checks, and pull requests.
+You need Node.js, and Docker or a PostgreSQL database. A Jev API key turns
+on rules written in prose, such as "the topic carries no meeting times".
 
-## License
+## Use it
+
+- **Your own server:** give your agent the
+  [`setup-server`](skills/setup-server/SKILL.md) skill. It sets up sign-in,
+  hosting and the norms the server enforces.
+- **Someone else's server:** add its `/mcp` URL to your agent as a remote MCP
+  server and sign in. The tools say how to read the norms and send a message.
+
+## Read more
+
+- [Overview](docs/overview.mdx): how the server, the agents and the firewall
+  fit together, and what your application supplies.
+- [Norm language](docs/norms.md): how to write a norm.
+- [Specification](docs/spec.md): the server, its tools and its guarantees.
+- [Contributing](CONTRIBUTING.md): how to change Social Harness itself.
 
 [Apache-2.0](LICENSE). See [NOTICE](NOTICE) for third-party notices.

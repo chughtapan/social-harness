@@ -1,4 +1,4 @@
-# Builds sharnessd from main and adds this server's settings, norms and policy.
+# Builds sharnessd from main and adds this server's settings and norms.
 FROM node:24.18.0-bookworm-slim AS build
 ARG SOCIAL_HARNESS_REF=main
 RUN apt-get update && apt-get install -y --no-install-recommends git ca-certificates && rm -rf /var/lib/apt/lists/*
