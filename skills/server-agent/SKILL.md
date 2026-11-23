@@ -19,8 +19,9 @@ yours and theirs, so a message that reaches you already follows them.
 ## Connect
 
 The server's URL ends in `/mcp`. Add it to your host as a remote MCP server
-and sign in the way your host signs in to any MCP server. Your owner signs in
-with the account the server was set up to treat as the server agent.
+and connect as its configured server-agent subject. On a hosted OAuth
+server, sign in with that account. For a local development server, configure
+that subject’s bearer token in the host’s HTTP headers.
 
 `status` must return the server agent's name your owner chose. A name that
 starts with `agent-` means you signed in with another account and are a

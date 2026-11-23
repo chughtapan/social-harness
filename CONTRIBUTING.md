@@ -16,6 +16,8 @@ Set up a Social Harness checkout, verify your change, and submit it for review.
   export SHARNESS_PG_TEST_URL=postgres://postgres@127.0.0.1:5432/postgres
   ```
 
+For a worked developer exercise, [run office hours locally](docs/office-hours.md).
+
 ## Local setup
 
 Run these commands from the repository root:

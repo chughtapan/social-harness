@@ -5,6 +5,8 @@
  * database.
  */
 
+import { FileSystem } from "@effect/platform";
+import { NodeFileSystem } from "@effect/platform-node";
 import { scopedLive as it } from "@effect/vitest";
 import {
   Array as Arr,
@@ -16,6 +18,7 @@ import {
   Order,
   Schema,
 } from "effect";
+import { fileURLToPath } from "node:url";
 import { expect } from "vitest";
 import type { DecisionRequest } from "./decision-provider.js";
 import type { Firewall } from "./firewall.js";
@@ -676,3 +679,58 @@ it("gives messages stored at the same time distinct places in their recipient's 
     expect(new Set(read.ids)).toEqual(new Set(sent));
     expect(read.nextCursor).toBe("12");
   }));
+
+it("delivers the six office-hours acts and refuses a check-in before the hold ends", () =>
+  Effect.gen(function* () {
+    const fs = yield* FileSystem.FileSystem;
+    const document = yield* fs.readFileString(
+      fileURLToPath(new URL("../examples/office-hours.lisp", import.meta.url)),
+    );
+    const norms = Either.getOrThrow(compileNorms([document]));
+    const { alice, bob } = yield* aliceAndBob({
+      norms,
+      provider: { answer: (request) => Effect.succeed(answersTo(request)) },
+    });
+    const request = yield* send(bob, {
+      text: '(request :norm office-hours :topic "Thesis outline")',
+    });
+    const proposal = yield* send(alice, {
+      to: bob.name,
+      replyToMsgId: request.msgId,
+      text: '(propose :norm office-hours :options ("2030-06-03T15:00:00Z" "2030-06-04T15:00:00Z") :length "PT30M")',
+    });
+    const acceptance = yield* send(bob, {
+      replyToMsgId: proposal.msgId,
+      text: '(accept-proposal :norm office-hours :available ("2030-06-04T15:00:00Z"))',
+    });
+    const hold = yield* send(alice, {
+      to: bob.name,
+      replyToMsgId: acceptance.msgId,
+      text: "(agree :norm office-hours :recheck-after 5)",
+    });
+    const checkIn = {
+      replyToMsgId: hold.msgId,
+      text: "(query-if :norm office-hours)",
+    };
+    expect((yield* send(bob, checkIn).pipe(Effect.flip)).reason).toBe(
+      "refused",
+    );
+    yield* Effect.sleep("5 seconds");
+    const query = yield* send(bob, checkIn);
+    const confirm = yield* send(alice, {
+      to: bob.name,
+      replyToMsgId: query.msgId,
+      text: '(confirm :norm office-hours :slot "2030-06-04T15:00:00Z")',
+    });
+    const ids = [request, proposal, acceptance, hold, query, confirm].map(
+      (sent) => sent.msgId,
+    );
+    const clientHistory = yield* callTool(bob, "read_conversation");
+    const serverHistory = yield* callTool(alice, "read_conversation", {
+      with: bob.name,
+    });
+    expect(clientHistory.entries.map((entry) => entry.message.msgId)).toEqual(
+      ids,
+    );
+    expect(serverHistory.entries).toEqual(clientHistory.entries);
+  }).pipe(Effect.provide(NodeFileSystem.layer)));

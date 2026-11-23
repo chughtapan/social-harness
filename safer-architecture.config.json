@@ -11,6 +11,12 @@
   ],
   "domains": [
     {
+      "name": "authentication",
+      "roots": ["src/authentication.ts"],
+      "entrypoints": ["src/authentication.ts"],
+      "reason": "Verifies bearer tokens and identifies their owners"
+    },
+    {
       "name": "messages",
       "roots": [
         "src/messages.ts"

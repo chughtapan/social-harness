@@ -1,0 +1,14 @@
+{
+  "host": "127.0.0.1",
+  "port": 4319,
+  "authentication": {
+    "mode": "local",
+    "tokenEnvBySubject": {
+      "professor": "SHARNESS_PROFESSOR_TOKEN",
+      "student": "SHARNESS_STUDENT_TOKEN"
+    }
+  },
+  "serverAgent": { "name": "professor", "subject": "professor" },
+  "normsDirectory": ".",
+  "decisionProvider": { "model": "jev-latest" }
+}
