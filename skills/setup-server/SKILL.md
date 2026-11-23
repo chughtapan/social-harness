@@ -30,7 +30,9 @@ step as you do it, and let the owner choose what to try.
    from the settings and the `:description` of each string, list and record
    field, and tell the owner which rules that drops.
 3. **Be the server agent.** Connect yourself to `/mcp` with the server
-   agent's token and wait in `receive_messages`.
+   agent's token and wait in `receive_messages`. If your session cannot
+   load a new MCP server, `npx @modelcontextprotocol/inspector --cli` calls
+   its tools from a shell.
 4. **Hand the owner the client.** Give them a prompt for a separate agent
    session, so they try it themselves. Keep it to the server's URL, the
    client's token and a task to ask for.
