@@ -241,6 +241,50 @@ it(
   PROCESS_TEST_TIMEOUT_MS,
 );
 
+it(
+  "maps local bearer tokens to their owners across rotation and refuses unknown credentials",
+  processTrace(
+    Effect.gen(function* () {
+      const daemon = yield* sharedServer();
+      const settings = (student: string) => ({
+        mode: "local",
+        tokenEnvBySubject: {
+          [SERVER_AGENT_OWNER]: "SHARNESS_TEST_PROFESSOR_TOKEN",
+          student,
+        },
+      });
+      yield* daemon.configure({
+        authentication: settings("SHARNESS_TEST_STUDENT_TOKEN"),
+      });
+      const first = yield* daemon.start();
+      expect((yield* daemon.connectWith("test-professor")).name).toBe(
+        SERVER_AGENT_NAME,
+      );
+      const student = yield* daemon.connectWith("test-student");
+      expect(student.name).toMatch(/^agent-[0-9a-f]{24}$/u);
+      yield* stopProcess(first);
+      yield* daemon.configure({
+        authentication: settings("SHARNESS_TEST_ROTATED_TOKEN"),
+      });
+      yield* daemon.start();
+      expect((yield* daemon.connectWith("rotated-student")).name).toBe(
+        student.name,
+      );
+      const http = yield* HttpClient.HttpClient;
+      for (const token of ["", "unknown", "test-student"]) {
+        const request = HttpClientRequest.post(daemon.endpoint);
+        const response = yield* http.execute(
+          token === ""
+            ? request
+            : HttpClientRequest.bearerToken(request, token),
+        );
+        expect(response.status).toBe(401);
+      }
+    }).pipe(Effect.provide(FetchHttpClient.layer)),
+  ),
+  PROCESS_TEST_TIMEOUT_MS,
+);
+
 /** The agent's inbox entries after `cursor`, read again until there is one. Without a cursor the read starts from now. */
 const readInbox = (agent: SignedIn, cursor?: string) =>
   callTool(agent, "receive_messages", { cursor }).pipe(

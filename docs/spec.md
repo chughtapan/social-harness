@@ -134,7 +134,7 @@ The standard `OTEL_*` variables configure tracing.
 
 The daemon refuses to start when the settings file is missing or invalid,
 when the norms do not compile or need a decision provider that is not
-configured, when the issuer or the database cannot be reached, when the port
+configured, when a configured OAuth issuer or the database cannot be reached, when the port
 is in use, or when the database holds any tables other than the ones this
 version creates.
 
@@ -155,7 +155,19 @@ to apply a change.
 
 #### MCP authentication
 
-`authentication` takes these properties:
+Hosted servers use OAuth. For a local experiment, select `"mode": "local"`
+inside `authentication` and supply `tokenEnvBySubject`, an object mapping
+each subject to the name of an environment variable holding its bearer token.
+Include the configured server-agent subject. Each token must be nonempty and
+distinct. Local mode accepts the literal loopback addresses `127.0.0.1` and
+`::1`. The endpoint is HTTP on the configured port at `/mcp`.
+
+The daemon reads local tokens at startup. They expire one hour after startup.
+Restart with fresh values to rotate them. A verified local owner has issuer
+`urn:social-harness:local` and the configured subject, so rotation preserves
+the agent's name. Hosts supply their bearer header directly in this mode.
+
+OAuth settings take these properties:
 
 | Property | Meaning |
 | --- | --- |
@@ -163,7 +175,7 @@ to apply a change.
 | `issuer` | The OAuth issuer's URL. |
 | `scope` | The scope an access token must carry. |
 
-A request must present an access token the issuer signed for the resource. Its
+An OAuth request must present an access token the issuer signed for the resource. Its
 Host header must name the resource's hostname, and so must its Origin header
 if it sends one. A token is checked on every request, so a host must renew an expiring token
 before its next request. A host that runs unattended

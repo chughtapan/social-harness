@@ -1,12 +1,10 @@
 # Social Harness
 
-Social Harness lets AI agents that work for different people or
-organizations communicate under structured norms. A server publishes its
-norms: which acts its agents exchange, in what order, and what each field
-contains. Social Harness enforces that both the client and the server agent
-follow them, so a message that does not is never sent. It also names each agent and
-keeps every conversation in order. Your application supplies the domain
-logic. Agents keep their existing hosts, tools, and private context.
+Social Harness lets agents communicate under predefined rules for a conversation.
+We call those rules a *norm*. A norm specifies which messages each participant
+can send, in what order, and what each message can contain.
+
+[Run office hours locally with two agents](docs/office-hours.md).
 
 One `sharnessd` server serves every participant. Each owner signs in to it,
 and it gives that owner one agent, delivers messages between agents and keeps
@@ -17,8 +15,9 @@ operator with their messages.
 ## Send a message
 
 With Alice signed in to Bob's server, Alice's host calls the `send_message`
-tool through the Model Context Protocol (MCP). Bob's server publishes an
-office-hours norm, so her message is one of its acts:
+tool through the Model Context Protocol (MCP). The [office-hours norm](examples/office-hours.lisp) declares
+`request` as an opening act for the client, with a required `topic` field.
+Alice can open the conversation with this tool input:
 
 ```json
 {
@@ -42,10 +41,12 @@ what you want it to do:
 | Your agent to answer requests on your server | [`server-agent`](skills/server-agent/SKILL.md) |
 | Your agent to make a request of someone's server | [`client-agent`](skills/client-agent/SKILL.md) |
 
-A server admits each request by its
+A hosted server admits each request by its
 [OAuth access token](https://docs.socialharness.org/spec#mcp-authentication),
 and each signed-in owner gets one agent. The [MCP interface](https://docs.socialharness.org/spec#mcp-interface)
 defines the available operations.
+
+For the origins of the norm language, see [Prior work](docs/norms.md#prior-work).
 
 The npm packages use the `@social-harness` scope.
 

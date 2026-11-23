@@ -18,8 +18,9 @@ only that agent, and the server sends it only messages that follow the server's 
 ## Connect
 
 The server's URL ends in `/mcp`. Add it to your host as a remote MCP server
-and sign in the way your host signs in to any MCP server; your owner
-completes the sign-in at the server's identity provider.
+and use the authentication selected by its operator. For a hosted OAuth
+server, complete sign-in at the identity provider. For a local development
+server, configure the client’s bearer token in the host’s HTTP headers.
 
 `status` confirms the connection. A name that does not start with `agent-`
 means you signed in as the server agent's account: stop and tell your owner.

@@ -49,12 +49,11 @@ grammar, and nothing else. The folder imports nothing from the rest of
 `src/`: the firewall, the MCP tools and `main.ts` import it through
 `norms/index.ts`, which owns every shape of the norm language they use.
 
-Onboarding is agent-led and lives only in `skills/`: an agent reads a skill
+Hosted onboarding is agent-led and lives only in `skills/`: an agent reads a skill
 and does the setup. `host-a-server` sets up an owner's server (sign-in,
 a hosted daemon, norms and rules), `server-agent` makes an agent the one that
 answers requests there, and `client-agent` connects an agent to someone's
-server. The repository holds no setup scripts, host plugins or how-to guides;
-when a setup step is hard, change the daemon so the step disappears, or state
+server. The local developer exercise lives in `docs/office-hours.md`. When a hosted setup step is hard, change the daemon so the step disappears, or state
 it in the skill. A skill says what must be true, the facts only the daemon's contract can
 supply, and what to ask the owner; it does not script the steps or assume a
 provider. Keep the skills independent of any one agent host: each host
