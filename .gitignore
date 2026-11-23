@@ -141,7 +141,7 @@ vite.config.ts.timestamp-*
 # Agent config: personal state stays out, checked-in skills stay in. A child
 # of an excluded directory cannot be re-included, so this must glob.
 .claude/*
-!.claude/skills/
+!.claude/skills
 
 .codex/*
 !.codex/skills/

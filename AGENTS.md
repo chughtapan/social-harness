@@ -147,9 +147,8 @@ boundary change with its public specification; do not leave a binding interface 
 agent state, or records outside this repository.
 
 Writing or regenerating public docs uses the `docs` skill at
-`.agents/skills/docs/SKILL.md`; `.claude/skills/docs` links to the same source.
-Keep repository-owned skills under `.agents/skills/` with a matching Claude
-link.
+`.agents/skills/docs/SKILL.md`. Repository-owned skills live under
+`.agents/skills/`; `.claude/skills` is a link to that folder.
 
 <!-- nx configuration start-->
 <!-- Leave the start & end comments to automatically receive updates. -->
