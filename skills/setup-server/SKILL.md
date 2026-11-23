@@ -18,9 +18,9 @@ Read `docs/spec.md` for the settings file and environment variables, and
 Run a server on the owner's machine and walk them through it. Explain each
 step as you do it, and let the owner choose what to try.
 
-1. **Read a norm together.** `examples/meetings/` holds norms for arranging
-   a meeting, each a different procedure. Pick one with the owner, or write
-   one for something they care about, and say what it allows.
+1. **Choose what to try.** Read `docs/norms.md` for how norms work, show
+   the owner the examples in `examples/meetings/`, and decide with them what
+   to try.
 2. **Start a server.** `examples/meetings/local.json` runs one on loopback.
    It names an environment variable for the server agent's bearer token and
    one for a client's, and reads norms from its own folder, so copy it and
