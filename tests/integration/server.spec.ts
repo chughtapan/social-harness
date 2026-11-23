@@ -246,32 +246,32 @@ it(
   processTrace(
     Effect.gen(function* () {
       const daemon = yield* sharedServer();
-      const settings = (student: string) => ({
+      const settings = (client: string) => ({
         mode: "local",
         tokenEnvBySubject: {
-          [SERVER_AGENT_OWNER]: "SHARNESS_TEST_PROFESSOR_TOKEN",
-          student,
+          [SERVER_AGENT_OWNER]: "SHARNESS_TEST_SERVER_TOKEN",
+          client,
         },
       });
       yield* daemon.configure({
-        authentication: settings("SHARNESS_TEST_STUDENT_TOKEN"),
+        authentication: settings("SHARNESS_TEST_CLIENT_TOKEN"),
       });
       const first = yield* daemon.start();
-      expect((yield* daemon.connectWith("test-professor")).name).toBe(
+      expect((yield* daemon.connectWith("test-server")).name).toBe(
         SERVER_AGENT_NAME,
       );
-      const student = yield* daemon.connectWith("test-student");
-      expect(student.name).toMatch(/^agent-[0-9a-f]{24}$/u);
+      const client = yield* daemon.connectWith("test-client");
+      expect(client.name).toMatch(/^agent-[0-9a-f]{24}$/u);
       yield* stopProcess(first);
       yield* daemon.configure({
         authentication: settings("SHARNESS_TEST_ROTATED_TOKEN"),
       });
       yield* daemon.start();
-      expect((yield* daemon.connectWith("rotated-student")).name).toBe(
-        student.name,
+      expect((yield* daemon.connectWith("rotated-client")).name).toBe(
+        client.name,
       );
       const http = yield* HttpClient.HttpClient;
-      for (const token of ["", "unknown", "test-student"]) {
+      for (const token of ["", "unknown", "test-client"]) {
         const request = HttpClientRequest.post(daemon.endpoint);
         const response = yield* http.execute(
           token === ""

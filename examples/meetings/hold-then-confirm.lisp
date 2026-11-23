@@ -1,5 +1,5 @@
-(norm office-hours
-  :description "A student's agent, the client, asks a professor's agent, the server, for a meeting about a topic. The server offers slots, and the client returns every option it can attend. The server holds the request and gives a delay in seconds. The client checks back after that delay using its host's scheduling tools. The server then books and confirms a selected slot, offers revised slots, or explains why the request cannot be completed. At most two offers occur in one request.")
+(norm hold-then-confirm
+  :description "The client asks the server for a meeting about a topic. The server offers slots, and the client returns every option it can attend. The server holds the request and gives a delay in seconds. The client checks back after that delay using its host's scheduling tools. The server then books and confirms a selected slot, offers revised slots, or explains why the request cannot be completed. At most two offers occur in one request.")
 
 (act request :by client :starts true :sets (open offer-due)
   (field topic :type string :min-length 1 :max-length 300
@@ -26,7 +26,7 @@
   (relation member slot (previous accept-proposal available)))
 (act failure :by server :when open :ends true
   (field reason :type string :min-length 1 :max-length 300
-    :description "Why this request cannot be completed or needs the professor's attention. It does not tell the client to start a new request to get around the offer limit."))
+    :description "Why this request cannot be completed or needs the attention of the server's owner. It does not tell the client to start a new request to get around the offer limit."))
 (act not-understood :by (client server) :when open
   :clears (offered hold-due held decision-due) :sets offer-due
   (field reason :type string :min-length 1

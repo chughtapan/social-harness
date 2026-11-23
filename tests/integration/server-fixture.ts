@@ -317,9 +317,9 @@ export const sharedServer = Effect.fn("sharedServer")(function* () {
   );
   const restrictedUrl = yield* restrictedLogin(database);
   const environment = {
-    SHARNESS_TEST_PROFESSOR_TOKEN: "test-professor",
-    SHARNESS_TEST_STUDENT_TOKEN: "test-student",
-    SHARNESS_TEST_ROTATED_TOKEN: "rotated-student",
+    SHARNESS_TEST_SERVER_TOKEN: "test-server",
+    SHARNESS_TEST_CLIENT_TOKEN: "test-client",
+    SHARNESS_TEST_ROTATED_TOKEN: "rotated-client",
     SHARNESS_CONFIG_FILE: join(directory, "settings.json"),
     SHARNESS_DATABASE_URL: Redacted.value(restrictedUrl),
     SHARNESS_DECISION_PROVIDER_KEY: "private-decision-provider-key",

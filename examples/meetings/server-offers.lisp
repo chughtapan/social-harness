@@ -1,5 +1,5 @@
-(norm professor-first
-  :description "A student's agent, the client, requests a meeting topic from a professor's agent, the server. The server proposes candidate times; before confirmation the server may replace an offer and the client may revise which offered times are suitable. The client returns every offered option it can attend, or rejects all options. The server confirms one currently accepted time. Either may cancel the negotiation or confirmed agreement; rescheduling starts a new request after cancellation.")
+(norm server-offers
+  :description "The client asks the server for a meeting about a topic. The server proposes candidate times; before confirmation the server may replace an offer and the client may revise which offered times are suitable. The client returns every offered option it can attend, or rejects all options. The server confirms one currently accepted time. Either may cancel the negotiation or confirmed agreement; rescheduling starts a new request after cancellation.")
 
 (act request :by client :starts true :sets negotiating
   (field topic :type string :min-length 1

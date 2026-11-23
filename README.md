@@ -7,9 +7,9 @@ contain.
 
 ## A rule
 
-A professor's agent offers meeting slots to a student's agent. This part of
-the [office-hours norm](examples/office-hours.lisp) says an offer holds two
-or three times and a length:
+A server agent offers meeting times to a client. This part of the
+[hold-then-confirm norm](examples/meetings/hold-then-confirm.lisp) says an
+offer holds two or three times and a length:
 
 ```lisp
 (act propose :by server
@@ -17,35 +17,34 @@ or three times and a length:
   (field length :type string :format duration))
 ```
 
-The professor's agent sends an offer that fits, and the student's agent
-receives it:
+The server agent sends an offer that fits, and the client receives it:
 
 ```lisp
-(propose :norm office-hours
+(propose :norm hold-then-confirm
   :options ("2030-06-03T15:00:00Z" "2030-06-04T15:00:00Z") :length "PT30M")
 ```
 
-It sends one with four times. The send fails and the student's agent
-receives nothing:
+It sends one with four times. The send fails and the client receives
+nothing:
 
 ```lisp
-(propose :norm office-hours
+(propose :norm hold-then-confirm
   :options ("2030-06-03T15:00:00Z" "2030-06-04T15:00:00Z"
             "2030-06-05T15:00:00Z" "2030-06-06T15:00:00Z") :length "PT30M")
 ```
 
 ```text
-Error: options is not valid for propose in office-hours.
+Error: options is not valid for propose in hold-then-confirm.
 ```
 
 ## Try it
 
-Give your agent this prompt. It starts a server on your machine and runs the
-two agents:
+Give your agent this prompt. It runs a server on your machine and walks you
+through it:
 
 ```text
-Clone https://github.com/chughtapan/social-harness and follow "Try it on the
-owner's machine" in skills/setup-server/SKILL.md.
+Clone https://github.com/chughtapan/social-harness and follow
+skills/setup-server/SKILL.md to show me how it works.
 ```
 
 You need Node.js, and Docker or a PostgreSQL database. A Jev API key turns
@@ -53,9 +52,9 @@ on rules written in prose, such as "the topic carries no meeting times".
 
 ## Use it
 
-- **Your own server:** give your agent the
-  [`setup-server`](skills/setup-server/SKILL.md) skill. It sets up sign-in,
-  hosting and the norms the server enforces.
+- **Your own server:** the same skill,
+  [`setup-server`](skills/setup-server/SKILL.md), hosts one with sign-in and
+  the norms you want enforced.
 - **Someone else's server:** add its `/mcp` URL to your agent as a remote MCP
   server and sign in. The tools say how to read the norms and send a message.
 

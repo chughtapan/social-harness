@@ -44,8 +44,8 @@ grammar, and nothing else. The folder imports nothing from the rest of
 
 Hosted onboarding is agent-led and lives only in `skills/`: an agent reads a skill
 and does the setup. `setup-server` sets up an owner's server (sign-in,
-a hosted daemon, norms and rules) and covers running the example on the
-owner's machine. An agent that uses a server needs no skill: what it must
+a hosted daemon, norms and rules) and walks an owner through a server on
+their own machine with the norms in `examples/meetings/`. An agent that uses a server needs no skill: what it must
 know goes in the tool descriptions. When a hosted setup step is hard, change the daemon so the step disappears, or state
 it in the skill. A skill says what must be true, the facts only the daemon's contract can
 supply, and what to ask the owner; it does not script the steps or assume a

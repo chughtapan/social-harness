@@ -4,11 +4,11 @@
   "authentication": {
     "mode": "local",
     "tokenEnvBySubject": {
-      "professor": "SHARNESS_PROFESSOR_TOKEN",
-      "student": "SHARNESS_STUDENT_TOKEN"
+      "server": "SHARNESS_SERVER_TOKEN",
+      "client": "SHARNESS_CLIENT_TOKEN"
     }
   },
-  "serverAgent": { "name": "professor", "subject": "professor" },
+  "serverAgent": { "name": "server", "subject": "server" },
   "normsDirectory": ".",
   "decisionProvider": { "model": "jev-latest" }
 }

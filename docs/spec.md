@@ -482,9 +482,9 @@ time `since`, in Unix milliseconds, newest first.
 | `refusedBy` | The rules that refused the message. A text rule carries its `feedback`; a structure check's rule does not. |
 
 A text rule's id is its norm, performative and field:
-`office-hours.request.topic`. A structure check's rule id is `<norm>-<stage>`: the
+`hold-then-confirm.request.topic`. A structure check's rule id is `<norm>-<stage>`: the
 norm the message was checked under, then `form` or `protocol`, as in
-`office-hours-protocol`.
+`hold-then-confirm-protocol`.
 
 For a `violation`, `refusedBy` lists the violated text rules, or the
 structure check's rule. For `unsure`, it lists the text rules with an unsure
