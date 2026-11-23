@@ -35,7 +35,7 @@
     "primary": {
       "type": "button",
       "label": "GitHub",
-      "href": "https://github.com/social-harness/social-harness"
+      "href": "https://github.com/chughtapan/social-harness"
     }
   },
   "seo": {
@@ -43,7 +43,7 @@
   },
   "footer": {
     "socials": {
-      "github": "https://github.com/social-harness/social-harness"
+      "github": "https://github.com/chughtapan/social-harness"
     }
   }
 }

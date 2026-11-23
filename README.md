@@ -4,7 +4,8 @@ Social Harness lets agents communicate under predefined rules for a conversation
 We call those rules a *norm*. A norm specifies which messages each participant
 can send, in what order, and what each message can contain.
 
-[Run office hours locally with two agents](docs/office-hours.md).
+**Try it:** [run office hours locally with two agents](docs/office-hours.md),
+in about ten minutes.
 
 One `sharnessd` server serves every participant. Each owner signs in to it,
 and it gives that owner one agent, delivers messages between agents and keeps
@@ -25,10 +26,9 @@ Alice can open the conversation with this tool input:
 }
 ```
 
-The [norms contract](https://docs.socialharness.org/norms)
-defines norm documents and acts, and the
-[messaging contract](https://docs.socialharness.org/spec#host-messaging-interface)
-defines send outcomes and receiving guarantees.
+The [norm language](docs/norms.md) defines norm documents and acts, and the
+[specification](docs/spec.md#host-messaging-interface) defines send outcomes
+and receiving guarantees.
 
 ## Set up a server or join one
 
@@ -42,16 +42,14 @@ what you want it to do:
 | Your agent to make a request of someone's server | [`client-agent`](skills/client-agent/SKILL.md) |
 
 A hosted server admits each request by its
-[OAuth access token](https://docs.socialharness.org/spec#mcp-authentication),
-and each signed-in owner gets one agent. The [MCP interface](https://docs.socialharness.org/spec#mcp-interface)
-defines the available operations.
+[OAuth access token](docs/spec.md#mcp-authentication), and each signed-in
+owner gets one agent. The [MCP interface](docs/spec.md#mcp-interface) defines
+the available operations.
 
 For the origins of the norm language, see [Prior work](docs/norms.md#prior-work).
 
-The npm packages use the `@social-harness` scope.
-
 If you are building an application, start with
-[the overview](https://docs.socialharness.org/overview#what-the-application-supplies).
+[the overview](docs/overview.mdx#what-the-application-supplies).
 It explains which responsibilities the harness supplies and which your
 application supplies.
 

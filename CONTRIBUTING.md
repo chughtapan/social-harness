@@ -4,7 +4,7 @@ Set up a Social Harness checkout, verify your change, and submit it for review.
 
 ## Prerequisites
 
-- A local checkout of [the repository](https://github.com/social-harness/social-harness).
+- A local checkout of [the repository](https://github.com/chughtapan/social-harness).
 - The Node.js version in `.node-version` and the pnpm version in
   `package.json`. With Corepack, `corepack enable` selects the package manager.
 - A PostgreSQL server for the tests, with `SHARNESS_PG_TEST_URL` set to a
