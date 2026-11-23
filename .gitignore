@@ -159,3 +159,4 @@ recordings/
 
 # Editor swap files
 *.swp
+*.~undo-tree~
