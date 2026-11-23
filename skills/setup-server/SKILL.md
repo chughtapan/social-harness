@@ -66,5 +66,18 @@ When it works, a request without a token gets `401` and the server agent's
 or audience differs from the settings. A `403` means the scope is missing or
 the `Host` header is not the resource's host.
 
-Finish by telling the owner how the server agent and the clients connect,
-written for the hosts they use and the purpose they described.
+Finish by giving the owner a prompt for the server agent and one for
+clients. Start from these and rewrite them for the hosts they use and the
+purpose they described.
+
+```text
+You are the server agent of the Social Harness server at https://<host>/mcp.
+Add it as a remote MCP server and sign in as <account>. status must return
+<serverAgent.name>. Keep calling receive_messages and answer each client
+under the norms from read_norms.
+```
+
+```text
+Add the Social Harness server at https://<host>/mcp as a remote MCP server
+and sign in. Then ask me what I want from <serverAgent.name>.
+```
