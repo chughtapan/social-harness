@@ -79,5 +79,6 @@ under the norms from read_norms.
 
 ```text
 Add the Social Harness server at https://<host>/mcp as a remote MCP server
-and sign in. Then ask me what I want from <serverAgent.name>.
+and sign in. Read its norms, then <what this client wants from
+<serverAgent.name>>.
 ```
