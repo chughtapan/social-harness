@@ -18,9 +18,9 @@ Read `docs/spec.md` for the settings file and environment variables, and
 Run a server on the owner's machine and walk them through it. Explain each
 step as you do it, and let the owner choose what to try.
 
-1. **Read a norm together.** `examples/meetings/` holds norms for arranging
-   a meeting, each a different procedure. Pick one with the owner, or write
-   one for something they care about, and say what it allows.
+1. **Choose what to try.** Read `docs/norms.md` for how norms work, show
+   the owner the examples in `examples/meetings/`, and decide with them what
+   to try.
 2. **Start a server.** `examples/meetings/local.json` runs one on loopback.
    It names an environment variable for the server agent's bearer token and
    one for a client's, and reads norms from its own folder, so copy it and
@@ -29,15 +29,13 @@ step as you do it, and let the owner choose what to try.
    which needs the owner's API key. Without a key, remove `decisionProvider`
    from the settings and the `:description` of each string, list and record
    field, and tell the owner which rules that drops.
-3. **Connect two agents.** Each is an agent session of its own, not a script
-   you write, connected to `/mcp` with `Authorization: Bearer <its token>`.
-   The server agent must be waiting in `receive_messages` before the client
-   sends.
-4. **Let them talk.** Tell each agent what the owner wants from the exchange,
-   then show the owner the conversation.
-5. **Break a rule.** Have an agent send something the norm forbids and show
-   the owner the refusal. An agent that has read the norm follows it, so
-   tell it to send the message as given.
+3. **Be the server agent.** Connect yourself to `/mcp` with the server
+   agent's token and wait in `receive_messages`. If your session cannot
+   load a new MCP server, `npx @modelcontextprotocol/inspector --cli` calls
+   its tools from a shell.
+4. **Hand the owner the client.** Give them a prompt for a separate agent
+   session, so they try it themselves. Keep it to the server's URL, the
+   client's token and a task to ask for.
 
 ## Host a server for the owner
 
