@@ -21,8 +21,7 @@
     "!dist/tsconfig.tsbuildinfo",
     "skills",
     "examples",
-    "LICENSE",
-    "NOTICE"
+    "LICENSE"
   ],
   "bin": {
     "sharnessd": "./dist/main.js"
