@@ -6,11 +6,19 @@ read_when:
   - You want to change a conversation rule and see its effect
 ---
 
-Run a professor's agent and a student's agent in two sessions of any host that
-can reach a loopback Streamable HTTP MCP endpoint and supply a bearer header.
-You need the hosts' ordinary model access, a Jev API key for judging prose,
-and a dedicated empty PostgreSQL database. The example below uses Docker for
-PostgreSQL. The appointments are fictional.
+Run a professor's agent and a student's agent against a daemon on your own
+machine. The two agents book a fictional meeting under the shipped
+office-hours norm, and then you change one rule and watch it take effect.
+It takes about ten minutes.
+
+You need:
+
+- Node.js at the version in `.node-version`, with Corepack for pnpm.
+- Docker, for a throwaway PostgreSQL. Any empty PostgreSQL database works.
+- A Jev API key. Jev is the decision provider that judges the norm's prose
+  fields.
+- An agent host that can connect to an HTTP MCP server with a bearer header,
+  such as Claude Code. You run two sessions of it.
 
 ## Start the daemon
 
@@ -54,8 +62,28 @@ Wait for `sharnessd listening on http://127.0.0.1:4319/mcp`.
 
 ## Connect the two agents
 
-In each host's MCP connection settings, enter that URL and set
-`Authorization: Bearer <token>` using the contents of its own role's token file.
+Open two more terminals, one per agent. In each host's MCP settings, enter
+that URL and set `Authorization: Bearer <token>` with that role's token file.
+With Claude Code, write each agent a connection file from the repository
+root:
+
+```sh
+for role in professor student; do
+  printf '{"mcpServers":{"office-hours":{"type":"http","url":"http://127.0.0.1:4319/mcp","headers":{"Authorization":"Bearer %s"}}}}\n' \
+    "$(cat .tmp/office-hours/$role.token)" > .tmp/office-hours/$role.mcp.json
+done
+```
+
+Then start the professor in one terminal and the student in the other:
+
+```sh
+claude --mcp-config .tmp/office-hours/professor.mcp.json --strict-mcp-config
+```
+
+```sh
+claude --mcp-config .tmp/office-hours/student.mcp.json --strict-mcp-config
+```
+
 Both agents should call `status` and `read_norms`. The professor gets the
 name `professor`, the student gets an `agent-…` name, and both see `office-hours`.
 A 401 means the host needs the current token for its session. Local tokens
@@ -87,16 +115,21 @@ student     query-if
 professor   confirm
 ```
 
-Hosts keep the `nextCursor` from each inbox read and pass it as `cursor` on
-the next. Each reply names its earlier message with `replyToMsgId`.
+The norm requires each slot as an RFC 3339 time, so the agents send
+`2030-06-04T15:00:00Z` for June 4 at 15:00 UTC, and `PT30M` for the length.
+If an agent stops while it waits out the hold, tell it to continue.
 
 ## Change a rule
 
 In the scratch copy of `office-hours.lisp`, change `:max-items 3` on the
 proposal's options to `:max-items 2`. Restart the daemon and have both agents
 call `read_norms` to see the edit. Start a fresh request. Ask the professor
-to try three distinct valid slots, then two. The first send should return a
-tool error. The second should appear in the student's conversation.
+to try three distinct valid slots, then two. The first send returns this
+tool error, and the second appears in the student's conversation:
+
+```text
+Error: options is not valid for propose in office-hours.
+```
 
 Stop the daemon with Ctrl-C. If you started the disposable database, run
 `docker stop sharness-office-hours-db` to discard it. Delete the generated
