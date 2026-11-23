@@ -8,16 +8,16 @@ afterEach(() => vi.restoreAllMocks());
 
 const settings = {
   mode: "local",
-  tokenEnvBySubject: { professor: "PROFESSOR", student: "STUDENT" },
+  tokenEnvBySubject: { server: "SERVER", client: "CLIENT" },
 } as const;
 
-const load = (host = "127.0.0.1", student = "second", server = "professor") =>
+const load = (host = "127.0.0.1", client = "second", server = "server") =>
   authenticate(settings, host, 4319, server).pipe(
     Effect.withConfigProvider(
       ConfigProvider.fromMap(
         new Map([
-          ["PROFESSOR", "first"],
-          ["STUDENT", student],
+          ["SERVER", "first"],
+          ["CLIENT", client],
         ]),
       ),
     ),
@@ -31,8 +31,8 @@ it("verifies each owner for one hour from startup", () =>
       const { bearerAuth: options } = yield* load();
       const verify = (header: string) =>
         Effect.tryPromise(() => verifyBearerToken(header, options));
-      expect((yield* verify("Bearer first")).extra?.subject).toBe("professor");
-      expect((yield* verify("Bearer second")).extra?.subject).toBe("student");
+      expect((yield* verify("Bearer first")).extra?.subject).toBe("server");
+      expect((yield* verify("Bearer second")).extra?.subject).toBe("client");
       expect(
         yield* Effect.isFailure(
           Effect.tryPromise(() => verifyBearerToken(undefined, options)),
@@ -49,7 +49,7 @@ it("rejects ambiguous credentials, an absent server owner and a public bind", ()
       for (const [check, message] of [
         [load("0.0.0.0"), "loopback"],
         [load("::1", "first"), "distinct"],
-        [load("::1", ""), "STUDENT"],
+        [load("::1", ""), "CLIENT"],
         [load("::1", "second", "unknown"), "server agent subject"],
       ] as const) {
         expect(yield* Effect.flip(check)).toContain(message);

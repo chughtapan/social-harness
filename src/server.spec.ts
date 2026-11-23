@@ -680,11 +680,13 @@ it("gives messages stored at the same time distinct places in their recipient's 
     expect(read.nextCursor).toBe("12");
   }));
 
-it("delivers the six office-hours acts and refuses a check-in before the hold ends", () =>
+it("delivers the six hold-then-confirm acts and refuses a check-in before the hold ends", () =>
   Effect.gen(function* () {
     const fs = yield* FileSystem.FileSystem;
     const document = yield* fs.readFileString(
-      fileURLToPath(new URL("../examples/office-hours.lisp", import.meta.url)),
+      fileURLToPath(
+        new URL("../examples/meetings/hold-then-confirm.lisp", import.meta.url),
+      ),
     );
     const norms = Either.getOrThrow(compileNorms([document]));
     const { alice, bob } = yield* aliceAndBob({
@@ -692,25 +694,25 @@ it("delivers the six office-hours acts and refuses a check-in before the hold en
       provider: { answer: (request) => Effect.succeed(answersTo(request)) },
     });
     const request = yield* send(bob, {
-      text: '(request :norm office-hours :topic "Thesis outline")',
+      text: '(request :norm hold-then-confirm :topic "Thesis outline")',
     });
     const proposal = yield* send(alice, {
       to: bob.name,
       replyToMsgId: request.msgId,
-      text: '(propose :norm office-hours :options ("2030-06-03T15:00:00Z" "2030-06-04T15:00:00Z") :length "PT30M")',
+      text: '(propose :norm hold-then-confirm :options ("2030-06-03T15:00:00Z" "2030-06-04T15:00:00Z") :length "PT30M")',
     });
     const acceptance = yield* send(bob, {
       replyToMsgId: proposal.msgId,
-      text: '(accept-proposal :norm office-hours :available ("2030-06-04T15:00:00Z"))',
+      text: '(accept-proposal :norm hold-then-confirm :available ("2030-06-04T15:00:00Z"))',
     });
     const hold = yield* send(alice, {
       to: bob.name,
       replyToMsgId: acceptance.msgId,
-      text: "(agree :norm office-hours :recheck-after 5)",
+      text: "(agree :norm hold-then-confirm :recheck-after 5)",
     });
     const checkIn = {
       replyToMsgId: hold.msgId,
-      text: "(query-if :norm office-hours)",
+      text: "(query-if :norm hold-then-confirm)",
     };
     expect((yield* send(bob, checkIn).pipe(Effect.flip)).reason).toBe(
       "refused",
@@ -720,7 +722,7 @@ it("delivers the six office-hours acts and refuses a check-in before the hold en
     const confirm = yield* send(alice, {
       to: bob.name,
       replyToMsgId: query.msgId,
-      text: '(confirm :norm office-hours :slot "2030-06-04T15:00:00Z")',
+      text: '(confirm :norm hold-then-confirm :slot "2030-06-04T15:00:00Z")',
     });
     const ids = [request, proposal, acceptance, hold, query, confirm].map(
       (sent) => sent.msgId,

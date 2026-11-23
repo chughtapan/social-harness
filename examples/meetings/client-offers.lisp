@@ -1,5 +1,5 @@
-(norm student-first
-  :description "A student's agent, the client, sends request-propose with a topic and candidate meeting times in one message to a professor's agent, the server. The server confirms one offered time or rejects all. Only after rejection may the client send request-propose-alternatives with the topic and revised times. Either may cancel a pending or confirmed meeting without giving a reason. To reschedule a confirmed meeting, cancel it and send a new request-propose.")
+(norm client-offers
+  :description "The client sends request-propose with a topic and candidate meeting times in one message to the server. The server confirms one offered time or rejects all. Only after rejection may the client send request-propose-alternatives with the topic and revised times. Either may cancel a pending or confirmed meeting without giving a reason. To reschedule a confirmed meeting, cancel it and send a new request-propose.")
 
 (act request-propose :by client :starts true :sets offered
   (field topic :type string :min-length 1
