@@ -29,15 +29,10 @@ step as you do it, and let the owner choose what to try.
    which needs the owner's API key. Without a key, remove `decisionProvider`
    from the settings and the `:description` of each string, list and record
    field, and tell the owner which rules that drops.
-3. **Connect two agents.** Each is an agent session of its own, not a script
-   you write, connected to `/mcp` with `Authorization: Bearer <its token>`.
-   The server agent must be waiting in `receive_messages` before the client
-   sends.
-4. **Let them talk.** Tell each agent what the owner wants from the exchange,
-   then show the owner the conversation.
-5. **Break a rule.** Have an agent send something the norm forbids and show
-   the owner the refusal. An agent that has read the norm follows it, so
-   tell it to send the message as given.
+3. **Be the server agent.** Connect yourself to `/mcp` with the server
+   agent's token and wait in `receive_messages`.
+4. **Hand the owner the client.** Give them a prompt for a separate agent
+   session that connects with the client's token, so they try it themselves.
 
 ## Host a server for the owner
 
